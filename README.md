@@ -30,7 +30,7 @@ Results from our Mosaic Diffusion model after training for 550k iterations at 25
 
 <p align="center">
   <picture>
-    <img alt="model outputs of SD-2-1" src="./assets/model-outputs-1.png">
+    <img alt="model outputs of SD-2-1" src="./assets/mushroom-collage.svg">
   </picture>
 </p>
 
