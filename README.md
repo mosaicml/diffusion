@@ -4,6 +4,13 @@
   </picture>
 </p>
 
+<p align="center">
+  <picture>
+    <img alt="training curve" src="./assets/collage.svg" width="100%">
+  </picture>
+</p>
+
+
 <h2><p align="center">Stable Diffusion Training with MosaicML</p></h2>
 
 <p align="center">
