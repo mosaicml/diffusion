@@ -1,9 +1,3 @@
-<p align="center">
-  <picture>
-    <img alt="training curve" src="./assets/training-curve.png" width="75%">
-  </picture>
-</p>
-
 <h2><p align="center">Stable Diffusion Training with MosaicML</p></h2>
 
 <p align="center">
@@ -16,7 +10,29 @@
 </p>
 <br />
 
+
 This repo contains code used to train your own Stable Diffusion model on your own data.
+
+<p align="center">
+  <picture>
+    <img alt="training curve" src="./assets/training-curve.png" width="75%">
+  </picture>
+</p>
+
+# Results
+Results from our Mosaic Diffusion model after training for 550k iterations at 256x256 resolution, then for 850k iterations at 512x512:
+
+<p align="center">
+  <picture>
+    <img alt="training curve" src="./assets/collage.svg" width="100%">
+  </picture>
+</p>
+
+<p align="center">
+  <picture>
+    <img alt="model outputs of SD-2-1" src="./assets/mushroom-collage.svg">
+  </picture>
+</p>
 
 # Prerequisites
 
@@ -75,14 +91,6 @@ Next, start training at 512x512 resolution by running:
 ```
 composer run.py --config_path yamls/hydra-yamls --config_name SD-2-base-512.yaml
 ```
-
-# Results
-Results from our Mosaic Diffusion model after training for 550k iterations at 256x256 resolution, then for 850k iterations at 512x512:
-<p align="center">
-  <picture>
-    <img alt="model outputs of SD-2-1" src="./assets/model-outputs-1.png">
-  </picture>
-</p>
 
 # Online Eval
 Our code is able to calculate the FID score at several guidance scales while training. To use this feature, add the torchmetrics class `FrechetInceptionDistance` to the `val_metrics` field and specify your desired guidance scores at the `val_guidance_scales` field under `model`. Below is an example config for calculating FID score online for guidance scores [1, 3, 7]:
