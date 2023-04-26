@@ -1,0 +1,27 @@
+run_name: convert-latents
+platform: r1z1
+gpu_num:  8
+image: mosaicml/pytorch_vision:1.13.1_cu117-python3.10-ubuntu20.04
+optimization_level: 0
+integrations:
+- integration_type: "git_repo"
+  git_repo: mosaicml/diffusion
+  git_branch: mvpatel2000/transform
+- integration_type: "wandb"
+  project: laion-dataset
+  entity: mosaic-ml
+
+command: |
+  cd diffusion
+  pip install -r requirements.txt
+  pip install --upgrade torchmetrics[image]
+  pip uninstall -y mosaicml-streaming
+  pip install git+https://github.com/mosaicml/streaming.git@3afa26cc3b36677c86d4ca842afccbdb763b952e
+  cd scripts
+
+  composer precompute_latents.py \
+    --remote_download {YOUR DOWNLOAD BUCKET HERE} \
+    --local /tmp/mds-cache/mds-laion2b-en/4.5/256-512/ \
+    --remote_upload {YOUR UPLOAD BUCKET HERE} \
+    --bucket 1 \
+    --wandb_name 256-512-bucket-1

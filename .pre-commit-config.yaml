@@ -1,0 +1,96 @@
+default_language_version:
+  python: python3
+repos:
+  - repo: https://github.com/google/yapf
+    rev: v0.32.0
+    hooks:
+      - id: yapf
+        name: yapf
+        description: "A formatter for Python files."
+        entry: yapf
+        args: [-i, -vv, -p] #inplace
+        language: python
+        types: [python]
+        additional_dependencies:
+          - "toml"
+  - repo: https://github.com/pycqa/isort
+    hooks:
+      - id: isort
+    rev: 5.12.0
+  -   repo: https://github.com/PyCQA/pydocstyle
+      hooks:
+      -   id: pydocstyle
+          name: pydocstyle
+          entry: pydocstyle
+          language: python
+          types: [python]
+          exclude: '(?:tests|.ci|composer\/algorithms|composer\/datasets|composer\/models)\/.*|composer\/trainer\/activation_checkpointing.py'
+          additional_dependencies:
+            - "toml"
+      rev: 6.1.1
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.1.0
+    hooks:
+      - id: check-added-large-files
+      - id: check-ast
+      - id: check-builtin-literals
+      - id: check-case-conflict
+      - id: check-docstring-first
+      - id: check-executables-have-shebangs
+      - id: check-json
+      - id: check-shebang-scripts-are-executable
+      - id: pretty-format-json
+        args:
+          - --autofix
+          - --no-sort-keys
+          - --indent=4
+      - id: check-merge-conflict
+      - id: check-symlinks
+      - id: check-toml
+      - id: check-vcs-permalinks
+      - id: check-xml
+      - id: check-yaml
+      - id: debug-statements
+      - id: destroyed-symlinks
+      - id: double-quote-string-fixer
+      - id: end-of-file-fixer
+      - id: fix-byte-order-marker
+      - id: mixed-line-ending
+      - id: trailing-whitespace
+  - repo: https://github.com/Lucas-C/pre-commit-hooks
+    rev: v1.1.13
+    hooks:
+      - id: insert-license
+        args:
+          - --license-filepath
+          - .ci/FILE_HEADER
+          - --comment-style
+          - "#"
+        types: [python]
+        exclude: 'composer\/trainer\/activation_checkpointing.py'
+
+  - repo: https://github.com/kynan/nbstripout
+    rev: 0.5.0
+    hooks:
+      - id: nbstripout
+        types:
+          - "jupyter"
+        args:
+          # Strip all the metadata that vscode or colab may add to a notebook
+          - --strip-empty-cells
+          - --extra-keys
+          - >
+            metadata.colab metadata.interpreter metadata.accelerator
+            metadata.kernelspec metadata.language_info.version
+            cell.metadata.heading_collapsed metadata.name metadata.nbconvert_exporter
+            metadata.version metadata.vscode
+  - repo: local
+    hooks:
+      - id: pyright
+        name: pyright
+        entry: pyright
+        language: node
+        types: [python]
+        pass_filenames: false
+        args: [--warnings]
+        additional_dependencies: ["pyright@1.1.256"]

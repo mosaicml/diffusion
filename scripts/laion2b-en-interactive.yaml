@@ -1,0 +1,37 @@
+run_name: download-laion2b-en
+platform: {YOUR CLUSTER HERE}
+gpu_num:
+image: mosaicml/pytorch_vision:1.13.1_cu117-python3.10-ubuntu20.04
+optimization_level: 0
+integrations:
+- integration_type: "git_repo"
+  git_repo: mosaicml/diffusion
+- integration_type: "wandb"
+  project: laion-dataset
+  entity: {YOUR ENTITY HERE}
+
+command: |
+  # Sleep for a week 60 * 60 * 24 * 7 = 604800
+  sleep 604800
+
+  ## Download aesthetic-4.5
+  # 1. pip3 install --upgrade img2dataset==1.41.0 mosaicml-streaming requests urllib3
+  # 2. Download big parquets
+  #   a. for i in {1..16}; do wget -P /tmp/laion2b-4.5-raw/ https://huggingface.co/datasets/ChristophSchuhmann/improved_aesthetics_4.5plus/resolve/main/2B-en-4.5_$i.parquet; done
+  #   b. for i in {17..32}; do wget -P /tmp/laion2b-4.5-raw/ https://huggingface.co/datasets/ChristophSchuhmann/improved_aesthetics_4.5plus/resolve/main/2B-en-4.5_$i.parquet; done
+  #   c. for i in {33..48}; do wget -P /tmp/laion2b-4.5-raw/ https://huggingface.co/datasets/ChristophSchuhmann/improved_aesthetics_4.5plus/resolve/main/2B-en-4.5_$i.parquet; done
+  #   d. for i in {49..64}; do wget -P /tmp/laion2b-4.5-raw/ https://huggingface.co/datasets/ChristophSchuhmann/improved_aesthetics_4.5plus/resolve/main/2B-en-4.5_$i.parquet; done
+  # 3.
+  #   a. tmux new -s download
+  #   b. source /secrets/secrets.env
+  #   c. cd /diffusion/scripts
+  #   d. sh laion_download_aesthetic.sh
+  # 4.
+  #   a. tmux new -s upload
+  #   b. source /secrets/secrets.env
+  #   c. cd /diffusion/scripts
+  #   d.
+  #     1. python3 laion_cloudwriter.py --local /tmp/laion2b-processed --remote {YOUR BUCKET HERE} --bucketed --subfolder 1 --wandb_disabled
+  #     2. python3 laion_cloudwriter.py --local /tmp/laion2b-processed --remote {YOUR BUCKET HERE} --bucketed --subfolder 2 --wandb_disabled
+  #     3. python3 laion_cloudwriter.py --local /tmp/laion2b-processed --remote {YOUR BUCKET HERE} --bucketed --subfolder 3 --wandb_disabled
+  #     4. python3 laion_cloudwriter.py --local /tmp/laion2b-processed --remote {YOUR BUCKET HERE} --bucketed --subfolder 4 --wandb_disabled

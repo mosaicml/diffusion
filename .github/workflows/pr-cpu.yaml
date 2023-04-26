@@ -1,0 +1,43 @@
+name: PR CPU tests
+on:
+  pull_request:
+    branches:
+      - main
+      - release/**
+  workflow_dispatch:
+# Cancel old runs when a new commit is pushed to the same branch if not on main or dev
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+jobs:
+  pytest-cpu:
+    uses: ./.github/workflows/pytest-cpu.yaml
+    strategy:
+      matrix:
+        include:
+          - name: 'cpu-3.8-1.11'
+            container: mosaicml/pytorch:1.11.0_cpu-python3.8-ubuntu20.04
+            markers: 'not gpu'
+            pytest_command: 'coverage run -m pytest'
+          - name: 'cpu-3.9-1.12'
+            container: mosaicml/pytorch:1.12.1_cpu-python3.9-ubuntu20.04
+            markers: 'not gpu'
+            pytest_command: 'coverage run -m pytest'
+          - name: 'cpu-3.10-1.13'
+            container: mosaicml/pytorch:1.13.1_cpu-python3.10-ubuntu20.04
+            markers: 'not gpu'
+            pytest_command: 'coverage run -m pytest'
+    name: ${{ matrix.name }}
+    if: github.repository_owner == 'mosaicml'
+    with:
+      container: ${{ matrix.container }}
+      name: ${{ matrix.name }}
+      pytest-command: ${{ matrix.pytest_command }}
+      pytest-markers: ${{ matrix.markers }}
+  coverage:
+    uses: ./.github/workflows/coverage.yaml
+    name: Coverage Results
+    if: github.repository_owner == 'mosaicml'
+    needs: [ pytest-cpu ]
+    with:
+      download-path: artifacts
