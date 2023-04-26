@@ -1,16 +1,3 @@
-<p align="center">
-  <picture>
-    <img alt="training curve" src="./assets/training-curve.png" width="75%">
-  </picture>
-</p>
-
-<p align="center">
-  <picture>
-    <img alt="training curve" src="./assets/collage.svg" width="100%">
-  </picture>
-</p>
-
-
 <h2><p align="center">Stable Diffusion Training with MosaicML</p></h2>
 
 <p align="center">
@@ -22,6 +9,18 @@
     </a>
 </p>
 <br />
+
+<p align="center">
+  <picture>
+    <img alt="training curve" src="./assets/collage.svg" width="100%">
+  </picture>
+</p>
+
+<p align="center">
+  <picture>
+    <img alt="training curve" src="./assets/training-curve.png" width="75%">
+  </picture>
+</p>
 
 This repo contains code used to train your own Stable Diffusion model on your own data.
 
