@@ -15,22 +15,21 @@ This repo contains code used to train your own Stable Diffusion model on your ow
 
 <p align="center">
   <picture>
-    <img alt="training curve" src="./assets/training-curve.png" width="75%">
-  </picture>
-</p>
-
-# Results
-Results from our Mosaic Diffusion model after training for 550k iterations at 256x256 resolution, then for 850k iterations at 512x512:
-
-<p align="center">
-  <picture>
-    <img alt="training curve" src="./assets/collage.svg" width="100%">
+    <img alt="model output collage" src="./assets/collage.svg" width="100%">
   </picture>
 </p>
 
 <p align="center">
   <picture>
     <img alt="model outputs of SD-2-1" src="./assets/mushroom-collage.svg">
+  </picture>
+</p>
+
+> Results from our Mosaic Diffusion model after training for 550k iterations at 256x256 resolution, then for 850k iterations at 512x512.
+
+<p align="center">
+  <picture>
+    <img alt="training curve" src="./assets/training-curve.png" width="75%">
   </picture>
 </p>
 
