@@ -40,7 +40,7 @@ class StableDiffusionInference():
         model.to(self.device)
         self.model = model.eval()
 
-    def forward(self, **inputs):
+    def predict(self, **inputs):
         if 'prompt' not in inputs:
             print('No prompt provided, returning nothing')
             return
