@@ -5,26 +5,21 @@
 
 import os
 from argparse import ArgumentParser, Namespace
-from io import BytesIO
-from typing import Callable, List, Optional, Sequence, Union
+from typing import List, Optional, Sequence, Union
 
 import torch
 import wandb
 from composer.devices import DeviceGPU
 from composer.utils import dist
-from diffusers import AutoencoderKL
-from PIL import Image
 from streaming import MDSWriter, Stream, StreamingDataset
 from torch.utils.data import DataLoader
-from torchvision import transforms
 from tqdm import tqdm
-from transformers import CLIPTextModel, CLIPTokenizer
+from transformers import T5EncoderModel, AutoTokenizer
 
-from diffusion.datasets.laion.transforms import LargestCenterSquare
 
 
 class StreamingLAIONDataset(StreamingDataset):
-    """Implementation of the LAION dataset as a streaming dataset except with metadata.
+    """Implementation of the LAION dataset as a streaming dataset. Only returns sample and caption.
 
     Args:
         streams (Sequence[Stream], optional): One or more Streams to stream/cache samples from. StreamingLAIONDataset
@@ -33,27 +28,26 @@ class StreamingLAIONDataset(StreamingDataset):
         local (str, optional): Local filesystem directory where dataset is cached during operation. Default: ``None``.
         split (str, optional): The dataset split to use. Currently, only ``None`` is supported. Default: ``None``.
         shuffle (bool): Whether to shuffle the samples in this dataset. Default: ``False``.
-        tokenizer_name_or_path (str): The name or path of the tokenizer to use. Default: ``'stabilityai/stable-diffusion-2-base'``.
-        transform (Optional[Union[Callable, List[Callable]]]): The transforms to apply to the image. Default: ``None``.
+        tokenizer_name_or_path (str): The name or path of the tokenizer to use. Default: ``'t5-v1_1-xxl'``.
         predownload (Optional[int]): The number of samples to prefetch. Default: ``100_000``.
         download_retry (Optional[int]): The number of times to retry a download. Default: ``2``.
         download_timeout (Optional[float]): The timeout for a download. Default: ``120``.
         batch_size (Optional[int]): Hint batch_size that will be used on each device's DataLoader. Default: ``None``.
     """
 
-    def __init__(self,
-                 streams: Optional[Sequence[Stream]] = None,
-                 remote: Optional[str] = None,
-                 local: Optional[str] = None,
-                 split: Optional[str] = None,
-                 shuffle: Optional[bool] = False,
-                 tokenizer_name_or_path: Optional[str] = 'stabilityai/stable-diffusion-2-base',
-                 caption_drop_prob: Optional[float] = 0.0,
-                 transform: Optional[List[Callable]] = None,
-                 predownload: Optional[int] = 100_000,
-                 download_retry: Optional[int] = 2,
-                 download_timeout: Optional[float] = 120,
-                 batch_size: Optional[int] = None) -> None:
+    def __init__(
+        self,
+        streams: Optional[Sequence[Stream]] = None,
+        remote: Optional[str] = None,
+        local: Optional[str] = None,
+        split: Optional[str] = None,
+        shuffle: Optional[bool] = False,
+        tokenizer_name_or_path: Optional[str] = 't5-v1_1-xxl',
+        predownload: Optional[int] = 100_000,
+        download_retry: Optional[int] = 2,
+        download_timeout: Optional[float] = 120,
+        batch_size: Optional[int] = None,
+    ) -> None:
 
         super().__init__(
             streams=streams,
@@ -69,17 +63,11 @@ class StreamingLAIONDataset(StreamingDataset):
             batch_size=batch_size,
         )
 
-        self.transform = transform
-        self.tokenizer = CLIPTokenizer.from_pretrained(tokenizer_name_or_path, subfolder='tokenizer')
-        self.caption_drop_prob = caption_drop_prob
+        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path)
 
     def __getitem__(self, index):
         sample = super().__getitem__(index)
-        # Drop the caption with probability `caption_drop_prob`
-        if torch.rand(1) < self.caption_drop_prob:
-            caption = ''
-        else:
-            caption = sample['caption']
+        caption = sample['caption']
         tokenized_caption = self.tokenizer(
             caption,
             padding='max_length',
@@ -88,29 +76,14 @@ class StreamingLAIONDataset(StreamingDataset):
         )['input_ids']
         tokenized_caption = torch.tensor(tokenized_caption)
 
-        if self.transform is None:
-            img = Image.open(BytesIO(sample['jpg']))
-            if img.mode != 'RGB':
-                img = img.convert('RGB')
-            return {'image': img, 'captions': tokenized_caption, 'sample': sample}
-        else:
-            ret = {'captions': tokenized_caption, 'sample': sample}
-            for i, tr in enumerate(self.transform):
-                img = Image.open(BytesIO(sample['jpg']))
-                if img.mode != 'RGB':
-                    img = img.convert('RGB')
-                img = tr(img)
-                ret[f'image_{i}'] = img
-            return ret
+        return {'captions': tokenized_caption, 'sample': sample}
 
 
 def build_streaming_laion_dataloader(
     remote: Union[str, List],
     local: Union[str, List],
     batch_size: int,
-    tokenizer_name_or_path: str = 'stabilityai/stable-diffusion-2-base',
-    caption_drop_prob: float = 0.0,
-    resize_size: Optional[List[int]] = None,
+    tokenizer_name_or_path: str = 't5-v1_1-xxl',
     num_samples: Optional[int] = None,
     predownload: Optional[int] = 100_000,
     download_retry: Optional[int] = 2,
@@ -119,15 +92,13 @@ def build_streaming_laion_dataloader(
     shuffle: bool = True,
     **dataloader_kwargs,
 ):
-    """Builds a streaming LAION dataloader returning multiple image sizes.
+    """Builds a streaming LAION dataloader returning just captions.
 
     Args:
         remote (str, Sequence[str]): One or more remote directories (S3 or local filesystem) where dataset is stored.
         local (str, Sequence[str]): One or more local filesystem directories where dataset is cached during operation.
         batch_size (int): The batch size to use.
-        tokenizer_name_or_path (str): The name or path of the tokenizer to use. Default: ``'stabilityai/stable-diffusion-2-base'``.
-        caption_drop_prob (float): The probability of dropping a caption. Default: ``0.0``.
-        resize_size (List[int]): The size or list of sizes to resize the image to. If None, defaults to ``[256, 512]``.
+        tokenizer_name_or_path (str): The name or path of the tokenizer to use. Default: ``'t5-v1_1-xxl'``.
         num_samples (Optional[int]): The number of samples to use. Default: ``None`` uses all available samples.
         predownload (Optional[int]): The number of samples to prefetch. Default: ``100_000``.
         download_retry (Optional[int]): The number of times to retry a download. Default: ``2``.
@@ -136,8 +107,6 @@ def build_streaming_laion_dataloader(
         shuffle (bool): Whether to shuffle the samples in this dataset. Default: ``True``.
         **dataloader_kwargs: Additional arguments to pass to the dataloader.
     """
-    if resize_size is None:
-        resize_size = [256, 512]
     if isinstance(remote, Sequence) or isinstance(local, Sequence):
         assert isinstance(remote, Sequence) and isinstance(
             local, Sequence), 'If either remote or local is a sequence, both must be sequences'
@@ -145,31 +114,18 @@ def build_streaming_laion_dataloader(
             local), f'remote and local must be lists of the same length, got lengths {len(remote)} and {len(local)}'
     else:
         # Hacky... make remote and local lists to simplify downstream code
-        remote, local = [
-            remote,
-        ], [
-            local,
-        ]
+        remote, local = [remote], [local]
 
     # Create a Stream for each (remote, local) pair
     streams = []
     for r, l in zip(remote, local):
         streams.append(Stream(remote=r, local=l, download_retry=download_retry, download_timeout=download_timeout))
 
-    transform = []
-    for resize in resize_size:
-        center_square_crop = LargestCenterSquare(resize)
-        # Normalize from 0 to 1 to -1 to 1
-        normalize = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-        transform.append(transforms.Compose([center_square_crop, transforms.ToTensor(), normalize]))
-
     dataset = StreamingLAIONDataset(
         streams=streams,
         split=None,
         shuffle=shuffle,
         tokenizer_name_or_path=tokenizer_name_or_path,
-        caption_drop_prob=caption_drop_prob,
-        transform=transform,
         predownload=predownload,
         download_retry=download_retry,
         download_timeout=download_timeout,
@@ -206,9 +162,9 @@ def parse_args() -> Namespace:
     args.add_argument('--bucket', type=int, help='Bucket index under remote path.')
     args.add_argument('--model_name',
                       type=str,
-                      default='stabilityai/stable-diffusion-2-base',
+                      default='t5-v1_1-xxl',
                       help='Name of model to use for encoding.')
-    args.add_argument('--batch-size', type=int, default=64, help='Batch size to use for encoding.')
+    args.add_argument('--batch-size', type=int, default=8, help='Batch size to use for encoding.')
     # Add wandb arguments
     args.add_argument('--wandb_disabled', action='store_true')
     args.add_argument('--wandb_name', type=str, default='baseline')
@@ -231,8 +187,6 @@ def main(args: Namespace) -> None:
         local=[os.path.join(args.local, str(args.bucket))],
         batch_size=args.batch_size,
         tokenizer_name_or_path=args.model_name,
-        caption_drop_prob=0.0,
-        resize_size=[256, 512],
         predownload=20_000,
         drop_last=False,
         shuffle=False,
@@ -244,9 +198,7 @@ def main(args: Namespace) -> None:
     )
 
     device = DeviceGPU()
-    vae = AutoencoderKL.from_pretrained(args.model_name, subfolder='vae', torch_dtype=torch.float16)
-    text_encoder = CLIPTextModel.from_pretrained(args.model_name, subfolder='text_encoder', torch_dtype=torch.float16)
-    vae = device.module_to_device(vae)
+    text_encoder = T5EncoderModel.from_pretrained(args.model_name, subfolder='text_encoder', torch_dtype=torch.bfloat16).eval()
     text_encoder = device.module_to_device(text_encoder)
 
     columns = {
@@ -266,44 +218,33 @@ def main(args: Namespace) -> None:
         'jpg': 'bytes',
         'hash': 'int64',
         'aesthetic_score': 'float64',
-        'caption_latents': 'bytes',
-        'latents_256': 'bytes',
-        'latents_512': 'bytes',
+        'caption_t5xxl_latents': 'bytes',
     }
 
     # We split each bucket into 8 copies for each GPU per node
     remote_upload = os.path.join(args.remote_upload, str((args.bucket - 1) * 8 + dist.get_local_rank()))
-    writer = MDSWriter(out=remote_upload,
-                       columns=columns,
-                       compression=None,
-                       hash=[],
-                       size_limit=256 * (2**20),
-                       max_workers=64)
+    writer = MDSWriter(
+        out=remote_upload,
+        columns=columns,
+        compression=None,
+        hash=[],
+        size_limit=256 * (2**20),
+        max_workers=64,
+    )
 
     max_sample_idx = 0
     for batch_idx, batch in enumerate(tqdm(dataloader)):
-        image_256 = device.batch_to_device(batch['image_0'])
-        image_512 = device.batch_to_device(batch['image_1'])
         captions = device.batch_to_device(batch['captions'])
 
         with torch.no_grad():
-            # Encode the images to the latent space with magical scaling number (See https://github.com/huggingface/diffusers/issues/437#issuecomment-1241827515)
-            latents_256 = vae.encode(image_256.half())['latent_dist'].sample().data * 0.18215
-            latents_512 = vae.encode(image_512.half())['latent_dist'].sample().data * 0.18215
             # Encode the text. Assume that the text is already tokenized
             conditioning = text_encoder(captions.view(-1, captions.shape[-1]))[0]  # Should be (batch_size, 77, 768)
 
         # Move the latents to CPU and convert to numpy / bytes
-        latents_256 = latents_256.cpu().numpy()
-        latents_512 = latents_512.cpu().numpy()
         conditioning = conditioning.cpu().numpy()
 
         sample = batch['sample']
-        for i in range(latents_256.shape[0]):
-            latents_256_sample = latents_256[i].tobytes() if min(sample['width'][i],
-                                                                 sample['height'][i]) >= 256 else b''
-            latents_512_sample = latents_512[i].tobytes() if min(sample['width'][i],
-                                                                 sample['height'][i]) >= 512 else b''
+        for i in range(conditioning.shape[0]):
             mds_sample = {
                 'punsafe': sample['punsafe'][i],
                 'pwatermark': sample['pwatermark'][i],
@@ -321,9 +262,7 @@ def main(args: Namespace) -> None:
                 'jpg': sample['jpg'][i],
                 'hash': sample['hash'][i],
                 'aesthetic_score': sample['aesthetic_score'][i],
-                'caption_latents': conditioning[i].tobytes(),
-                'latents_256': latents_256_sample,
-                'latents_512': latents_512_sample,
+                'caption_t5xxl_latents': conditioning[i].tobytes(),
             }
             writer.write(mds_sample)
         if not args.wandb_disabled and dist.get_local_rank() == 0:
