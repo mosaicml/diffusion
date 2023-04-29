@@ -198,7 +198,7 @@ def main(args: Namespace) -> None:
     )
 
     device = DeviceGPU()
-    text_encoder = AutoModelForSeq2SeqLM.from_pretrained(args.model_name, subfolder='text_encoder', torch_dtype=torch.bfloat16).eval()
+    text_encoder = AutoModelForSeq2SeqLM.from_pretrained(args.model_name, torch_dtype=torch.bfloat16).eval()
     text_encoder = device.module_to_device(text_encoder)
 
     columns = {
