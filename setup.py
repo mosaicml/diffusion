@@ -12,6 +12,7 @@ install_requires = [
     'hydra-colorlog>=1.1.0',
     'diffusers[torch]',
     'transformers[torch]',
+    'sentencepiece',
     'wandb',
     'xformers==0.0.16',
     'triton==2.0.0',
