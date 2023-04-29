@@ -199,7 +199,7 @@ def main(args: Namespace) -> None:
     )
 
     device = DeviceGPU()
-    dist.initialize_dist(device=device, timeout=900)
+    dist.initialize_dist(device=device, timeout=2700)
     
     # Download on local rank 0 first and cache
     if dist.get_local_rank() == 0:

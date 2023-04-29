@@ -14,6 +14,7 @@ integrations:
 command: |
   cd diffusion
   pip install -e .
+  pip install protobuf==3.20.0
   cd scripts
 
   composer precompute_t5xxl.py \
