@@ -168,7 +168,7 @@ def parse_args() -> Namespace:
     # Add wandb arguments
     args.add_argument('--wandb_disabled', action='store_true')
     args.add_argument('--wandb_name', type=str, default='baseline')
-    args.add_argument('--wandb_project', type=str, default='laion-latents')
+    args.add_argument('--wandb_project', type=str, default='precompute-latents-t5xxl')
     args.add_argument('--wandb_entity', type=str, default='mosaic-ml')
     return args.parse_args()
 
@@ -198,7 +198,16 @@ def main(args: Namespace) -> None:
     )
 
     device = DeviceGPU()
-    text_encoder = T5EncoderModel.from_pretrained(args.model_name, torch_dtype=torch.bfloat16).eval()
+    dist.initialize_dist(device=device, timeout=900)
+    
+    # Download on local rank 0 first and cache
+    if dist.get_local_rank() == 0:
+        text_encoder = T5EncoderModel.from_pretrained(args.model_name, torch_dtype=torch.bfloat16, cache_dir='/tmp/text-encoder').eval()
+    dist.barrier()
+    if dist.get_local_rank() > 0:
+        text_encoder = T5EncoderModel.from_pretrained(args.model_name, torch_dtype=torch.bfloat16, cache_dir='/tmp/text-encoder').eval()
+    dist.barrier()
+    
     text_encoder = device.module_to_device(text_encoder)
 
     columns = {
