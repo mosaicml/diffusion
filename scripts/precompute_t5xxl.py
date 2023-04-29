@@ -14,7 +14,8 @@ from composer.utils import dist
 from streaming import MDSWriter, Stream, StreamingDataset
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from transformers import T5EncoderModel, T5Tokenizer
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+
 
 
 
@@ -63,7 +64,7 @@ class StreamingLAIONDataset(StreamingDataset):
             batch_size=batch_size,
         )
 
-        self.tokenizer = T5Tokenizer.from_pretrained(tokenizer_name_or_path)
+        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path)
 
     def __getitem__(self, index):
         sample = super().__getitem__(index)
@@ -202,10 +203,10 @@ def main(args: Namespace) -> None:
     
     # Download on local rank 0 first and cache
     if dist.get_local_rank() == 0:
-        text_encoder = T5EncoderModel.from_pretrained(args.model_name, torch_dtype=torch.bfloat16, cache_dir='/tmp/text-encoder').eval()
+        text_encoder = AutoModelForSeq2SeqLM.from_pretrained(args.model_name, torch_dtype=torch.bfloat16, cache_dir='/tmp/text-encoder').eval()
     dist.barrier()
     if dist.get_local_rank() > 0:
-        text_encoder = T5EncoderModel.from_pretrained(args.model_name, torch_dtype=torch.bfloat16, cache_dir='/tmp/text-encoder').eval()
+        text_encoder = AutoModelForSeq2SeqLM.from_pretrained(args.model_name, torch_dtype=torch.bfloat16, cache_dir='/tmp/text-encoder').eval()
     dist.barrier()
     
     text_encoder = device.module_to_device(text_encoder)
@@ -249,8 +250,8 @@ def main(args: Namespace) -> None:
             # Encode the text. Assume that the text is already tokenized
             conditioning = text_encoder(captions.view(-1, captions.shape[-1]))[0]  # Should be (batch_size, 77, 768)
 
-        # Move the latents to CPU and convert to numpy / bytes
-        conditioning = conditioning.cpu().numpy()
+        # Cast latents to fp32, move to CPU, and convert to numpy / bytes
+        conditioning = conditioning.float().cpu().numpy()
 
         sample = batch['sample']
         for i in range(conditioning.shape[0]):
