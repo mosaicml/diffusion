@@ -64,7 +64,15 @@ class StreamingLAIONDataset(StreamingDataset):
             batch_size=batch_size,
         )
 
-        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path)
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            tokenizer_name_or_path,
+            max_length=77,
+            padding='max_length',
+            truncation=True,
+            return_attention_mask=True,
+            add_special_tokens=True,
+            return_tensors='pt',
+        )
 
     def __getitem__(self, index):
         sample = super().__getitem__(index)
@@ -201,13 +209,14 @@ def main(args: Namespace) -> None:
     device = DeviceGPU()
     dist.initialize_dist(device=device, timeout=2700)
     
+    text_encoder = AutoModelForSeq2SeqLM.from_pretrained(args.model_name, torch_dtype=torch.bfloat16, cache_dir='/tmp/text-encoder').eval()
     # Download on local rank 0 first and cache
-    if dist.get_local_rank() == 0:
-        text_encoder = AutoModelForSeq2SeqLM.from_pretrained(args.model_name, torch_dtype=torch.bfloat16, cache_dir='/tmp/text-encoder').eval()
-    dist.barrier()
-    if dist.get_local_rank() > 0:
-        text_encoder = AutoModelForSeq2SeqLM.from_pretrained(args.model_name, torch_dtype=torch.bfloat16, cache_dir='/tmp/text-encoder').eval()
-    dist.barrier()
+    # if dist.get_local_rank() == 0:
+    #     text_encoder = AutoModelForSeq2SeqLM.from_pretrained(args.model_name, torch_dtype=torch.bfloat16, cache_dir='/tmp/text-encoder').eval()
+    # dist.barrier()
+    # if dist.get_local_rank() > 0:
+    #     text_encoder = AutoModelForSeq2SeqLM.from_pretrained(args.model_name, torch_dtype=torch.bfloat16, cache_dir='/tmp/text-encoder').eval()
+    # dist.barrier()
     
     text_encoder = device.module_to_device(text_encoder)
 
@@ -244,11 +253,18 @@ def main(args: Namespace) -> None:
 
     max_sample_idx = 0
     for batch_idx, batch in enumerate(tqdm(dataloader)):
-        captions = device.batch_to_device(batch['captions'])
+        # captions = device.batch_to_device(batch['captions'])
+        input_ids = device.batch_to_device(batch['captions']['input_ids'])
+        attention_mask = device.batch_to_device(batch['captions']['attention_mask'])
 
         with torch.no_grad():
             # Encode the text. Assume that the text is already tokenized
-            conditioning = text_encoder(captions.view(-1, captions.shape[-1]))[0]  # Should be (batch_size, 77, 768)
+            # conditioning = text_encoder(captions.view(-1, captions.shape[-1]))[0]  # Should be (batch_size, 77, 768)
+            text_encoder_embs = text_encoder(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+            )['last_hidden_state'].detach()
+
 
         # Cast latents to fp32, move to CPU, and convert to numpy / bytes
         conditioning = conditioning.float().cpu().numpy()
