@@ -14,7 +14,7 @@ from composer.utils import dist
 from streaming import MDSWriter, Stream, StreamingDataset
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from transformers import T5EncoderModel, AutoTokenizer
+from transformers import T5EncoderModel, T5Tokenizer
 
 
 
@@ -63,7 +63,7 @@ class StreamingLAIONDataset(StreamingDataset):
             batch_size=batch_size,
         )
 
-        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path)
+        self.tokenizer = T5Tokenizer.from_pretrained(tokenizer_name_or_path)
 
     def __getitem__(self, index):
         sample = super().__getitem__(index)
@@ -162,7 +162,7 @@ def parse_args() -> Namespace:
     args.add_argument('--bucket', type=int, help='Bucket index under remote path.')
     args.add_argument('--model_name',
                       type=str,
-                      default='t5-v1_1-xxl',
+                      default='google/t5-v1_1-xxl',
                       help='Name of model to use for encoding.')
     args.add_argument('--batch-size', type=int, default=8, help='Batch size to use for encoding.')
     # Add wandb arguments

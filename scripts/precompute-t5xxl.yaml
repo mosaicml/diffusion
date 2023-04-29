@@ -1,27 +1,24 @@
 run_name: precompute-t5xxl
-platform: r1z1
+platform: replit-hero-run
 gpu_num:  8
 image: mosaicml/pytorch_vision:1.13.1_cu117-python3.10-ubuntu20.04
 optimization_level: 0
 integrations:
 - integration_type: "git_repo"
   git_repo: mosaicml/diffusion
-  git_branch: mvpatel2000/transform
+  git_branch: mvpatel2000/t5-precompute
 - integration_type: "wandb"
-  project: laion-dataset
+  project: precompute-latents-t5xxl
   entity: mosaic-ml
 
 command: |
   cd diffusion
-  pip install -r requirements.txt
-  pip install --upgrade torchmetrics[image]
-  pip uninstall -y mosaicml-streaming
-  pip install git+https://github.com/mosaicml/streaming.git@3afa26cc3b36677c86d4ca842afccbdb763b952e
+  pip install -e .
   cd scripts
 
-  composer precompute_latents.py \
-    --remote_download {YOUR DOWNLOAD BUCKET HERE} \
+  composer precompute_t5xxl.py \
+    --remote_download oci://mosaicml-internal-dataset-laion2b-en/4.5v2/256-512/ \
     --local /tmp/mds-cache/mds-laion2b-en/4.5/256-512/ \
-    --remote_upload {YOUR UPLOAD BUCKET HERE} \
+    --remote_upload oci://mosaicml-internal-dataset-laion2b-en/4.5v2-t5xxl/256-512/  \
     --bucket 1 \
     --wandb_name 256-512-bucket-1
