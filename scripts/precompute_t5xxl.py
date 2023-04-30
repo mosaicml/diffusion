@@ -7,6 +7,8 @@ import os
 import urllib.parse as ul
 from bs4 import BeautifulSoup
 import re
+import ftfy
+import html
 from argparse import ArgumentParser, Namespace
 from typing import List, Optional, Sequence, Union
 
@@ -121,7 +123,7 @@ def clean_caption(caption):
     caption = re.sub(r'[\"\']{2,}', r'"', caption)  # """AUSVERKAUFT"""
     caption = re.sub(r'[\.]{2,}', r' ', caption)  # """AUSVERKAUFT"""
 
-    caption = re.sub(self.bad_punct_regex, r' ', caption)  # ***AUSVERKAUFT***, #AUSVERKAUFT
+    caption = re.sub(re.compile(r'['+'#®•©™&@·º½¾¿¡§~'+'\)'+'\('+'\]'+'\['+'\}'+'\{'+'\|'+'\\'+'\/'+'\*' + r']{1,}'), r' ', caption)  # ***AUSVERKAUFT***, #AUSVERKAUFT
     caption = re.sub(r'\s+\.\s+', r' ', caption)  # " . "
 
     # this-is-my-cute-cat / this_is_my_cute_cat
@@ -129,7 +131,10 @@ def clean_caption(caption):
     if len(re.findall(regex2, caption)) > 3:
         caption = re.sub(regex2, ' ', caption)
 
-    caption = self.basic_clean(caption)
+    # Basic clean
+    caption = ftfy.fix_text(caption)
+    caption = html.unescape(html.unescape(caption))
+    caption = caption.strip()
 
     caption = re.sub(r'\b[a-zA-Z]{1,3}\d{3,15}\b', '', caption)  # jc6640
     caption = re.sub(r'\b[a-zA-Z]+\d+[a-zA-Z]+\b', '', caption)  # jc6640vc

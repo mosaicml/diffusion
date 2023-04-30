@@ -16,6 +16,7 @@ command: |
   pip install -e .
   pip install protobuf==3.20.0
   pip install bs4
+  pip install ftfy
   cd scripts
 
   composer precompute_t5xxl.py \
