@@ -77,7 +77,7 @@ for run_name in run_names:
     --local /tmp/mds-cache/mds-laion2b-en/4.5/{folder}/ \
     --remote_upload oci://mosaicml-internal-dataset-laion2b-en/4.5v2-t5xxl/{folder}/  \
     --bucket {bucket} \
-    --wandb_name {folder}-bucket-{bucket}
+    --wandb_name v2-{folder}-bucket-{bucket}
     """)
 
     print(f'Launching run {run_name}')

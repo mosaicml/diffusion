@@ -9,6 +9,8 @@ from bs4 import BeautifulSoup
 import re
 import ftfy
 import html
+import psutil
+import time
 from argparse import ArgumentParser, Namespace
 from typing import List, Optional, Sequence, Union
 
@@ -429,8 +431,8 @@ def main(args: Namespace) -> None:
 
         dist.barrier()
         max_sample_idx += args.batch_size * dist.get_world_size()
-        # Remove completed shards
-        if batch_idx % 10 == 0 and dist.get_local_rank() == 0:
+        if batch_idx % 500 == 0 and dist.get_local_rank() == 0:
+            # Remove completed shards
             shard_sample_offset = 0
             for shard_id, samples_this_shard in enumerate(dataloader.dataset.samples_per_shard):  # type: ignore
                 shard_sample_offset += samples_this_shard
@@ -447,6 +449,22 @@ def main(args: Namespace) -> None:
                         path = os.path.join(stream.local, zip_info.basename)
                         if os.path.exists(path):
                             os.remove(path)
+    
+            # Wait until disk utilization goes down, which happens when egress is slower than ingress
+            disk_usage = psutil.disk_usage('/')
+            disk_usage_percent = disk_usage.percent
+            disk_usage_tensor = device.tensor_to_device(torch.tensor([disk_usage_percent], dtype=torch.float32))
+            dist.all_reduce(disk_usage_percent, op=dist.ReduceOp.MIN)
+            disk_usage_percent = disk_usage_tensor.cpu().item()
+            # If utilization exceeds 60%, wait until it drops below 40%
+            if disk_usage_percent > 60:
+                while disk_usage_percent > 40:
+                    time.sleep(60)
+                    disk_usage = psutil.disk_usage('/')
+                    disk_usage_percent = disk_usage.percent
+                    disk_usage_tensor = device.tensor_to_device(torch.tensor([disk_usage_percent], dtype=torch.float32))
+                    dist.all_reduce(disk_usage_percent, op=dist.ReduceOp.MIN)
+                    disk_usage_percent = disk_usage_tensor.cpu().item()
 
     writer.finish()
 
