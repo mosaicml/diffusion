@@ -348,9 +348,10 @@ def main(args: Namespace) -> None:
     device = DeviceGPU()
     dist.initialize_dist(device=device, timeout=2700)
 
+    print(f'Loading model {args.model_name}')
     text_encoder = AutoModelForSeq2SeqLM.from_pretrained(args.model_name, torch_dtype=torch.bfloat16, cache_dir='/tmp/text-encoder').encoder.eval()
-
     text_encoder = device.module_to_device(text_encoder)
+    print('Model loaded')
 
     columns = {
         'punsafe': 'float64',
@@ -382,13 +383,16 @@ def main(args: Namespace) -> None:
         size_limit=256 * (2**20),
         max_workers=64,
     )
+    print(f'Uploading to {remote_upload}')
 
     max_sample_idx = 0
     for batch_idx, batch in enumerate(tqdm(dataloader)):
+        print(f'Batch {batch_idx}')
         input_ids = device.batch_to_device(batch['captions']['input_ids'])
         attention_mask = device.batch_to_device(batch['captions']['attention_mask'])
         input_ids = input_ids.reshape(-1, input_ids.shape[-1])
         attention_mask = attention_mask.reshape(-1, attention_mask.shape[-1])
+        print(f'input_ids: {input_ids.shape}')
 
         with torch.no_grad():
             # Encode the text. Assume that the text is already tokenized
@@ -396,12 +400,15 @@ def main(args: Namespace) -> None:
                 input_ids=input_ids,
                 attention_mask=attention_mask,
             )['last_hidden_state'].detach()  # Should be (batch_size, 77, 4096)
+            print(f'conditioning: {conditioning.shape}')
 
         # Cast latents to fp32, move to CPU, and convert to numpy / bytes
         conditioning = conditioning.float().cpu().numpy()
+        print(f'conditioning: {conditioning.shape}')
 
         sample = batch['sample']
         for i in range(conditioning.shape[0]):
+            print(f'Writing sample {i}')
             mds_sample = {
                 'punsafe': sample['punsafe'][i],
                 'pwatermark': sample['pwatermark'][i],
