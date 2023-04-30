@@ -306,7 +306,7 @@ def parse_args() -> Namespace:
                       type=str,
                       default='google/t5-v1_1-xxl',
                       help='Name of model to use for encoding.')
-    args.add_argument('--batch-size', type=int, default=64, help='Batch size to use for encoding.')
+    args.add_argument('--batch-size', type=int, default=128, help='Batch size to use for encoding.')
     # Add wandb arguments
     args.add_argument('--wandb_disabled', action='store_true')
     args.add_argument('--wandb_name', type=str, default='baseline')

@@ -17,7 +17,6 @@ install_requires = [
     'xformers==0.0.16',
     'triton==2.0.0',
     'torchmetrics[image]',
-    'bs4',
 ]
 
 extras_require = {}
