@@ -213,7 +213,8 @@ class StreamingLAIONDataset(StreamingDataset):
 
     def __getitem__(self, index):
         sample = super().__getitem__(index)
-        caption = clean_caption(sample['caption'])
+        # caption = clean_caption(sample['caption'])
+        caption = sample['caption']
         tokenized_caption = self.tokenizer(
             caption,
             max_length=77,
@@ -337,8 +338,8 @@ def main(args: Namespace) -> None:
         predownload=20_000,
         drop_last=False,
         shuffle=False,
-        prefetch_factor=1,
-        num_workers=1,
+        prefetch_factor=2,
+        num_workers=8,
         persistent_workers=True,
         pin_memory=True,
         download_timeout=300,
