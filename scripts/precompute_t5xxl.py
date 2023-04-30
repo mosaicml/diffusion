@@ -20,7 +20,7 @@ from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
 
-def clean_caption(self, caption):
+def clean_caption(caption):
     """Clean caption from bad symbols.
 
     Copied from: https://github.com/deep-floyd/IF/blob/develop/deepfloyd_if/modules/t5.py
