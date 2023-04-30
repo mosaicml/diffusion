@@ -311,7 +311,7 @@ def parse_args() -> Namespace:
                       type=str,
                       default='google/t5-v1_1-xxl',
                       help='Name of model to use for encoding.')
-    args.add_argument('--batch-size', type=int, default=32, help='Batch size to use for encoding.')
+    args.add_argument('--batch-size', type=int, default=128, help='Batch size to use for encoding.')
     # Add wandb arguments
     args.add_argument('--wandb_disabled', action='store_true')
     args.add_argument('--wandb_name', type=str, default='baseline')
@@ -337,8 +337,8 @@ def main(args: Namespace) -> None:
         predownload=20_000,
         drop_last=False,
         shuffle=False,
-        prefetch_factor=2,
-        num_workers=8,
+        prefetch_factor=1,
+        num_workers=1,
         persistent_workers=True,
         pin_memory=True,
         download_timeout=300,
@@ -348,13 +348,6 @@ def main(args: Namespace) -> None:
     dist.initialize_dist(device=device, timeout=2700)
 
     text_encoder = AutoModelForSeq2SeqLM.from_pretrained(args.model_name, torch_dtype=torch.bfloat16, cache_dir='/tmp/text-encoder').encoder.eval()
-    # Download on local rank 0 first and cache
-    # if dist.get_local_rank() == 0:
-    #     text_encoder = AutoModelForSeq2SeqLM.from_pretrained(args.model_name, torch_dtype=torch.bfloat16, cache_dir='/tmp/text-encoder').eval()
-    # dist.barrier()
-    # if dist.get_local_rank() > 0:
-    #     text_encoder = AutoModelForSeq2SeqLM.from_pretrained(args.model_name, torch_dtype=torch.bfloat16, cache_dir='/tmp/text-encoder').eval()
-    # dist.barrier()
 
     text_encoder = device.module_to_device(text_encoder)
 
