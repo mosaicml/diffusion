@@ -6,11 +6,11 @@ This directory contains code to convert LAION and COCO captions into [Streaming]
 We provide some helper scripts to download and process the LAION dataset into a [streaming dataset](https://docs.mosaicml.com/projects/streaming/en/stable/).
 `laion_download_all.sh` and `laion_download_aesthetic.sh` use [img2dataset](https://github.com/rom1504/img2dataset) to download the images and metadata for the full dataset and aesthetics only dataset, respectively.
 `laion_cloudwriter.py` runs in parallel, converting images to the streaming MDS format and uploading them to a cloud storage bucket. Additionally,
-it buckets different images by resolution. `laion2b-en-interactive.yaml` is an example config file for this dataset preparation. Note that this script
+it buckets different images by resolution. `mcloud/laion2b-en-interactive.yaml` is an example config file for this dataset preparation. Note that this script
 does not require a GPU.
 
 `precompute_latents.py` takes a streaming LAION dataset and attaches the precomputed VAE and CLIP latents to each sample. As we often train latent diffusion
-models for multiple epochs, this lets us avoid recomputing the latents for each epoch. `precompute-latents.yaml` is an example config file for this. Note that
+models for multiple epochs, this lets us avoid recomputing the latents for each epoch. `mcloud/precompute-latents.yaml` is an example config file for this. Note that
 this script requires a GPU.
 
 # COCO Dataset
