@@ -349,7 +349,12 @@ def main(args: Namespace) -> None:
     dist.initialize_dist(device=device, timeout=2700)
 
     print(f'Loading model {args.model_name}')
-    text_encoder = AutoModelForSeq2SeqLM.from_pretrained(args.model_name, torch_dtype=torch.bfloat16, cache_dir='/tmp/text-encoder').encoder.eval()
+    dist.barrier()
+    for i in range(dist.get_local_world_size()):
+        print(f'Loading model on rank {i}')
+        if dist.get_local_rank() == i:
+           text_encoder = AutoModelForSeq2SeqLM.from_pretrained(args.model_name, torch_dtype=torch.bfloat16, cache_dir='/tmp/text-encoder').encoder.eval()
+        dist.barrier()
     text_encoder = device.module_to_device(text_encoder)
     print('Model loaded')
 
