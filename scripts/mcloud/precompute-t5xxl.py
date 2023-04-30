@@ -49,6 +49,7 @@ for folder in folders:
         --wandb_name {folder}-bucket-{bucket}
         """)
 
+        print(f'Launching run {run_name}')
         run_config = RunConfig(
             run_name=run_name,
             cluster=cluster,
