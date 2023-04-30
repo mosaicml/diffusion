@@ -64,26 +64,19 @@ class StreamingLAIONDataset(StreamingDataset):
             batch_size=batch_size,
         )
 
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            tokenizer_name_or_path,
-            max_length=77,
-            padding='max_length',
-            truncation=True,
-            return_attention_mask=True,
-            add_special_tokens=True,
-            return_tensors='pt',
-        )
+        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path)
 
     def __getitem__(self, index):
         sample = super().__getitem__(index)
         caption = sample['caption']
         tokenized_caption = self.tokenizer(
             caption,
+            max_length=77,
             padding='max_length',
-            max_length=self.tokenizer.model_max_length,
             truncation=True,
-        )['input_ids']
-        tokenized_caption = torch.tensor(tokenized_caption)
+            return_attention_mask=True,
+            return_tensors='pt',
+        )
 
         return {'captions': tokenized_caption, 'sample': sample}
 
@@ -173,7 +166,7 @@ def parse_args() -> Namespace:
                       type=str,
                       default='google/t5-v1_1-xxl',
                       help='Name of model to use for encoding.')
-    args.add_argument('--batch-size', type=int, default=8, help='Batch size to use for encoding.')
+    args.add_argument('--batch-size', type=int, default=64, help='Batch size to use for encoding.')
     # Add wandb arguments
     args.add_argument('--wandb_disabled', action='store_true')
     args.add_argument('--wandb_name', type=str, default='baseline')
@@ -208,8 +201,8 @@ def main(args: Namespace) -> None:
 
     device = DeviceGPU()
     dist.initialize_dist(device=device, timeout=2700)
-    
-    text_encoder = AutoModelForSeq2SeqLM.from_pretrained(args.model_name, torch_dtype=torch.bfloat16, cache_dir='/tmp/text-encoder').eval()
+
+    text_encoder = AutoModelForSeq2SeqLM.from_pretrained(args.model_name, torch_dtype=torch.bfloat16, cache_dir='/tmp/text-encoder').encoder.eval()
     # Download on local rank 0 first and cache
     # if dist.get_local_rank() == 0:
     #     text_encoder = AutoModelForSeq2SeqLM.from_pretrained(args.model_name, torch_dtype=torch.bfloat16, cache_dir='/tmp/text-encoder').eval()
@@ -217,7 +210,7 @@ def main(args: Namespace) -> None:
     # if dist.get_local_rank() > 0:
     #     text_encoder = AutoModelForSeq2SeqLM.from_pretrained(args.model_name, torch_dtype=torch.bfloat16, cache_dir='/tmp/text-encoder').eval()
     # dist.barrier()
-    
+
     text_encoder = device.module_to_device(text_encoder)
 
     columns = {
@@ -253,18 +246,17 @@ def main(args: Namespace) -> None:
 
     max_sample_idx = 0
     for batch_idx, batch in enumerate(tqdm(dataloader)):
-        # captions = device.batch_to_device(batch['captions'])
         input_ids = device.batch_to_device(batch['captions']['input_ids'])
         attention_mask = device.batch_to_device(batch['captions']['attention_mask'])
+        input_ids = input_ids.reshape(-1, input_ids.shape[-1])
+        attention_mask = attention_mask.reshape(-1, attention_mask.shape[-1])
 
         with torch.no_grad():
             # Encode the text. Assume that the text is already tokenized
-            # conditioning = text_encoder(captions.view(-1, captions.shape[-1]))[0]  # Should be (batch_size, 77, 768)
-            text_encoder_embs = text_encoder(
+            conditioning = text_encoder(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
-            )['last_hidden_state'].detach()
-
+            )['last_hidden_state'].detach()  # Should be (batch_size, 77, 4096)
 
         # Cast latents to fp32, move to CPU, and convert to numpy / bytes
         conditioning = conditioning.float().cpu().numpy()
