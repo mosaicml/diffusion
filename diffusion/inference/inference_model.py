@@ -18,7 +18,7 @@ LOCAL_CHECKPOINT_PATH = '/tmp/model.pt'
 
 def download_model():
     """Download model from remote storage."""
-    model_uri = "oci://mosaicml-internal-checkpoints/stable-diffusion-hero-run/4-13-512-ema/ep5-ba850000-rank0.pt"
+    model_uri = 'oci://mosaicml-internal-checkpoints/stable-diffusion-hero-run/4-13-512-ema/ep5-ba850000-rank0.pt'
     get_file(path=model_uri, destination=LOCAL_CHECKPOINT_PATH)
 
 
