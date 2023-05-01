@@ -387,6 +387,13 @@ def main(args: Namespace) -> None:
         max_workers=64,
     )
 
+    FILTER_URLS = [
+        'shutterstock',
+        'gettyimages',
+        'dreamstime',
+        'yayimages',
+    ]
+
     max_sample_idx = 0
     for batch_idx, batch in enumerate(tqdm(dataloader)):
         input_ids = device.batch_to_device(batch['captions']['input_ids'])
@@ -406,6 +413,8 @@ def main(args: Namespace) -> None:
 
         sample = batch['sample']
         for i in range(conditioning.shape[0]):
+            if any([url in sample['url'][i].lower() for url in FILTER_URLS]):
+                continue
             mds_sample = {
                 'punsafe': sample['punsafe'][i],
                 'pwatermark': sample['pwatermark'][i],
@@ -458,7 +467,7 @@ def main(args: Namespace) -> None:
             dist.all_reduce(disk_usage_tensor, reduce_operation='MAX')
             disk_usage_percent = disk_usage_tensor.cpu().item()
             print(disk_usage_percent)
-            # If utilization exceeds 60%, wait until it drops below 40%
+            # If utilization exceeds 30%, wait until it drops below 20%
             if disk_usage_percent > 30:
                 while disk_usage_percent > 20:
                     time.sleep(60)
