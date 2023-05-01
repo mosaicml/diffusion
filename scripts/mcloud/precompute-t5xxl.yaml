@@ -1,5 +1,5 @@
 run_name: precompute-t5xxl
-platform: replit-hero-run
+platform: r1z1
 gpu_num:  8
 image: mosaicml/pytorch_vision:1.13.1_cu117-python3.10-ubuntu20.04
 optimization_level: 0

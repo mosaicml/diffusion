@@ -35,7 +35,7 @@ integrations = [
 
 run_names = [
     # 'precompute-t5xxl-64-128-1',
-    'precompute-t5xxl-64-128-2',
+    # 'precompute-t5xxl-64-128-2',
     # 'precompute-t5xxl-64-128-3',
     # 'precompute-t5xxl-64-128-4',
     # 'precompute-t5xxl-128-256-1',
@@ -44,7 +44,7 @@ run_names = [
     # 'precompute-t5xxl-128-256-4',
     # 'precompute-t5xxl-256-512-1',
     # 'precompute-t5xxl-256-512-2',
-    # 'precompute-t5xxl-256-512-3',
+    'precompute-t5xxl-256-512-3',
     # 'precompute-t5xxl-256-512-4',
     # 'precompute-t5xxl-512-768-1',
     # 'precompute-t5xxl-512-768-2',
