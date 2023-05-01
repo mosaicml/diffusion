@@ -393,7 +393,7 @@ def main(args: Namespace) -> None:
         'dreamstime',
         'yayimages',
     ]
-
+    filter_count = 0
     max_sample_idx = 0
     for batch_idx, batch in enumerate(tqdm(dataloader)):
         input_ids = device.batch_to_device(batch['captions']['input_ids'])
@@ -414,6 +414,7 @@ def main(args: Namespace) -> None:
         sample = batch['sample']
         for i in range(conditioning.shape[0]):
             if any([url in sample['url'][i].lower() for url in FILTER_URLS]):
+                filter_count += 1
                 continue
             mds_sample = {
                 'punsafe': sample['punsafe'][i],
@@ -435,11 +436,18 @@ def main(args: Namespace) -> None:
                 'caption_t5xxl_latents': conditioning[i].tobytes(),
             }
             writer.write(mds_sample)
+        max_sample_idx += args.batch_size * dist.get_world_size()
+
         if not args.wandb_disabled and dist.get_local_rank() == 0:
-            wandb.log({'batch': batch_idx, 'progress': batch_idx / len(dataloader)})
+            wandb.log({
+                'batch': batch_idx,
+                'progress': batch_idx / len(dataloader),
+                'filter_count': filter_count,
+                'filter_percent': filter_count / max_sample_idx,
+                'max_sample_idx': max_sample_idx,
+            })
 
         dist.barrier()
-        max_sample_idx += args.batch_size * dist.get_world_size()
         if batch_idx % 500 == 0 and dist.get_local_rank() == 0:
             # Remove completed shards
             shard_sample_offset = 0
@@ -462,20 +470,20 @@ def main(args: Namespace) -> None:
             # Wait until disk utilization goes down, which happens when egress is slower than ingress
             disk_usage = psutil.disk_usage('/')
             disk_usage_percent = disk_usage.percent
-            print('\n\n', disk_usage_percent)
             disk_usage_tensor = device.tensor_to_device(torch.tensor([disk_usage_percent], dtype=torch.float32))
             dist.all_reduce(disk_usage_tensor, reduce_operation='MAX')
             disk_usage_percent = disk_usage_tensor.cpu().item()
-            print(disk_usage_percent)
-            # If utilization exceeds 30%, wait until it drops below 20%
-            if disk_usage_percent > 30:
-                while disk_usage_percent > 20:
+            print(f'\n\nDisk usage: {disk_usage_percent}%')
+            # If utilization exceeds 60%, wait until it drops below 50%
+            if disk_usage_percent > 60:
+                while disk_usage_percent > 50:
                     time.sleep(60)
                     disk_usage = psutil.disk_usage('/')
                     disk_usage_percent = disk_usage.percent
                     disk_usage_tensor = device.tensor_to_device(torch.tensor([disk_usage_percent], dtype=torch.float32))
                     dist.all_reduce(disk_usage_tensor, reduce_operation='MAX')
                     disk_usage_percent = disk_usage_tensor.cpu().item()
+                    print(f'Loop disk usage: {disk_usage_percent}%')
 
     writer.finish()
 
