@@ -347,7 +347,7 @@ def main(args: Namespace) -> None:
     )
 
     device = DeviceGPU()
-    dist.initialize_dist(device=device, timeout=3600)
+    dist.initialize_dist(device=device, timeout=7200)
 
     # Stagger model loading across ranks. Otherwise, we overload system memory.
     for i in range(dist.get_local_world_size()):
