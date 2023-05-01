@@ -453,6 +453,7 @@ def main(args: Namespace) -> None:
             # Wait until disk utilization goes down, which happens when egress is slower than ingress
             disk_usage = psutil.disk_usage('/')
             disk_usage_percent = disk_usage.percent
+            print('\n\n', disk_usage_percent)
             disk_usage_tensor = device.tensor_to_device(torch.tensor([disk_usage_percent], dtype=torch.float32))
             dist.all_reduce(disk_usage_tensor, reduce_operation='MIN')
             disk_usage_percent = disk_usage_tensor.cpu().item()
