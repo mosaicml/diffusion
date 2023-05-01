@@ -16,22 +16,22 @@ from diffusion.models import stable_diffusion_2
 LOCAL_CHECKPOINT_PATH = '/tmp/model.pt'
 
 
-def download_model(model_uri: str, pretrained: str):
+def download_model():
     """Download model from remote storage."""
-    if pretrained != 'pretrained':  # Note: Hack since arg isn't customizable yet
-        get_file(path=model_uri, destination=LOCAL_CHECKPOINT_PATH)
+    model_uri = 'oci://mosaicml-internal-checkpoints/stable-diffusion-hero-run/4-13-512-ema/ep5-ba850000-rank0.pt'
+    get_file(path=model_uri, destination=LOCAL_CHECKPOINT_PATH)
 
 
 class StableDiffusionInference():
     """Inference endpoint class for Stable Diffusion."""
 
-    def __init__(self, model_uri: str, pretrained: str):
-        self.model_uri = model_uri
-        pretrained_flag = pretrained == 'pretrained'  # Note: Hack since arg isn't customizable yet
+    def __init__(self):
+        pretrained_flag = False
         self.device = torch.cuda.current_device()
 
         model = stable_diffusion_2(pretrained=pretrained_flag, encode_latents_in_fp16=True, fsdp=False)
         if not pretrained_flag:
+            download_model()
             state_dict = torch.load(LOCAL_CHECKPOINT_PATH)
             for key in list(state_dict['state']['model'].keys()):
                 if 'val_metrics.' in key:
@@ -40,7 +40,7 @@ class StableDiffusionInference():
         model.to(self.device)
         self.model = model.eval()
 
-    def forward(self, **inputs):
+    def predict(self, **inputs):
         if 'prompt' not in inputs:
             print('No prompt provided, returning nothing')
             return
