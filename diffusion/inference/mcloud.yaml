@@ -1,0 +1,16 @@
+name: sd-o1ema
+cluster: r7z13
+gpu_num: 1
+gpu_type: a100_40gb
+image: mosaicml/inference:latest
+replicas: 1
+integrations:
+  - integration_type: "git_repo"
+    git_repo: mosaicml/diffusion
+    git_branch: main
+    pip_install: .[all]
+model:
+  checkpoint_path: hkunlp/instructor-large
+  custom_model:
+    model_handler: diffusion.inference.inference_model.StableDiffusionInference
+command: uvicorn serve:app --host 0.0.0.0 --port 8080
