@@ -35,29 +35,29 @@ integrations = [
 
 run_names = [
     'precompute-t5xxl-64-128-1',
-    'precompute-t5xxl-64-128-2',
-    'precompute-t5xxl-64-128-3',
-    'precompute-t5xxl-64-128-4',
-    'precompute-t5xxl-128-256-1',
-    'precompute-t5xxl-128-256-2',
-    'precompute-t5xxl-128-256-3',
-    'precompute-t5xxl-128-256-4',
-    'precompute-t5xxl-256-512-1',
-    'precompute-t5xxl-256-512-2',
-    'precompute-t5xxl-256-512-3',
-    'precompute-t5xxl-256-512-4',
-    'precompute-t5xxl-512-768-1',
-    'precompute-t5xxl-512-768-2',
-    'precompute-t5xxl-512-768-3',
-    'precompute-t5xxl-512-768-4',
-    'precompute-t5xxl-768-1024-1',
-    'precompute-t5xxl-768-1024-2',
-    'precompute-t5xxl-768-1024-3',
-    'precompute-t5xxl-768-1024-4',
-    'precompute-t5xxl-1024-1048576-1',
-    'precompute-t5xxl-1024-1048576-2',
-    'precompute-t5xxl-1024-1048576-3',
-    'precompute-t5xxl-1024-1048576-4',
+    # 'precompute-t5xxl-64-128-2',
+    # 'precompute-t5xxl-64-128-3',
+    # 'precompute-t5xxl-64-128-4',
+    # 'precompute-t5xxl-128-256-1',
+    # 'precompute-t5xxl-128-256-2',
+    # 'precompute-t5xxl-128-256-3',
+    # 'precompute-t5xxl-128-256-4',
+    # 'precompute-t5xxl-256-512-1',
+    # 'precompute-t5xxl-256-512-2',
+    # 'precompute-t5xxl-256-512-3',
+    # 'precompute-t5xxl-256-512-4',
+    # 'precompute-t5xxl-512-768-1',
+    # 'precompute-t5xxl-512-768-2',
+    # 'precompute-t5xxl-512-768-3',
+    # 'precompute-t5xxl-512-768-4',
+    # 'precompute-t5xxl-768-1024-1',
+    # 'precompute-t5xxl-768-1024-2',
+    # 'precompute-t5xxl-768-1024-3',
+    # 'precompute-t5xxl-768-1024-4',
+    # 'precompute-t5xxl-1024-1048576-1',
+    # 'precompute-t5xxl-1024-1048576-2',
+    # 'precompute-t5xxl-1024-1048576-3',
+    # 'precompute-t5xxl-1024-1048576-4',
 ]
 for run_name in run_names:
     run_name_split = run_name.split('-')
@@ -77,7 +77,7 @@ for run_name in run_names:
     --local /tmp/mds-cache/mds-laion2b-en/4.5/{folder}/ \
     --remote_upload oci://mosaicml-internal-dataset-laion2b-en/4.5v2-t5xxl/{folder}/  \
     --bucket {bucket} \
-    --wandb_name v2-{folder}-bucket-{bucket}
+    --wandb_name v3-{folder}-bucket-{bucket}
     """)
 
     print(f'Launching run {run_name}')
