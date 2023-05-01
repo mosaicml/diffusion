@@ -347,7 +347,7 @@ def main(args: Namespace) -> None:
     )
 
     device = DeviceGPU()
-    dist.initialize_dist(device=device, timeout=2700)
+    dist.initialize_dist(device=device, timeout=3600)
 
     # Stagger model loading across ranks. Otherwise, we overload system memory.
     for i in range(dist.get_local_world_size()):
@@ -454,7 +454,7 @@ def main(args: Namespace) -> None:
             disk_usage = psutil.disk_usage('/')
             disk_usage_percent = disk_usage.percent
             disk_usage_tensor = device.tensor_to_device(torch.tensor([disk_usage_percent], dtype=torch.float32))
-            dist.all_reduce(disk_usage_percent, op=dist.ReduceOp.MIN)
+            dist.all_reduce(disk_usage_percent, reduce_operation='MIN')
             disk_usage_percent = disk_usage_tensor.cpu().item()
             # If utilization exceeds 60%, wait until it drops below 40%
             if disk_usage_percent > 60:
@@ -463,7 +463,7 @@ def main(args: Namespace) -> None:
                     disk_usage = psutil.disk_usage('/')
                     disk_usage_percent = disk_usage.percent
                     disk_usage_tensor = device.tensor_to_device(torch.tensor([disk_usage_percent], dtype=torch.float32))
-                    dist.all_reduce(disk_usage_percent, op=dist.ReduceOp.MIN)
+                    dist.all_reduce(disk_usage_percent, reduce_operation='MIN')
                     disk_usage_percent = disk_usage_tensor.cpu().item()
 
     writer.finish()
