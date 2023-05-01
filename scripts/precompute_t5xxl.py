@@ -455,7 +455,7 @@ def main(args: Namespace) -> None:
             disk_usage_percent = disk_usage.percent
             print('\n\n', disk_usage_percent)
             disk_usage_tensor = device.tensor_to_device(torch.tensor([disk_usage_percent], dtype=torch.float32))
-            dist.all_reduce(disk_usage_tensor, reduce_operation='MIN')
+            dist.all_reduce(disk_usage_tensor, reduce_operation='MAX')
             disk_usage_percent = disk_usage_tensor.cpu().item()
             print(disk_usage_percent)
             # If utilization exceeds 60%, wait until it drops below 40%
@@ -465,7 +465,7 @@ def main(args: Namespace) -> None:
                     disk_usage = psutil.disk_usage('/')
                     disk_usage_percent = disk_usage.percent
                     disk_usage_tensor = device.tensor_to_device(torch.tensor([disk_usage_percent], dtype=torch.float32))
-                    dist.all_reduce(disk_usage_tensor, reduce_operation='MIN')
+                    dist.all_reduce(disk_usage_tensor, reduce_operation='MAX')
                     disk_usage_percent = disk_usage_tensor.cpu().item()
 
     writer.finish()
