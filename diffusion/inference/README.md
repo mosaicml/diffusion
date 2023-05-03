@@ -1,4 +1,4 @@
-# Inference with Diffusion Models on the MosaicML platform
+# Inference with Diffusion Models on the MosaicML Platform
 
 In this folder, we provide an example of how to create and deploy a diffusion model on the MosaicML platform.
 
