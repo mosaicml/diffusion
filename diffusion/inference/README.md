@@ -18,7 +18,7 @@ pip install mosaicml-cli
 
 # Deploying the Model
 
-Deploying the model is as simple as running `mcli deploy -f yamls/instructor_model.yaml`.
+Deploying the model is as simple as running `mcli deploy -f yamls/mosaic_inference.yaml`.
 
 # Running Inference
 
