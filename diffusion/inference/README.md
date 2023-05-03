@@ -22,4 +22,4 @@ Deploying the model is as simple as running `mcli deploy -f yamls/instructor_mod
 
 # Running Inference
 
-Once the model has successfully been deployed, we can run inference by running `mcli predict <deployment_name> --inputs <input_dictionary>`.
+Once the model has successfully been deployed, we can run inference by running `mcli predict <deployment_name> --inputs '{"prompt": "a cute bunny"}'`.
