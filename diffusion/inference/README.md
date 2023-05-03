@@ -20,13 +20,6 @@ pip install mosaicml-cli
 
 Deploying the model is as simple as running `mcli deploy -f yamls/instructor_model.yaml`.
 
-The logs for a successful deployment should look something like:
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./assets/instructor_model_logs.png">
-  <img alt="Logs from server startup." src="./assets/instructor_model_logs.png">
-</picture>
-
 # Running Inference
 
 Once the model has successfully been deployed, we can run inference by running `mcli predict <deployment_name> --inputs <input_dictionary>`.
