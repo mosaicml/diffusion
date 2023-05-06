@@ -85,11 +85,11 @@ If you have not pre-computed the VAE and CLIP latents for your dataset, set `pre
 
 Once the configurations have been updated, start training at 256x256 resolution by running:
 ```
-composer run.py --config_path yamls/hydra-yamls --config_name SD-2-base-256.yaml
+composer run.py --config-path yamls/hydra-yamls --config-name SD-2-base-256.yaml
 ```
 Next, start training at 512x512 resolution by running:
 ```
-composer run.py --config_path yamls/hydra-yamls --config_name SD-2-base-512.yaml
+composer run.py --config-path yamls/hydra-yamls --config-name SD-2-base-512.yaml
 ```
 
 # Online Eval
