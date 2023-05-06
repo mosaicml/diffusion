@@ -161,7 +161,8 @@ def build_streaming_laion_dataloader(
         assert len(remote) == len(
             local), f'remote and local must be lists of the same length, got lengths {len(remote)} and {len(local)}'
     else:
-        ValueError('remote and local must both be a single string or a Sequence of strings.')
+        ValueError(
+            f'remote and local must be a string or a Sequence of strings, got types {type(remote)} and {type(local)}.')
 
     # Create a Stream for each (remote, local) pair
     streams = []
