@@ -15,7 +15,8 @@ from diffusion.train import train
 def main(config: DictConfig) -> None:
     """Hydra wrapper for train."""
     if not config:
-        raise ValueError(textwrap.dedent("""\
+        raise ValueError(
+            textwrap.dedent("""\
                             Config path and name not specified!
                             Please specify these by using --config-path and --config-name, respectively."""))
     return train(config)
