@@ -146,18 +146,22 @@ def build_streaming_laion_dataloader(
         num_canonical_nodes (int, optional): The number of canonical nodes for shuffle. Default: ``None``.
         **dataloader_kwargs: Additional arguments to pass to the dataloader.
     """
-    if isinstance(remote, Sequence) or isinstance(local, Sequence):
-        assert isinstance(remote, Sequence) and isinstance(
-            local, Sequence), 'If either remote or local is a sequence, both must be sequences'
-        assert len(remote) == len(
-            local), f'remote and local must be lists of the same length, got lengths {len(remote)} and {len(local)}'
-    else:
+    if isinstance(remote, str) or isinstance(local, str):
+        assert isinstance(remote, str) and isinstance(
+            local, str), 'If either remote or local is a single string, both must be single strings'
         # Hacky... make remote and local lists to simplify downstream code
         remote, local = [
             remote,
         ], [
             local,
         ]
+    elif isinstance(remote, Sequence) or isinstance(local, Sequence):
+        assert isinstance(remote, Sequence) and isinstance(
+            local, Sequence), 'If either remote or local is a sequence, both must be sequences'
+        assert len(remote) == len(
+            local), f'remote and local must be lists of the same length, got lengths {len(remote)} and {len(local)}'
+    else:
+        ValueError('remote and local must both be a single string or a Sequence of strings.')
 
     # Create a Stream for each (remote, local) pair
     streams = []
