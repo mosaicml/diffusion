@@ -111,8 +111,7 @@ def stable_diffusion_2(
     return model
 
 
-def discrete_pixel_diffusion(model_name: str = 'stabilityai/stable-diffusion-2-base',
-                             prediction_type = 'epsilon'):
+def discrete_pixel_diffusion(model_name: str = 'stabilityai/stable-diffusion-2-base', prediction_type='epsilon'):
     # Get the stable diffusion 2 unet config
     config = PretrainedConfig.get_config_dict(model_name, subfolder='unet')
     # Set the number of channels to 3
@@ -127,6 +126,9 @@ def discrete_pixel_diffusion(model_name: str = 'stabilityai/stable-diffusion-2-b
     # Get the SD2 schedulers
     noise_scheduler = DDPMScheduler.from_pretrained(model_name, subfolder='scheduler')
     inference_scheduler = DDIMScheduler.from_pretrained(model_name, subfolder='scheduler')
+    # Set the scheduler prediction type
+    noise_scheduler.prediction_type = prediction_type
+    inference_scheduler.prediction_type = prediction_type
 
     # Create the pixel space diffusion model
     model = PixelSpaceDiffusion(unet,
