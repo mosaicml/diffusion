@@ -13,6 +13,7 @@ from torchmetrics.image.fid import FrechetInceptionDistance
 from torchmetrics.multimodal.clip_score import CLIPScore
 from transformers import CLIPTextModel, CLIPTokenizer, PretrainedConfig
 
+from diffusion.models.pixel_diffusion import PixelSpaceDiffusion
 from diffusion.models.stable_diffusion import StableDiffusion
 
 try:
@@ -107,4 +108,37 @@ def stable_diffusion_2(
         if is_xformers_installed:
             model.unet.enable_xformers_memory_efficient_attention()
             model.vae.enable_xformers_memory_efficient_attention()
+    return model
+
+
+def discrete_pixel_diffusion():
+    # Get the stable diffusion 2 unet config
+    config = PretrainedConfig.get_config_dict('stabilityai/stable-diffusion-2-base', subfolder='unet')
+    # Set the number of channels to 3
+    config[0]['in_channels'] = 3
+    # Set the number of out channels to 3
+    config[0]['out_channels'] = 3
+    # Create the pixel space unet based on the SD2 unet.
+    unet = UNet2DConditionModel(**config[0])
+    # Get the SD2 text encoder and tokenizer:
+    text_encoder = CLIPTextModel.from_pretrained('stabilityai/stable-diffusion-2-base', subfolder='text_encoder')
+    tokenizer = CLIPTokenizer.from_pretrained('stabilityai/stable-diffusion-2-base', subfolder='tokenizer')
+    # Get the SD2 schedulers
+    noise_scheduler = DDPMScheduler.from_pretrained('stabilityai/stable-diffusion-2-base', subfolder='scheduler')
+    inference_noise_scheduler = DDIMScheduler.from_pretrained('stabilityai/stable-diffusion-2-base',
+                                                              subfolder='scheduler')
+
+    # Create the pixel space diffusion model
+    model = PixelSpaceDiffusion(unet,
+                                text_encoder,
+                                tokenizer,
+                                noise_scheduler,
+                                inference_noise_scheduler=inference_noise_scheduler,
+                                train_metrics=[MeanSquaredError()],
+                                val_metrics=[MeanSquaredError()])
+
+    if torch.cuda.is_available():
+        model = DeviceGPU().module_to_device(model)
+        if is_xformers_installed:
+            model.model.enable_xformers_memory_efficient_attention()
     return model
