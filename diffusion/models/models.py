@@ -111,9 +111,10 @@ def stable_diffusion_2(
     return model
 
 
-def discrete_pixel_diffusion():
+def discrete_pixel_diffusion(model_name: str = 'stabilityai/stable-diffusion-2-base',
+                             prediction_type = 'epsilon'):
     # Get the stable diffusion 2 unet config
-    config = PretrainedConfig.get_config_dict('stabilityai/stable-diffusion-2-base', subfolder='unet')
+    config = PretrainedConfig.get_config_dict(model_name, subfolder='unet')
     # Set the number of channels to 3
     config[0]['in_channels'] = 3
     # Set the number of out channels to 3
@@ -121,11 +122,11 @@ def discrete_pixel_diffusion():
     # Create the pixel space unet based on the SD2 unet.
     unet = UNet2DConditionModel(**config[0])
     # Get the SD2 text encoder and tokenizer:
-    text_encoder = CLIPTextModel.from_pretrained('stabilityai/stable-diffusion-2-base', subfolder='text_encoder')
-    tokenizer = CLIPTokenizer.from_pretrained('stabilityai/stable-diffusion-2-base', subfolder='tokenizer')
+    text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder')
+    tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer')
     # Get the SD2 schedulers
-    noise_scheduler = DDPMScheduler.from_pretrained('stabilityai/stable-diffusion-2-base', subfolder='scheduler')
-    inference_scheduler = DDIMScheduler.from_pretrained('stabilityai/stable-diffusion-2-base', subfolder='scheduler')
+    noise_scheduler = DDPMScheduler.from_pretrained(model_name, subfolder='scheduler')
+    inference_scheduler = DDIMScheduler.from_pretrained(model_name, subfolder='scheduler')
 
     # Create the pixel space diffusion model
     model = PixelSpaceDiffusion(unet,
@@ -133,7 +134,7 @@ def discrete_pixel_diffusion():
                                 tokenizer,
                                 noise_scheduler,
                                 inference_scheduler=inference_scheduler,
-                                prediction_type='v_prediction',
+                                prediction_type=prediction_type,
                                 train_metrics=[MeanSquaredError()],
                                 val_metrics=[MeanSquaredError()])
 
