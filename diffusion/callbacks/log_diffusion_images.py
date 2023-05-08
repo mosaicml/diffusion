@@ -35,11 +35,13 @@ class LogDiffusionImages(Callback):
                  prompts: List[str],
                  size: Optional[int] = 256,
                  guidance_scale: Optional[float] = 0.0,
+                 text_key: Optional[str] = 'captions',
                  tokenized_prompts: Optional[torch.LongTensor] = None,
                  seed: Optional[int] = 1138):
         self.prompts = prompts
         self.size = size
         self.guidance_scale = guidance_scale
+        self.text_key = text_key
         self.seed = seed
         self.tokenized_prompts = tokenized_prompts
 
@@ -60,7 +62,7 @@ class LogDiffusionImages(Callback):
                     for p in self.prompts
                 ]
                 self.tokenized_prompts = torch.cat(tokenized_prompts)
-            self.tokenized_prompts = self.tokenized_prompts.to(state.batch[model.text_key].device)
+            self.tokenized_prompts = self.tokenized_prompts.to(state.batch[self.text_key].device)
 
             # Generate images
             with get_precision_context(state.precision):

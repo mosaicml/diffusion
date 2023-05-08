@@ -24,13 +24,13 @@ class PixelSpaceDiffusion(ComposerModel):
                  inference_scheduler=None,
                  continuous_time=False,
                  input_key='image',
-                 conditioning_key='caption',
+                 conditioning_key='captions',
                  prediction_type='epsilon',
                  train_metrics: Optional[List] = None,
                  val_metrics: Optional[List] = None,
-                 val_guidance_scales: Optional[List] = None,
+                 val_guidance_scales: List = [],
                  negative_conditioning: Optional[torch.FloatTensor] = None):
-        super().__init__(model)
+        super().__init__()
         self.model = model
         self.text_encoder = text_encoder
         self.tokenizer = tokenizer
@@ -64,10 +64,10 @@ class PixelSpaceDiffusion(ComposerModel):
         elif self.prediction_type == 'v_prediction':
             targets = self.scheduler.get_velocity(inputs, noise, timesteps)
         # Forward through the model
-        return self.model(noised_inputs, timesteps, conditioning), targets, timesteps
+        return self.model(noised_inputs, timesteps, conditioning)['sample'], targets, timesteps
 
     def loss(self, outputs, batch):
-        return torch.nn.functional.mse_loss, (outputs[0], outputs[1])
+        return torch.nn.functional.mse_loss(outputs[0], outputs[1])
 
     def eval_forward(self, batch, outputs=None):
         if outputs is not None:
@@ -80,7 +80,7 @@ class PixelSpaceDiffusion(ComposerModel):
         height, width = images.shape[-2], images.shape[-1]
         generated_images = {}
         for guidance_scale in self.val_guidance_scales:
-            gen_images = self.generate(conditioning,
+            gen_images = self.generate(tokenized_prompts=conditioning,
                                        height=height,
                                        width=width,
                                        guidance_scale=guidance_scale,
@@ -116,45 +116,43 @@ class PixelSpaceDiffusion(ComposerModel):
     @torch.no_grad()
     def generate(
         self,
-        conditioning: Optional[torch.FloatTensor],
-        negative_conditioning: Optional[torch.FloatTensor] = None,
-        height: Optional[int] = 64,
-        width: Optional[int] = 64,
+        prompt: Optional[list] = None,
+        negative_prompt: Optional[list] = None,
+        tokenized_prompts: Optional[torch.LongTensor] = None,
+        tokenized_negative_prompts: Optional[torch.LongTensor] = None,
+        prompt_embeds: Optional[torch.FloatTensor] = None,
+        negative_prompt_embeds: Optional[torch.FloatTensor] = None,
+        height: int = 64,
+        width: int = 64,
         num_inference_steps: Optional[int] = 50,
         guidance_scale: Optional[float] = 3.0,
+        num_images_per_prompt: Optional[int] = 1,
         seed: Optional[int] = None,
         progress_bar: Optional[bool] = True,
     ):
-        """Generates image from noise.
-        """
         # Create rng for the generation
         device = self.model.device
         rng_generator = torch.Generator(device=device)
         if seed:
             rng_generator = rng_generator.manual_seed(seed)  # type: ignore
 
-        # Encode the conditioning
-        if conditioning is not None:
-            conditioning = self.text_encoder(conditioning)[0]
-
-        # Prep latents if doing classifier-free guidance
         do_classifier_free_guidance = guidance_scale > 1.0  # type: ignore
+
+        text_embeddings = self._prepare_text_embeddings(prompt, tokenized_prompts, prompt_embeds, num_images_per_prompt)
+        batch_size = len(text_embeddings)  # len prompts * num_images_per_prompt
+        # classifier free guidance + negative prompts
+        # negative prompt is given in place of the unconditional input in classifier free guidance
         if do_classifier_free_guidance:
-            if negative_conditioning is None:
-                negative_conditioning = [
-                    self.tokenizer('', padding='max_length', truncation=True, return_tensors='pt')['input_ids']
-                    for c in conditioning
-                ]
-            negative_conditioning = self.text_encoder(negative_conditioning.to(device))[0]
-            embeddings = torch.cat([conditioning, negative_conditioning])
+            negative_prompt = negative_prompt or ([''] * (batch_size // num_images_per_prompt))  # type: ignore
+            unconditional_embeddings = self._prepare_text_embeddings(negative_prompt, tokenized_negative_prompts,
+                                                                     negative_prompt_embeds, num_images_per_prompt)
+            # concat uncond + prompt
+            text_embeddings = torch.cat([unconditional_embeddings, text_embeddings])
 
         # prepare for diffusion generation process
-        images = torch.randn((conditioning.shape[0], 3, height, width), device=device, generator=rng_generator)
+        images = torch.randn((batch_size, 3, height, width), device=device, generator=rng_generator)
 
-        # Set the number of inference steps
-        assert self.inference_scheduler is not None
         self.inference_scheduler.set_timesteps(num_inference_steps)
-
         # scale the initial noise by the standard deviation required by the scheduler
         images = images * self.inference_scheduler.init_noise_sigma
 
@@ -166,17 +164,37 @@ class PixelSpaceDiffusion(ComposerModel):
                 model_input = images
 
             model_input = self.inference_scheduler.scale_model_input(model_input, t)
-            model_output = self.model(model_input, t, embeddings)
+            # get model's predicted output
+            model_output = self.model(model_input, t, encoder_hidden_states=text_embeddings).sample
 
             if do_classifier_free_guidance:
-                # perform guidance.
-                # Note that this is not quite right if self.prediction_type != 'epsilon'...
+                # perform guidance. Not this is technically incorrect unless prediction_type is 'epsilon'
                 pred_uncond, pred_text = model_output.chunk(2)
-                pred = pred_uncond + guidance_scale * (pred_text - pred_uncond)
+                model_output = pred_uncond + guidance_scale * (pred_text - pred_uncond)
 
             # compute the previous noisy sample x_t -> x_t-1
-            images = self.inference_scheduler.step(pred, t, images, generator=rng_generator).prev_sample
+            images = self.inference_scheduler.step(model_output, t, images, generator=rng_generator).prev_sample
 
-        # Scale the images to 0, 1
+        # Rescale to (0, 1)
         images = (images / 2 + 0.5).clamp(0, 1)
         return images.detach()  # (batch*num_images_per_prompt, channel, h, w)
+
+    def _prepare_text_embeddings(self, prompt, tokenized_prompts, prompt_embeds, num_images_per_prompt):
+        """Tokenizes and embeds prompts if needed, then duplicates embeddings to support multiple generations per prompt."""
+        device = self.text_encoder.device
+        if prompt_embeds is None:
+            if tokenized_prompts is None:
+                tokenized_prompts = self.tokenizer(prompt,
+                                                   padding='max_length',
+                                                   max_length=self.tokenizer.model_max_length,
+                                                   truncation=True,
+                                                   return_tensors='pt').input_ids
+            text_embeddings = self.text_encoder(tokenized_prompts.to(device))[0]  # type: ignore
+        else:
+            text_embeddings = prompt_embeds
+
+        # duplicate text embeddings for each generation per prompt
+        bs_embed, seq_len, _ = text_embeddings.shape
+        text_embeddings = text_embeddings.repeat(1, num_images_per_prompt, 1)  # type: ignore
+        text_embeddings = text_embeddings.view(bs_embed * num_images_per_prompt, seq_len, -1)
+        return text_embeddings

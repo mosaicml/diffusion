@@ -125,15 +125,15 @@ def discrete_pixel_diffusion():
     tokenizer = CLIPTokenizer.from_pretrained('stabilityai/stable-diffusion-2-base', subfolder='tokenizer')
     # Get the SD2 schedulers
     noise_scheduler = DDPMScheduler.from_pretrained('stabilityai/stable-diffusion-2-base', subfolder='scheduler')
-    inference_noise_scheduler = DDIMScheduler.from_pretrained('stabilityai/stable-diffusion-2-base',
-                                                              subfolder='scheduler')
+    inference_scheduler = DDIMScheduler.from_pretrained('stabilityai/stable-diffusion-2-base', subfolder='scheduler')
 
     # Create the pixel space diffusion model
     model = PixelSpaceDiffusion(unet,
                                 text_encoder,
                                 tokenizer,
                                 noise_scheduler,
-                                inference_noise_scheduler=inference_noise_scheduler,
+                                inference_scheduler=inference_scheduler,
+                                prediction_type='v_prediction',
                                 train_metrics=[MeanSquaredError()],
                                 val_metrics=[MeanSquaredError()])
 
