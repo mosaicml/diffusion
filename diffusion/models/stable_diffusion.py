@@ -157,10 +157,12 @@ class StableDiffusion(ComposerModel):
         if self.precomputed_latents and self.image_latents_key in batch and self.text_latents_key in batch:
             latents, conditioning = batch[self.image_latents_key], batch[self.text_latents_key]
         else:
-            inputs, conditioning, attention_mask = batch[self.image_key], batch[self.text_key], batch['attention_mask']
-            # Do we need these?
+            inputs, conditioning = batch[self.image_key], batch[self.text_key]
+            # Do we need this?
             conditioning = conditioning.view(-1, conditioning.shape[-1])
-            attention_mask = attention_mask.view(-1, attention_mask.shape[-1])
+            attention_mask = None
+            if 'attention_mask' in batch:
+                attention_mask = batch['attention_mask'].view(-1, batch['attention_mask'].shape[-1])
             if self.encode_latents_in_fp16:
                 # Disable autocast context as models are in fp16
                 with torch.cuda.amp.autocast(enabled=False):
