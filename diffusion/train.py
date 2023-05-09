@@ -6,6 +6,7 @@
 import operator
 from collections.abc import Iterable
 from typing import Any, Dict, List, Optional, Union
+import torch
 
 import hydra
 from composer import Algorithm, Callback, ComposerModel, DataSpec, Evaluator, Trainer
@@ -26,6 +27,7 @@ def train(config: DictConfig) -> None:
         Optional[float]: Metric score for hyperparameter optimization
     """
     reproducibility.seed_all(config['seed'])
+    torch.set_float32_matmul_precision("high")
 
     model: ComposerModel = hydra.utils.instantiate(config.model)
 
