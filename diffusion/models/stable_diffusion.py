@@ -158,7 +158,6 @@ class StableDiffusion(ComposerModel):
             latents, conditioning = batch[self.image_latents_key], batch[self.text_latents_key]
         else:
             inputs, conditioning = batch[self.image_key], batch[self.text_key]
-            # Do we need this?
             conditioning = conditioning.view(-1, conditioning.shape[-1])
             attention_mask = None
             if 'attention_mask' in batch:
