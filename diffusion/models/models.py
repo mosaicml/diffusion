@@ -123,12 +123,32 @@ def discrete_pixel_diffusion(model_name: str = 'stabilityai/stable-diffusion-2-b
     # Get the SD2 text encoder and tokenizer:
     text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder')
     tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer')
-    # Get the SD2 schedulers
-    noise_scheduler = DDPMScheduler.from_pretrained(model_name, subfolder='scheduler')
-    inference_scheduler = DDIMScheduler.from_pretrained(model_name, subfolder='scheduler')
-    # Set the scheduler prediction type
-    noise_scheduler.prediction_type = prediction_type
-    inference_scheduler.prediction_type = prediction_type
+    # Hard code the sheduler config
+    noise_scheduler = DDPMScheduler(num_train_timesteps=1000,
+                                    beta_start=0.00085,
+                                    beta_end=0.012,
+                                    beta_schedule='scaled_linear',
+                                    trained_betas=None,
+                                    variance_type='fixed_small',
+                                    clip_sample=False,
+                                    prediction_type=prediction_type,
+                                    thresholding=False,
+                                    dynamic_thresholding_ratio=0.995,
+                                    clip_sample_range=1.0,
+                                    sample_max_value=1.0)
+    inference_scheduler = DDIMScheduler(num_train_timesteps=1000,
+                                        beta_start=0.00085,
+                                        beta_end=0.012,
+                                        beta_schedule='scaled_linear',
+                                        trained_betas=None,
+                                        clip_sample=False,
+                                        set_alpha_to_one=False,
+                                        steps_offset=1,
+                                        prediction_type=prediction_type,
+                                        thresholding=False,
+                                        dynamic_thresholding_ratio=0.995,
+                                        clip_sample_range=1.0,
+                                        sample_max_value=1.0)
 
     # Create the pixel space diffusion model
     model = PixelSpaceDiffusion(unet,
