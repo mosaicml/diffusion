@@ -28,7 +28,7 @@ def train(config: DictConfig) -> None:
     """
     reproducibility.seed_all(config['seed'])
     torch.autograd.set_detect_anomaly(True)
-    torch._dynamo.config.verbose=True
+    # torch._dynamo.config.verbose=True
 
     model: ComposerModel = hydra.utils.instantiate(config.model)
 
