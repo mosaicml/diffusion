@@ -98,7 +98,7 @@ class PixelSpaceDiffusion(ComposerModel):
         if isinstance(metrics, Metric):
             metrics_dict = {metrics.__class__.__name__: metrics}
         elif isinstance(metrics, list):
-            metrics_dict = {metrics.__class__.__name__: metric for metric in metrics}
+            metrics_dict = {metric.__class__.__name__: metric for metric in metrics}
         else:
             metrics_dict = {}
             for name, metric in metrics.items():
