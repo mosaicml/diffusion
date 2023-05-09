@@ -200,10 +200,12 @@ class StableDiffusion(ComposerModel):
         unet_out, noise, timesteps = self.forward(batch)
         # Sample images from the prompts in the batch
         prompts = batch[self.text_key]
+        attention_mask = batch['attention_mask'] if 'attention_mask' in batch else None
         height, width = batch[self.image_key].shape[-2], batch[self.image_key].shape[-1]
         generated_images = {}
         for guidance_scale in self.val_guidance_scales:
             gen_images = self.generate(tokenized_prompts=prompts,
+                                       prompt_attention_mask=attention_mask,
                                        height=height,
                                        width=width,
                                        guidance_scale=guidance_scale,
@@ -270,6 +272,8 @@ class StableDiffusion(ComposerModel):
         tokenized_negative_prompts: Optional[torch.LongTensor] = None,
         prompt_embeds: Optional[torch.FloatTensor] = None,
         negative_prompt_embeds: Optional[torch.FloatTensor] = None,
+        prompt_attention_mask: Optional[torch.LongTensor] = None,
+        negative_attention_mask: Optional[torch.LongTensor] = None,
         height: Optional[int] = None,
         width: Optional[int] = None,
         num_inference_steps: Optional[int] = 50,
@@ -299,6 +303,10 @@ class StableDiffusion(ComposerModel):
             negative_prompt_embeds (torch.FloatTensor): Optionally pass pre-embedded negative
                 prompts instead of string negative prompts. If both negative_prompt and
                 negative_prompt_embeds are passed, prompt_embeds will be used.  Default: `None`.
+            prompt_attention_mask (torch.LongTensor): Attention mask to apply if using
+                ``tokenized_prompts``. Default: ``None``.
+            negative_attention_mask (torch.LongTensor): Attention mask to apply if using
+                ``tokenized_negative_prompt``. Default: ``None``.
             height (int, optional): The height in pixels of the generated image.
                 Default: `self.unet.config.sample_size * 8)`.
             width (int, optional): The width in pixels of the generated image.
@@ -320,9 +328,9 @@ class StableDiffusion(ComposerModel):
                 Default: `None`.
         """
         _check_prompt_given(prompt, tokenized_prompts, prompt_embeds)
-        _check_prompt_lenths(prompt, negative_prompt)
-        _check_prompt_lenths(tokenized_prompts, tokenized_negative_prompts)
-        _check_prompt_lenths(prompt_embeds, negative_prompt_embeds)
+        _check_prompt_lengths(prompt, negative_prompt)
+        _check_prompt_lengths(tokenized_prompts, tokenized_negative_prompts)
+        _check_prompt_lengths(prompt_embeds, negative_prompt_embeds)
 
         # Create rng for the generation
         device = self.vae.device
@@ -338,14 +346,16 @@ class StableDiffusion(ComposerModel):
 
         do_classifier_free_guidance = guidance_scale > 1.0  # type: ignore
 
-        text_embeddings = self._prepare_text_embeddings(prompt, tokenized_prompts, prompt_embeds, num_images_per_prompt)
+        text_embeddings = self._prepare_text_embeddings(prompt, tokenized_prompts, prompt_embeds, prompt_attention_mask,
+                                                        num_images_per_prompt)
         batch_size = len(text_embeddings)  # len prompts * num_images_per_prompt
         # classifier free guidance + negative prompts
         # negative prompt is given in place of the unconditional input in classifier free guidance
         if do_classifier_free_guidance:
             negative_prompt = negative_prompt or ([''] * (batch_size // num_images_per_prompt))  # type: ignore
             unconditional_embeddings = self._prepare_text_embeddings(negative_prompt, tokenized_negative_prompts,
-                                                                     negative_prompt_embeds, num_images_per_prompt)
+                                                                     negative_prompt_embeds, negative_attention_mask,
+                                                                     num_images_per_prompt)
             # concat uncond + prompt
             text_embeddings = torch.cat([unconditional_embeddings, text_embeddings])
 
@@ -386,19 +396,20 @@ class StableDiffusion(ComposerModel):
         image = (image / 2 + 0.5).clamp(0, 1)
         return image.detach()  # (batch*num_images_per_prompt, channel, h, w)
 
-    def _prepare_text_embeddings(self, prompt, tokenized_prompts, prompt_embeds, num_images_per_prompt):
+    def _prepare_text_embeddings(self, prompt, tokenized_prompts, prompt_embeds, attention_mask, num_images_per_prompt):
         """Tokenizes and embeds prompts if needed, then duplicates embeddings to support multiple generations per prompt."""
         device = self.text_encoder.device
         if prompt_embeds is None:
             if tokenized_prompts is None:
-                tokenized_prompts = self.tokenizer(prompt,
-                                                   padding='max_length',
-                                                   max_length=self.tokenizer.model_max_length,
-                                                   truncation=True,
-                                                   return_tensors='pt')
-                input_ids = tokenized_prompts['input_ids'].to(device)
-                attention_mask = tokenized_prompts['attention_mask'].to(device)
-            text_embeddings = self.text_encoder(input_ids=input_ids, attention_mask=attention_mask)[0]  # type: ignore
+                tokenized = self.tokenizer(prompt,
+                                           padding='max_length',
+                                           max_length=self.tokenizer.model_max_length,
+                                           truncation=True,
+                                           return_tensors='pt')
+                tokenized_prompts = tokenized['input_ids'].to(device)
+                attention_mask = tokenized['attention_mask'].to(device)
+            text_embeddings = self.text_encoder(input_ids=tokenized_prompts,
+                                                attention_mask=attention_mask)[0]  # type: ignore
         else:
             text_embeddings = prompt_embeds
 
@@ -409,7 +420,7 @@ class StableDiffusion(ComposerModel):
         return text_embeddings
 
 
-def _check_prompt_lenths(prompt, negative_prompt):
+def _check_prompt_lengths(prompt, negative_prompt):
     if prompt is None and negative_prompt is None:
         return
     batch_size = 1 if isinstance(prompt, str) else len(prompt)
