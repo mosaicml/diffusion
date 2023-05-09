@@ -27,7 +27,6 @@ def train(config: DictConfig) -> None:
         Optional[float]: Metric score for hyperparameter optimization
     """
     reproducibility.seed_all(config['seed'])
-    torch.set_float32_matmul_precision("high")
 
     model: ComposerModel = hydra.utils.instantiate(config.model)
 
