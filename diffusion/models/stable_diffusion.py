@@ -157,19 +157,22 @@ class StableDiffusion(ComposerModel):
         if self.precomputed_latents and self.image_latents_key in batch and self.text_latents_key in batch:
             latents, conditioning = batch[self.image_latents_key], batch[self.text_latents_key]
         else:
-            inputs, conditioning = batch[self.image_key], batch[self.text_key]
+            inputs, conditioning, attention_mask = batch[self.image_key], batch[self.text_key], batch['attention_mask']
+            # Do we need these?
             conditioning = conditioning.view(-1, conditioning.shape[-1])
+            attention_mask = attention_mask.view(-1, attention_mask.shape[-1])
             if self.encode_latents_in_fp16:
                 # Disable autocast context as models are in fp16
                 with torch.cuda.amp.autocast(enabled=False):
                     # Encode the images to the latent space.
                     # Encode prompt into conditioning vector
                     latents = self.vae.encode(inputs.half())['latent_dist'].sample().data
-                    conditioning = self.text_encoder(conditioning)[0]  # Should be (batch_size, 77, 768)
+                    conditioning = self.text_encoder(
+                        input_ids=conditioning, attention_mask=attention_mask)[0]  # Should be (batch_size, 77, 768)
 
             else:
                 latents = self.vae.encode(inputs)['latent_dist'].sample().data
-                conditioning = self.text_encoder(conditioning)[0]
+                conditioning = self.text_encoder(input_ids=conditioning, attention_mask=attention_mask)[0]
             # Magical scaling number (See https://github.com/huggingface/diffusers/issues/437#issuecomment-1241827515)
             latents *= 0.18215
 
@@ -390,8 +393,10 @@ class StableDiffusion(ComposerModel):
                                                    padding='max_length',
                                                    max_length=self.tokenizer.model_max_length,
                                                    truncation=True,
-                                                   return_tensors='pt').input_ids
-            text_embeddings = self.text_encoder(tokenized_prompts.to(device))[0]  # type: ignore
+                                                   return_tensors='pt')
+                input_ids = tokenized_prompts['input_ids'].to(device)
+                attention_mask = tokenized_prompts['attention_mask'].to(device)
+            text_embeddings = self.text_encoder(input_ids=input_ids, attention_mask=attention_mask)[0]  # type: ignore
         else:
             text_embeddings = prompt_embeds
 
