@@ -10,11 +10,11 @@ import torch
 class ContinuousTimeScheduler:
 
     def __init__(self, t_max=3.14159 / 2, num_inference_timesteps=50, prediction_type='epsilon'):
-        self.t_max = t_max
+        self.t_max = t_max * (1 - 0.01)
         self.num_inference_timesteps = num_inference_timesteps
         self.prediction_type = prediction_type
 
-        self.timesteps = np.linspace((1 - 0.1) * self.t_max, 0, num=num_inference_timesteps, endpoint=False)
+        self.timesteps = np.linspace(self.t_max, 0, num=num_inference_timesteps, endpoint=False)
         self.init_noise_sigma = 1.0
 
     def __len__(self):
@@ -22,7 +22,7 @@ class ContinuousTimeScheduler:
 
     def set_timesteps(self, num_inference_timesteps):
         self.num_inference_timesteps = num_inference_timesteps
-        self.timesteps = np.linspace((1 - 0.1) * self.t_max, 0, num=num_inference_timesteps, endpoint=False)
+        self.timesteps = np.linspace(self.t_max, 0, num=num_inference_timesteps, endpoint=False)
 
     def add_noise(self, inputs, noise, timesteps):
         # expand timesteps to the right number of dimensions
