@@ -15,6 +15,7 @@ from transformers import CLIPTextModel, CLIPTokenizer, PretrainedConfig
 
 from diffusion.models.pixel_diffusion import PixelSpaceDiffusion
 from diffusion.models.stable_diffusion import StableDiffusion
+from diffusion.schedulers.schedulers import ContinuousTimeScheduler
 
 try:
     import xformers  # type: ignore
@@ -157,6 +158,40 @@ def discrete_pixel_diffusion(model_name: str = 'stabilityai/stable-diffusion-2-b
                                 noise_scheduler,
                                 inference_scheduler=inference_scheduler,
                                 prediction_type=prediction_type,
+                                train_metrics=[MeanSquaredError()],
+                                val_metrics=[MeanSquaredError()])
+
+    if torch.cuda.is_available():
+        model = DeviceGPU().module_to_device(model)
+        if is_xformers_installed:
+            model.model.enable_xformers_memory_efficient_attention()
+    return model
+
+
+def continuous_pixel_diffusion(model_name: str = 'stabilityai/stable-diffusion-2-base', prediction_type='epsilon'):
+    # Get the stable diffusion 2 unet config
+    config = PretrainedConfig.get_config_dict(model_name, subfolder='unet')
+    # Set the number of channels to 3
+    config[0]['in_channels'] = 3
+    # Set the number of out channels to 3
+    config[0]['out_channels'] = 3
+    # Create the pixel space unet based on the SD2 unet.
+    unet = UNet2DConditionModel(**config[0])
+    # Get the SD2 text encoder and tokenizer:
+    text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder')
+    tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer')
+    # Hard code the sheduler config
+    noise_scheduler = ContinuousTimeScheduler(prediction_type=prediction_type)
+    inference_scheduler = ContinuousTimeScheduler(prediction_type=prediction_type)
+
+    # Create the pixel space diffusion model
+    model = PixelSpaceDiffusion(unet,
+                                text_encoder,
+                                tokenizer,
+                                noise_scheduler,
+                                inference_scheduler=inference_scheduler,
+                                prediction_type=prediction_type,
+                                continuous_time=True,
                                 train_metrics=[MeanSquaredError()],
                                 val_metrics=[MeanSquaredError()])
 

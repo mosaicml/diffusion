@@ -36,6 +36,7 @@ class PixelSpaceDiffusion(ComposerModel):
         self.tokenizer = tokenizer
         self.scheduler = scheduler
         self.inference_scheduler = inference_scheduler
+        self.continuous_time = continuous_time
         self.input_key = input_key
         self.conditioning_key = conditioning_key
         self.prediction_type = prediction_type
@@ -51,8 +52,11 @@ class PixelSpaceDiffusion(ComposerModel):
         inputs, conditioning = batch[self.input_key], batch[self.conditioning_key]
         # Encode the conditioning
         conditioning = self.text_encoder(conditioning)[0]
-        # Sample the diffusion timesteps
-        timesteps = torch.randint(0, len(self.scheduler), (inputs.shape[0],), device=inputs.device)
+        # Sample the diffusion timesteps, either discrete or continuous
+        if self.continuous_time:
+            timesteps = self.scheduler.t_max * torch.rand(inputs.shape[0], device=inputs.device)
+        else:
+            timesteps = torch.randint(0, len(self.scheduler), (inputs.shape[0],), device=inputs.device)
         # Add noise to the inputs (forward diffusion)
         noise = torch.randn_like(inputs)
         noised_inputs = self.scheduler.add_noise(inputs, noise, timesteps)
@@ -173,7 +177,8 @@ class PixelSpaceDiffusion(ComposerModel):
                 model_output = pred_uncond + guidance_scale * (pred_text - pred_uncond)
 
             # compute the previous noisy sample x_t -> x_t-1
-            images = self.inference_scheduler.step(model_output, t, images, generator=rng_generator).prev_sample
+            print('outisde', t, images.shape)
+            images = self.inference_scheduler.step(model_output, t, images, generator=rng_generator)['prev_sample']
 
         # Rescale to (0, 1)
         images = (images / 2 + 0.5).clamp(0, 1)
