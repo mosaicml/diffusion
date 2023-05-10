@@ -14,7 +14,7 @@ class ContinuousTimeScheduler:
         self.num_inference_timesteps = num_inference_timesteps
         self.prediction_type = prediction_type
 
-        self.timesteps = np.linspace(self.t_max, 0, num=num_inference_timesteps, endpoint=False)
+        self.timesteps = np.linspace((1 - 0.1) * self.t_max, 0, num=num_inference_timesteps, endpoint=False)
         self.init_noise_sigma = 1.0
 
     def __len__(self):
@@ -22,7 +22,7 @@ class ContinuousTimeScheduler:
 
     def set_timesteps(self, num_inference_timesteps):
         self.num_inference_timesteps = num_inference_timesteps
-        self.timesteps = np.linspace(self.t_max, 0, num=num_inference_timesteps, endpoint=False)
+        self.timesteps = np.linspace((1 - 0.1) * self.t_max, 0, num=num_inference_timesteps, endpoint=False)
 
     def add_noise(self, inputs, noise, timesteps):
         # expand timesteps to the right number of dimensions
@@ -49,20 +49,25 @@ class ContinuousTimeScheduler:
     def step(self, model_output, t, model_input, generator=None):
         if t == 0:
             return {'prev_sample': model_input}
-        # compute sin, cos of the timesteps
+        # compute sin, cos, tan of the timesteps
         sin_t = np.sin(t)
         cos_t = np.cos(t)
-        # Compute the score function for the different prediction types
-        if self.prediction_type == 'sample':
-            s = 1 / np.pow(sin_t, 2) * (model_input + cos_t * model_output)
-        elif self.prediction_type == 'epsilon':
-            s = -1 / sin_t * model_output
-        elif self.prediction_type == 'v_prediction':
-            s = -model_input - cos_t / sin_t * model_output
+        tan_t = np.tan(t)
+        beta_t = 2 * tan_t
         # Compute the previous sample x_t -> x_t-1
         dt = self.t_max / self.timesteps.shape[0]
-
-        x_prev = model_input + 1 / 2 * t * model_input * dt + t * s * dt + np.sqrt(
-            t * dt) * torch.randn_like(model_input)
-        print('inside', t, x_prev.shape, model_input.shape)
+        # Get the predicted clean input from each of the prediction types
+        if self.prediction_type == 'sample':
+            x_0 = model_output
+        elif self.prediction_type == 'epsilon':
+            x_0 = (model_input - sin_t * model_output) / cos_t
+        elif self.prediction_type == 'v_prediction':
+            x_0 = cos_t * model_input - sin_t * model_output
+        # Compute the score function
+        score = -(model_input - cos_t * x_0) / np.square(sin_t)
+        # Compute the previous sample
+        x_prev = model_input + 0.5 * beta_t * model_input * dt + beta_t * score * dt
+        # Add the noise term
+        x_prev += np.sqrt(beta_t * dt) * torch.randn_like(model_input)
+        print(t, x_prev.mean().item(), x_prev.std().item(), x_prev.max().item(), x_prev.min().item())
         return {'prev_sample': x_prev}

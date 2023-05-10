@@ -29,6 +29,7 @@ class PixelSpaceDiffusion(ComposerModel):
                  train_metrics: Optional[List] = None,
                  val_metrics: Optional[List] = None,
                  val_guidance_scales: List = [],
+                 val_seed: int = 1138,
                  negative_conditioning: Optional[torch.FloatTensor] = None):
         super().__init__()
         self.model = model
@@ -43,20 +44,24 @@ class PixelSpaceDiffusion(ComposerModel):
         self.train_metrics = train_metrics
         self.val_metrics = val_metrics
         self.val_guidance_scales = val_guidance_scales
+        self.val_seed = val_seed
         self.negative_conditioning = negative_conditioning
 
         # freeze text_encoder training
         self.text_encoder.requires_grad_(False)
 
-    def forward(self, batch):
+    def forward(self, batch, generator=None):
         inputs, conditioning = batch[self.input_key], batch[self.conditioning_key]
         # Encode the conditioning
         conditioning = self.text_encoder(conditioning)[0]
         # Sample the diffusion timesteps, either discrete or continuous
         if self.continuous_time:
-            timesteps = self.scheduler.t_max * torch.rand(inputs.shape[0], device=inputs.device)
+            timesteps = self.scheduler.t_max * torch.rand(inputs.shape[0], device=inputs.device, generator=generator)
         else:
-            timesteps = torch.randint(0, len(self.scheduler), (inputs.shape[0],), device=inputs.device)
+            timesteps = torch.randint(0,
+                                      len(self.scheduler), (inputs.shape[0],),
+                                      device=inputs.device,
+                                      generator=generator)
         # Add noise to the inputs (forward diffusion)
         noise = torch.randn_like(inputs)
         noised_inputs = self.scheduler.add_noise(inputs, noise, timesteps)
@@ -76,8 +81,11 @@ class PixelSpaceDiffusion(ComposerModel):
     def eval_forward(self, batch, outputs=None):
         if outputs is not None:
             return outputs
+        # Create rng and fix the seed for eval
+        generator = torch.Generator(device=self.model.device)
+        generator = generator.manual_seed(self.val_seed)
         # Get model outputs
-        model_out, targets, timesteps = self.forward(batch)
+        model_out, targets, timesteps = self.forward(batch, generator=generator)
         # Sample images from the conditioning in the batch
         images = batch[self.input_key]
         conditioning = batch[self.conditioning_key]
@@ -177,7 +185,6 @@ class PixelSpaceDiffusion(ComposerModel):
                 model_output = pred_uncond + guidance_scale * (pred_text - pred_uncond)
 
             # compute the previous noisy sample x_t -> x_t-1
-            print('outisde', t, images.shape)
             images = self.inference_scheduler.step(model_output, t, images, generator=rng_generator)['prev_sample']
 
         # Rescale to (0, 1)
