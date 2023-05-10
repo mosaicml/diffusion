@@ -112,6 +112,8 @@ def train(config: DictConfig) -> None:
 
     scheduler = hydra.utils.instantiate(config.scheduler)
 
+    model.unet = torch.compile(model.unet, mode='reduce-overhead', fullgraph=True)
+
     trainer: Trainer = hydra.utils.instantiate(
         config.trainer,
         train_dataloader=train_dataloader,
