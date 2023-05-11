@@ -11,7 +11,7 @@
 <br />
 
 
-This repo contains code used to train your own Stable Diffusion model on your own data.
+This repo contains code used to train your own Stable Diffusion model on your own data
 
 <p align="center">
   <picture>
