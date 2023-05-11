@@ -168,7 +168,11 @@ def discrete_pixel_diffusion(model_name: str = 'stabilityai/stable-diffusion-2-b
     return model
 
 
-def continuous_pixel_diffusion(model_name: str = 'stabilityai/stable-diffusion-2-base', prediction_type='epsilon'):
+def continuous_pixel_diffusion(model_name: str = 'stabilityai/stable-diffusion-2-base',
+                               prediction_type='epsilon',
+                               use_ode=False,
+                               train_t_max=1.570795,
+                               inference_t_max=1.56):
     # Get the stable diffusion 2 unet config
     config = PretrainedConfig.get_config_dict(model_name, subfolder='unet')
     # Set the number of channels to 3
@@ -181,8 +185,10 @@ def continuous_pixel_diffusion(model_name: str = 'stabilityai/stable-diffusion-2
     text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder')
     tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer')
     # Hard code the sheduler config
-    noise_scheduler = ContinuousTimeScheduler(prediction_type=prediction_type)
-    inference_scheduler = ContinuousTimeScheduler(prediction_type=prediction_type)
+    noise_scheduler = ContinuousTimeScheduler(t_max=train_t_max, prediction_type=prediction_type)
+    inference_scheduler = ContinuousTimeScheduler(t_max=inference_t_max,
+                                                  prediction_type=prediction_type,
+                                                  use_ode=use_ode)
 
     # Create the pixel space diffusion model
     model = PixelSpaceDiffusion(unet,

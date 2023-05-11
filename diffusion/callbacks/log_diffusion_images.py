@@ -34,12 +34,14 @@ class LogDiffusionImages(Callback):
     def __init__(self,
                  prompts: List[str],
                  size: Optional[int] = 256,
+                 num_inference_steps=50,
                  guidance_scale: Optional[float] = 0.0,
                  text_key: Optional[str] = 'captions',
                  tokenized_prompts: Optional[torch.LongTensor] = None,
                  seed: Optional[int] = 1138):
         self.prompts = prompts
         self.size = size
+        self.num_inference_steps = num_inference_steps
         self.guidance_scale = guidance_scale
         self.text_key = text_key
         self.seed = seed
@@ -72,6 +74,7 @@ class LogDiffusionImages(Callback):
                     width=self.size,
                     guidance_scale=self.guidance_scale,
                     progress_bar=False,
+                    num_inference_steps=self.num_inference_steps,
                     seed=self.seed)
 
             # Log images to wandb

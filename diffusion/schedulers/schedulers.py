@@ -7,11 +7,11 @@ import torch
 
 class ContinuousTimeScheduler:
 
-    def __init__(self, t_max=3.14159 / 2, num_inference_timesteps=50, prediction_type='epsilon', stochastic=True):
-        self.t_max = t_max * (1 - 0.1)
+    def __init__(self, t_max=1.57, num_inference_timesteps=50, prediction_type='epsilon', use_ode=False):
+        self.t_max = t_max
         self.num_inference_timesteps = num_inference_timesteps
         self.prediction_type = prediction_type
-        self.stochastic = stochastic
+        self.use_ode = use_ode
         self.timesteps = np.linspace(self.t_max, 0, num=num_inference_timesteps, endpoint=False)
         self.init_noise_sigma = 1.0  # Needed to work with our generate function that uses huggingface schedulers
 
@@ -68,15 +68,18 @@ class ContinuousTimeScheduler:
             x_0 = (model_input - sin_t * model_output) / cos_t
         elif self.prediction_type == 'v_prediction':
             x_0 = cos_t * model_input - sin_t * model_output
+        else:
+            raise ValueError(
+                f'prediction type must be one of sample, epsilon, or v_prediction. Got {self.prediction_type}')
         # Compute the score function
         score = -(model_input - cos_t * x_0) / np.square(sin_t)
         # Compute the previous sample x_t -> x_t-1
-        if self.stochastic:
-            # Use Euler-Maruyama to integrate the reverse SDE
-            x_prev = model_input + 0.5 * beta_t * model_input * dt + beta_t * score * dt
-            # Add the noise term
-            x_prev += np.sqrt(beta_t * dt) * torch.randn_like(model_input)
-        else:
+        if self.use_ode:
             # Use Euler's method to integrate the probability flow ODE
             x_prev = model_input + 0.5 * (model_input + score) * beta_t * dt
+        else:
+            # Use Euler-Maruyama to integrate the reverse SDE
+            x_prev = model_input + (0.5 * model_input + score) * beta_t * dt
+            # Add the noise term
+            x_prev += np.sqrt(beta_t * dt) * torch.randn_like(model_input)
         return {'prev_sample': x_prev}

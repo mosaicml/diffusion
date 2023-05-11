@@ -28,24 +28,22 @@ class PixelSpaceDiffusion(ComposerModel):
                  prediction_type='epsilon',
                  train_metrics: Optional[List] = None,
                  val_metrics: Optional[List] = None,
-                 val_guidance_scales: List = [],
-                 val_seed: int = 1138,
-                 negative_conditioning: Optional[torch.FloatTensor] = None):
+                 val_seed: int = 1138):
         super().__init__()
         self.model = model
         self.text_encoder = text_encoder
         self.tokenizer = tokenizer
         self.scheduler = scheduler
-        self.inference_scheduler = inference_scheduler
+        self.inference_scheduler = inference_scheduler if inference_scheduler is not None else scheduler
         self.continuous_time = continuous_time
         self.input_key = input_key
         self.conditioning_key = conditioning_key
+        if prediction_type not in ['sample', 'epsilon', 'v_prediction']:
+            raise ValueError(f'prediction type must be one of sample, epsilon, or v_prediction. Got {prediction_type}')
         self.prediction_type = prediction_type
         self.train_metrics = train_metrics
         self.val_metrics = val_metrics
-        self.val_guidance_scales = val_guidance_scales
         self.val_seed = val_seed
-        self.negative_conditioning = negative_conditioning
 
         # freeze text_encoder training
         self.text_encoder.requires_grad_(False)
@@ -72,6 +70,9 @@ class PixelSpaceDiffusion(ComposerModel):
             targets = inputs
         elif self.prediction_type == 'v_prediction':
             targets = self.scheduler.get_velocity(inputs, noise, timesteps)
+        else:
+            raise ValueError(
+                f'prediction type must be one of sample, epsilon, or v_prediction. Got {self.prediction_type}')
         # Forward through the model
         return self.model(noised_inputs, timesteps, conditioning)['sample'], targets, timesteps
 
@@ -86,20 +87,7 @@ class PixelSpaceDiffusion(ComposerModel):
         generator = generator.manual_seed(self.val_seed)
         # Get model outputs
         model_out, targets, timesteps = self.forward(batch, generator=generator)
-        # Sample images from the conditioning in the batch
-        images = batch[self.input_key]
-        conditioning = batch[self.conditioning_key]
-        height, width = images.shape[-2], images.shape[-1]
-        generated_images = {}
-        for guidance_scale in self.val_guidance_scales:
-            gen_images = self.generate(tokenized_prompts=conditioning,
-                                       height=height,
-                                       width=width,
-                                       guidance_scale=guidance_scale,
-                                       seed=self.val_seed,
-                                       progress_bar=False)
-            generated_images[guidance_scale] = gen_images
-        return model_out, targets, timesteps, generated_images
+        return model_out, targets, timesteps
 
     def get_metrics(self, is_train: bool = False):
         if is_train:
@@ -111,12 +99,13 @@ class PixelSpaceDiffusion(ComposerModel):
             metrics_dict = {metrics.__class__.__name__: metrics}
         elif isinstance(metrics, list):
             metrics_dict = {metric.__class__.__name__: metric for metric in metrics}
-        else:
+        elif isinstance(metrics, dict):
             metrics_dict = {}
             for name, metric in metrics.items():
                 assert isinstance(metric, Metric)
                 metrics_dict[name] = metric
-
+        else:
+            raise NotImplementedError(f'Metrics type {metrics.__class__.__name__} not supported.')
         return metrics_dict
 
     def update_metric(self, batch, outputs, metric):
