@@ -12,8 +12,23 @@ from tqdm.auto import tqdm
 
 
 class PixelSpaceDiffusion(ComposerModel):
-    """
-    TODO: Docstring
+    """Pixel space diffusion model.
+
+    Args:
+        model (torch.nn.Module): Model to use as the core diffusion model.
+        text_encoder (torch.nn.Module): HuggingFace CLIP or LLM text enoder.
+        tokenizer (transformers.PreTrainedTokenizer): Tokenizer used for
+            text_encoder. For a `CLIPTextModel` this will be the
+            `CLIPTokenizer` from HuggingFace transformers.
+        scheduler (diffusers.SchedulerMixin or diffusion.Scheduler): Scheduler to use for diffusion during training.
+        inference_scheduler (diffusers.SchedulerMixin or diffusion.Scheduler): Scheduler to use for diffusion during inference. If `None`, defaults to `scheduler`.
+        continuous_time (bool): Whether to use continuous time diffusion. Default: `False`.
+        input_key (str):  The name of the inputs in the dataloader batch. Default: `image`.
+        conditioning_key (str): The name of the conditioning inputs in the dataloader batch. Default: `captions`.
+        prediction_type (str): The type of prediction to use. Must be one of 'sample', 'epsilon', or 'v_prediction'. Default: `epsilon`.
+        train_metrics (List[torchmetrics.Metric]): List of metrics to use during training. Default: `[torchmetrics.MeanSquaredError]`.
+        val_metrics (List[torchmetrics.Metric]): List of metrics to use during validation. Default: `[torchmetrics.MeanSquaredError]`.
+        val_seed (int): Random seed to use for validation. Default: `1138`.
     """
 
     def __init__(self,
@@ -22,10 +37,10 @@ class PixelSpaceDiffusion(ComposerModel):
                  tokenizer,
                  scheduler,
                  inference_scheduler=None,
-                 continuous_time=False,
-                 input_key='image',
-                 conditioning_key='captions',
-                 prediction_type='epsilon',
+                 continuous_time: bool = False,
+                 input_key: str = 'image',
+                 conditioning_key: str = 'captions',
+                 prediction_type: str = 'epsilon',
                  train_metrics: Optional[List] = None,
                  val_metrics: Optional[List] = None,
                  val_seed: int = 1138):
@@ -131,6 +146,47 @@ class PixelSpaceDiffusion(ComposerModel):
         seed: Optional[int] = None,
         progress_bar: Optional[bool] = True,
     ):
+        """Generates image from noise.
+
+        Performs the backward diffusion process, each inference step takes
+        one forward pass through the unet.
+
+        Args:
+            prompt (str or List[str]): The prompt or prompts to guide the image generation.
+            negative_prompt (str or List[str]): The prompt or prompts to guide the
+                image generation away from. Ignored when not using guidance
+                (i.e., ignored if guidance_scale is less than 1).
+                Must be the same length as list of prompts. Default: `None`.
+            tokenized_prompts (torch.LongTensor): Optionally pass pre-tokenized prompts instead
+                of string prompts. Default: `None`.
+            tokenized_negative_prompts (torch.LongTensor): Optionally pass pre-tokenized negative
+                prompts instead of string prompts. Default: `None`.
+            prompt_embeds (torch.FloatTensor): Optionally pass pre-tokenized prompts instead
+                of string prompts. If both prompt and prompt_embeds
+                are passed, prompt_embeds will be used. Default: `None`.
+            negative_prompt_embeds (torch.FloatTensor): Optionally pass pre-embedded negative
+                prompts instead of string negative prompts. If both negative_prompt and
+                negative_prompt_embeds are passed, prompt_embeds will be used.  Default: `None`.
+            height (int, optional): The height in pixels of the generated image.
+                Default: `64`.
+            width (int, optional): The width in pixels of the generated image.
+                Default: `64`.
+            num_inference_steps (int): The number of denoising steps.
+                More denoising steps usually lead to a higher quality image at the expense
+                of slower inference. Default: `50`.
+            guidance_scale (float): Guidance scale as defined in
+                Classifier-Free Diffusion Guidance. guidance_scale is defined as w of equation
+                2. of Imagen Paper. Guidance scale is enabled by setting guidance_scale > 1.
+                Higher guidance scale encourages to generate images that are closely linked
+                to the text prompt, usually at the expense of lower image quality.
+                Default: `3.0`.
+            num_images_per_prompt (int): The number of images to generate per prompt.
+                 Default: `1`.
+            progress_bar (bool): Wether to use the tqdm progress bar during generation.
+                Default: `True`.
+            seed (int): Random seed to use for generation. Set a seed for reproducible generation.
+                Default: `None`.
+        """
         # Create rng for the generation
         device = self.model.device
         rng_generator = torch.Generator(device=device)

@@ -1,13 +1,29 @@
 # Copyright 2022 MosaicML Diffusion authors
 # SPDX-License-Identifier: Apache-2.0
 
+"""Custom schedulers for diffusion models."""
+
 import numpy as np
 import torch
 
 
 class ContinuousTimeScheduler:
+    """Scheduler for continuous time (variance preserving) diffusion models.
 
-    def __init__(self, t_max=1.57, num_inference_timesteps=50, prediction_type='epsilon', use_ode=False):
+    Currently, the noise schedule is hardcoded to angle = time, hence beta = 2 * tan(t). This results in a maximum time of t_max = pi/2. For stability, t_max should be less than pi/2 during generation, as otherwise a divide by zero can occur.
+
+    Args:
+        t_max (float): The maximum timestep in the diffusion process. Defaults to 1.57.
+        num_inference_timesteps (int): The number of timesteps to use during inference. Defaults to 50.
+        prediction_type (str): The type of prediction to use during inference. Must be one of 'sample', 'epsilon', or 'v_prediction'. Defaults to 'epsilon'.
+        use_ode (bool): Whether to use Euler's method to integrate the probability flow ODE. Defaults to False.
+    """
+
+    def __init__(self,
+                 t_max: float = 1.57,
+                 num_inference_timesteps: int = 50,
+                 prediction_type: str = 'epsilon',
+                 use_ode: bool = False):
         self.t_max = t_max
         self.num_inference_timesteps = num_inference_timesteps
         self.prediction_type = prediction_type

@@ -113,6 +113,14 @@ def stable_diffusion_2(
 
 
 def discrete_pixel_diffusion(model_name: str = 'stabilityai/stable-diffusion-2-base', prediction_type='epsilon'):
+    """Discrete pixel diffusion training setup.
+
+    Uses the same clip and unet config as stable diffusion, but operates in pixel space rather than latent space.
+
+    Args:
+        model_name (str, optional): Name of the model config to load. Defaults to 'stabilityai/stable-diffusion-2-base'.
+        prediction_type (str, optional): Type of prediction to use. One of 'sample', 'epsilon', 'v_prediction'. Defaults to 'epsilon'.
+    """
     # Get the stable diffusion 2 unet config
     config = PretrainedConfig.get_config_dict(model_name, subfolder='unet')
     # Set the number of channels to 3
@@ -173,6 +181,17 @@ def continuous_pixel_diffusion(model_name: str = 'stabilityai/stable-diffusion-2
                                use_ode=False,
                                train_t_max=1.570795,
                                inference_t_max=1.56):
+    """Continuous pixel diffusion training setup.
+
+    Uses the same clip and unet config as stable diffusion, but operates in pixel space rather than latent space. Uses the continuous time parameterization as in the VP process in https://arxiv.org/abs/2011.13456.
+
+    Args:
+        model_name (str, optional): Name of the model config to load. Defaults to 'stabilityai/stable-diffusion-2-base'.
+        prediction_type (str, optional): Type of prediction to use. One of 'sample', 'epsilon', 'v_prediction'. Defaults to 'epsilon'.
+        use_ode (bool, optional): Whether to do generation using the probability flow ODE. If not used, uses the reverse diffusion process. Defaults to False.
+        train_t_max (float, optional): Maximum timestep during training. Defaults to 1.570795 (pi/2).
+        inference_t_max (float, optional): Maximum timestep during inference. Defaults to 1.56 (pi/2 - 0.01 for stability).
+    """
     # Get the stable diffusion 2 unet config
     config = PretrainedConfig.get_config_dict(model_name, subfolder='unet')
     # Set the number of channels to 3
