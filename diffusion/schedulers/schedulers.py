@@ -10,12 +10,15 @@ import torch
 class ContinuousTimeScheduler:
     """Scheduler for continuous time (variance preserving) diffusion models.
 
-    Currently, the noise schedule is hardcoded to angle = time, hence beta = 2 * tan(t). This results in a maximum time of t_max = pi/2. For stability, t_max should be less than pi/2 during generation, as otherwise a divide by zero can occur.
+    Currently, the noise schedule is hardcoded to angle = time, hence beta = 2 * tan(t). This results in a maximum
+    time of t_max = pi/2. For stability, t_max should be less than pi/2 during generation, as otherwise a divide by
+    zero can occur.
 
     Args:
         t_max (float): The maximum timestep in the diffusion process. Defaults to 1.57.
         num_inference_timesteps (int): The number of timesteps to use during inference. Defaults to 50.
-        prediction_type (str): The type of prediction to use during inference. Must be one of 'sample', 'epsilon', or 'v_prediction'. Defaults to 'epsilon'.
+        prediction_type (str): The type of prediction to use during inference. Must be one of 'sample', 'epsilon', or
+            'v_prediction'. Defaults to 'epsilon'.
         use_ode (bool): Whether to use Euler's method to integrate the probability flow ODE. Defaults to False.
     """
 

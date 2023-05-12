@@ -119,7 +119,8 @@ def discrete_pixel_diffusion(model_name: str = 'stabilityai/stable-diffusion-2-b
 
     Args:
         model_name (str, optional): Name of the model config to load. Defaults to 'stabilityai/stable-diffusion-2-base'.
-        prediction_type (str, optional): Type of prediction to use. One of 'sample', 'epsilon', 'v_prediction'. Defaults to 'epsilon'.
+        prediction_type (str, optional): Type of prediction to use. One of 'sample', 'epsilon', 'v_prediction'.
+            Defaults to 'epsilon'.
     """
     # Get the stable diffusion 2 unet config
     config = PretrainedConfig.get_config_dict(model_name, subfolder='unet')
@@ -187,10 +188,13 @@ def continuous_pixel_diffusion(model_name: str = 'stabilityai/stable-diffusion-2
 
     Args:
         model_name (str, optional): Name of the model config to load. Defaults to 'stabilityai/stable-diffusion-2-base'.
-        prediction_type (str, optional): Type of prediction to use. One of 'sample', 'epsilon', 'v_prediction'. Defaults to 'epsilon'.
-        use_ode (bool, optional): Whether to do generation using the probability flow ODE. If not used, uses the reverse diffusion process. Defaults to False.
+        prediction_type (str, optional): Type of prediction to use. One of 'sample', 'epsilon', 'v_prediction'.
+            Defaults to 'epsilon'.
+        use_ode (bool, optional): Whether to do generation using the probability flow ODE. If not used, uses the
+            reverse diffusion process. Defaults to False.
         train_t_max (float, optional): Maximum timestep during training. Defaults to 1.570795 (pi/2).
-        inference_t_max (float, optional): Maximum timestep during inference. Defaults to 1.56 (pi/2 - 0.01 for stability).
+        inference_t_max (float, optional): Maximum timestep during inference.
+            Defaults to 1.56 (pi/2 - 0.01 for stability).
     """
     # Get the stable diffusion 2 unet config
     config = PretrainedConfig.get_config_dict(model_name, subfolder='unet')

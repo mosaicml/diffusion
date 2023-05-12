@@ -21,13 +21,17 @@ class PixelSpaceDiffusion(ComposerModel):
             text_encoder. For a `CLIPTextModel` this will be the
             `CLIPTokenizer` from HuggingFace transformers.
         scheduler (diffusers.SchedulerMixin or diffusion.Scheduler): Scheduler to use for diffusion during training.
-        inference_scheduler (diffusers.SchedulerMixin or diffusion.Scheduler): Scheduler to use for diffusion during inference. If `None`, defaults to `scheduler`.
+        inference_scheduler (diffusers.SchedulerMixin or diffusion.Scheduler): Scheduler to use for diffusion during
+            inference. If `None`, defaults to `scheduler`.
         continuous_time (bool): Whether to use continuous time diffusion. Default: `False`.
         input_key (str):  The name of the inputs in the dataloader batch. Default: `image`.
         conditioning_key (str): The name of the conditioning inputs in the dataloader batch. Default: `captions`.
-        prediction_type (str): The type of prediction to use. Must be one of 'sample', 'epsilon', or 'v_prediction'. Default: `epsilon`.
-        train_metrics (List[torchmetrics.Metric]): List of metrics to use during training. Default: `[torchmetrics.MeanSquaredError]`.
-        val_metrics (List[torchmetrics.Metric]): List of metrics to use during validation. Default: `[torchmetrics.MeanSquaredError]`.
+        prediction_type (str): The type of prediction to use. Must be one of 'sample', 'epsilon', or 'v_prediction'.
+            Default: `epsilon`.
+        train_metrics (List[torchmetrics.Metric]): List of metrics to use during training.
+            Default: `[torchmetrics.MeanSquaredError]`.
+        val_metrics (List[torchmetrics.Metric]): List of metrics to use during validation.
+            Default: `[torchmetrics.MeanSquaredError]`.
         val_seed (int): Random seed to use for validation. Default: `1138`.
     """
 
