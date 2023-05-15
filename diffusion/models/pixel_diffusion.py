@@ -1,7 +1,7 @@
 # Copyright 2022 MosaicML Diffusion authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Pixel space diffusion models."""
+"""Diffusion models in pixel space."""
 
 from typing import List, Optional
 
@@ -11,7 +11,7 @@ from torchmetrics import MeanSquaredError, Metric
 from tqdm.auto import tqdm
 
 
-class PixelSpaceDiffusion(ComposerModel):
+class PixelDiffusion(ComposerModel):
     """Pixel space diffusion model.
 
     Args:

@@ -13,7 +13,7 @@ from torchmetrics.image.fid import FrechetInceptionDistance
 from torchmetrics.multimodal.clip_score import CLIPScore
 from transformers import CLIPTextModel, CLIPTokenizer, PretrainedConfig
 
-from diffusion.models.pixel_diffusion import PixelSpaceDiffusion
+from diffusion.models.pixel_diffusion import PixelDiffusion
 from diffusion.models.stable_diffusion import StableDiffusion
 from diffusion.schedulers.schedulers import ContinuousTimeScheduler
 
@@ -161,14 +161,14 @@ def discrete_pixel_diffusion(model_name: str = 'stabilityai/stable-diffusion-2-b
                                         sample_max_value=1.0)
 
     # Create the pixel space diffusion model
-    model = PixelSpaceDiffusion(unet,
-                                text_encoder,
-                                tokenizer,
-                                noise_scheduler,
-                                inference_scheduler=inference_scheduler,
-                                prediction_type=prediction_type,
-                                train_metrics=[MeanSquaredError()],
-                                val_metrics=[MeanSquaredError()])
+    model = PixelDiffusion(unet,
+                           text_encoder,
+                           tokenizer,
+                           noise_scheduler,
+                           inference_scheduler=inference_scheduler,
+                           prediction_type=prediction_type,
+                           train_metrics=[MeanSquaredError()],
+                           val_metrics=[MeanSquaredError()])
 
     if torch.cuda.is_available():
         model = DeviceGPU().module_to_device(model)
@@ -214,15 +214,15 @@ def continuous_pixel_diffusion(model_name: str = 'stabilityai/stable-diffusion-2
                                                   use_ode=use_ode)
 
     # Create the pixel space diffusion model
-    model = PixelSpaceDiffusion(unet,
-                                text_encoder,
-                                tokenizer,
-                                noise_scheduler,
-                                inference_scheduler=inference_scheduler,
-                                prediction_type=prediction_type,
-                                continuous_time=True,
-                                train_metrics=[MeanSquaredError()],
-                                val_metrics=[MeanSquaredError()])
+    model = PixelDiffusion(unet,
+                           text_encoder,
+                           tokenizer,
+                           noise_scheduler,
+                           inference_scheduler=inference_scheduler,
+                           prediction_type=prediction_type,
+                           continuous_time=True,
+                           train_metrics=[MeanSquaredError()],
+                           val_metrics=[MeanSquaredError()])
 
     if torch.cuda.is_available():
         model = DeviceGPU().module_to_device(model)
