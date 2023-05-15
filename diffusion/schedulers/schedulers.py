@@ -26,8 +26,8 @@ def tangent_schedule(times):
 class ContinuousTimeScheduler:
     """Scheduler for continuous time (variance preserving) diffusion models.
 
-    Currently, the noise schedule is hardcoded to angle = time, hence beta = 2 * tan(t). This results in a maximum
-    time of t_max = pi/2. For stability, t_max should be less than pi/2 during generation, as otherwise a divide by
+    By default, the noise schedule is set to angle = time, hence beta = 2 * tan(t). This results in a maximum time
+    of t_max = pi/2. For stability, t_max should be less than pi/2 during generation, as otherwise a divide by
     zero can occur.
 
     Args:
