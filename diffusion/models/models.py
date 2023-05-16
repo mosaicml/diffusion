@@ -112,27 +112,24 @@ def stable_diffusion_2(
     return model
 
 
-def discrete_pixel_diffusion(model_name: str = 'stabilityai/stable-diffusion-2-base', prediction_type='epsilon'):
+def discrete_pixel_diffusion(model_name: str = 'openai/clip-vit-large-patch14', prediction_type='epsilon'):
     """Discrete pixel diffusion training setup.
 
-    Uses the same clip and unet config as stable diffusion, but operates in pixel space rather than latent space.
-
     Args:
-        model_name (str, optional): Name of the model config to load. Defaults to 'stabilityai/stable-diffusion-2-base'.
+        model_name (str, optional): Name of the model config to load. Defaults to 'openai/clip-vit-large-patch14'.
         prediction_type (str, optional): Type of prediction to use. One of 'sample', 'epsilon', 'v_prediction'.
             Defaults to 'epsilon'.
     """
-    # Get the stable diffusion 2 unet config
-    config = PretrainedConfig.get_config_dict(model_name, subfolder='unet')
-    # Set the number of channels to 3
-    config[0]['in_channels'] = 3
-    # Set the number of out channels to 3
-    config[0]['out_channels'] = 3
-    # Create the pixel space unet based on the SD2 unet.
-    unet = UNet2DConditionModel(**config[0])
-    # Get the SD2 text encoder and tokenizer:
-    text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder')
-    tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer')
+    # Create a pixel space unet
+    unet = UNet2DConditionModel(in_channels=3,
+                                out_channels=3,
+                                attention_head_dim=[5, 10, 20, 20],
+                                cross_attention_dim=768,
+                                flip_sin_to_cos=True,
+                                use_linear_projection=True)
+    # Get the CLIP text encoder and tokenizer:
+    text_encoder = CLIPTextModel.from_pretrained(model_name)
+    tokenizer = CLIPTokenizer.from_pretrained(model_name)
     # Hard code the sheduler config
     noise_scheduler = DDPMScheduler(num_train_timesteps=1000,
                                     beta_start=0.00085,
@@ -177,17 +174,18 @@ def discrete_pixel_diffusion(model_name: str = 'stabilityai/stable-diffusion-2-b
     return model
 
 
-def continuous_pixel_diffusion(model_name: str = 'stabilityai/stable-diffusion-2-base',
+def continuous_pixel_diffusion(model_name: str = 'openai/clip-vit-large-patch14',
                                prediction_type='epsilon',
                                use_ode=False,
                                train_t_max=1.570795,
                                inference_t_max=1.56):
     """Continuous pixel diffusion training setup.
 
-    Uses the same clip and unet config as stable diffusion, but operates in pixel space rather than latent space. Uses the continuous time parameterization as in the VP process in https://arxiv.org/abs/2011.13456.
+    Uses the same clip and unet config as `discrete_pixel_diffusion`, but operates in continous time as in the VP
+    process in https://arxiv.org/abs/2011.13456.
 
     Args:
-        model_name (str, optional): Name of the model config to load. Defaults to 'stabilityai/stable-diffusion-2-base'.
+        model_name (str, optional): Name of the model config to load. Defaults to 'openai/clip-vit-large-patch14'.
         prediction_type (str, optional): Type of prediction to use. One of 'sample', 'epsilon', 'v_prediction'.
             Defaults to 'epsilon'.
         use_ode (bool, optional): Whether to do generation using the probability flow ODE. If not used, uses the
@@ -196,18 +194,17 @@ def continuous_pixel_diffusion(model_name: str = 'stabilityai/stable-diffusion-2
         inference_t_max (float, optional): Maximum timestep during inference.
             Defaults to 1.56 (pi/2 - 0.01 for stability).
     """
-    # Get the stable diffusion 2 unet config
-    config = PretrainedConfig.get_config_dict(model_name, subfolder='unet')
-    # Set the number of channels to 3
-    config[0]['in_channels'] = 3
-    # Set the number of out channels to 3
-    config[0]['out_channels'] = 3
-    # Create the pixel space unet based on the SD2 unet.
-    unet = UNet2DConditionModel(**config[0])
-    # Get the SD2 text encoder and tokenizer:
-    text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder')
-    tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer')
-    # Hard code the sheduler config
+    # Create a pixel space unet
+    unet = UNet2DConditionModel(in_channels=3,
+                                out_channels=3,
+                                attention_head_dim=[5, 10, 20, 20],
+                                cross_attention_dim=768,
+                                flip_sin_to_cos=True,
+                                use_linear_projection=True)
+    # Get the CLIP text encoder and tokenizer:
+    text_encoder = CLIPTextModel.from_pretrained(model_name)
+    tokenizer = CLIPTokenizer.from_pretrained(model_name)
+    # Need to use the continuous time schedulers for training and inference.
     noise_scheduler = ContinuousTimeScheduler(t_max=train_t_max, prediction_type=prediction_type)
     inference_scheduler = ContinuousTimeScheduler(t_max=inference_t_max,
                                                   prediction_type=prediction_type,
