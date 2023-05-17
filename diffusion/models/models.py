@@ -112,11 +112,11 @@ def stable_diffusion_2(
     return model
 
 
-def discrete_pixel_diffusion(model_name: str = 'openai/clip-vit-large-patch14', prediction_type='epsilon'):
+def discrete_pixel_diffusion(clip_model_name: str = 'openai/clip-vit-large-patch14', prediction_type='epsilon'):
     """Discrete pixel diffusion training setup.
 
     Args:
-        model_name (str, optional): Name of the model config to load. Defaults to 'openai/clip-vit-large-patch14'.
+        clip_model_name (str, optional): Name of the clip model to load. Defaults to 'openai/clip-vit-large-patch14'.
         prediction_type (str, optional): Type of prediction to use. One of 'sample', 'epsilon', 'v_prediction'.
             Defaults to 'epsilon'.
     """
@@ -128,8 +128,8 @@ def discrete_pixel_diffusion(model_name: str = 'openai/clip-vit-large-patch14', 
                                 flip_sin_to_cos=True,
                                 use_linear_projection=True)
     # Get the CLIP text encoder and tokenizer:
-    text_encoder = CLIPTextModel.from_pretrained(model_name)
-    tokenizer = CLIPTokenizer.from_pretrained(model_name)
+    text_encoder = CLIPTextModel.from_pretrained(clip_model_name)
+    tokenizer = CLIPTokenizer.from_pretrained(clip_model_name)
     # Hard code the sheduler config
     noise_scheduler = DDPMScheduler(num_train_timesteps=1000,
                                     beta_start=0.00085,
@@ -174,7 +174,7 @@ def discrete_pixel_diffusion(model_name: str = 'openai/clip-vit-large-patch14', 
     return model
 
 
-def continuous_pixel_diffusion(model_name: str = 'openai/clip-vit-large-patch14',
+def continuous_pixel_diffusion(clip_model_name: str = 'openai/clip-vit-large-patch14',
                                prediction_type='epsilon',
                                use_ode=False,
                                train_t_max=1.570795,
@@ -185,7 +185,7 @@ def continuous_pixel_diffusion(model_name: str = 'openai/clip-vit-large-patch14'
     process in https://arxiv.org/abs/2011.13456.
 
     Args:
-        model_name (str, optional): Name of the model config to load. Defaults to 'openai/clip-vit-large-patch14'.
+        clip_model_name (str, optional): Name of the clip model to load. Defaults to 'openai/clip-vit-large-patch14'.
         prediction_type (str, optional): Type of prediction to use. One of 'sample', 'epsilon', 'v_prediction'.
             Defaults to 'epsilon'.
         use_ode (bool, optional): Whether to do generation using the probability flow ODE. If not used, uses the
@@ -202,8 +202,8 @@ def continuous_pixel_diffusion(model_name: str = 'openai/clip-vit-large-patch14'
                                 flip_sin_to_cos=True,
                                 use_linear_projection=True)
     # Get the CLIP text encoder and tokenizer:
-    text_encoder = CLIPTextModel.from_pretrained(model_name)
-    tokenizer = CLIPTokenizer.from_pretrained(model_name)
+    text_encoder = CLIPTextModel.from_pretrained(clip_model_name)
+    tokenizer = CLIPTokenizer.from_pretrained(clip_model_name)
     # Need to use the continuous time schedulers for training and inference.
     noise_scheduler = ContinuousTimeScheduler(t_max=train_t_max, prediction_type=prediction_type)
     inference_scheduler = ContinuousTimeScheduler(t_max=inference_t_max,
