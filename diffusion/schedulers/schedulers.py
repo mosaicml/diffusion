@@ -64,8 +64,7 @@ class ContinuousTimeScheduler:
 
     def add_noise(self, inputs, noise, timesteps):
         # expand timesteps to the right number of dimensions
-        while len(timesteps.shape) < len(inputs.shape):
-            timesteps = timesteps.unsqueeze(-1)
+        timesteps = timesteps.view(len(timesteps), *(1,) * (len(inputs.shape) - 1))
         # compute sin, cos of the angle
         _, sin_phi, cos_phi = self.schedule_function(timesteps)
         # combine the signal with the noise
@@ -74,8 +73,7 @@ class ContinuousTimeScheduler:
     def get_velocity(self, inputs, noise, timesteps):
         # v is defined by -sin(t) * inputs + cos(t) * noise
         # expand timesteps to the right number of dimensions
-        while len(timesteps.shape) < len(inputs.shape):
-            timesteps = timesteps.unsqueeze(-1)
+        timesteps = timesteps.view(len(timesteps), *(1,) * (len(inputs.shape) - 1))
         # compute sin, cos of the angle
         _, sin_phi, cos_phi = self.schedule_function(timesteps)
         return -sin_phi * inputs + cos_phi * noise
