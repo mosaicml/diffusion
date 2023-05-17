@@ -229,7 +229,7 @@ class PixelDiffusion(ComposerModel):
             model_output = self.model(model_input, t, encoder_hidden_states=text_embeddings).sample
 
             if do_classifier_free_guidance:
-                # perform guidance. Not this is technically incorrect unless prediction_type is 'epsilon'
+                # perform guidance. Note this is only techincally correct for prediction_type 'epsilon'
                 pred_uncond, pred_text = model_output.chunk(2)
                 model_output = pred_uncond + guidance_scale * (pred_text - pred_uncond)
 
