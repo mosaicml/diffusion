@@ -13,7 +13,9 @@ from torchmetrics.image.fid import FrechetInceptionDistance
 from torchmetrics.multimodal.clip_score import CLIPScore
 from transformers import CLIPTextModel, CLIPTokenizer, PretrainedConfig
 
+from diffusion.models.pixel_diffusion import PixelDiffusion
 from diffusion.models.stable_diffusion import StableDiffusion
+from diffusion.schedulers.schedulers import ContinuousTimeScheduler
 
 try:
     import xformers  # type: ignore
@@ -107,4 +109,120 @@ def stable_diffusion_2(
         if is_xformers_installed:
             model.unet.enable_xformers_memory_efficient_attention()
             model.vae.enable_xformers_memory_efficient_attention()
+    return model
+
+
+def discrete_pixel_diffusion(clip_model_name: str = 'openai/clip-vit-large-patch14', prediction_type='epsilon'):
+    """Discrete pixel diffusion training setup.
+
+    Args:
+        clip_model_name (str, optional): Name of the clip model to load. Defaults to 'openai/clip-vit-large-patch14'.
+        prediction_type (str, optional): Type of prediction to use. One of 'sample', 'epsilon', 'v_prediction'.
+            Defaults to 'epsilon'.
+    """
+    # Create a pixel space unet
+    unet = UNet2DConditionModel(in_channels=3,
+                                out_channels=3,
+                                attention_head_dim=[5, 10, 20, 20],
+                                cross_attention_dim=768,
+                                flip_sin_to_cos=True,
+                                use_linear_projection=True)
+    # Get the CLIP text encoder and tokenizer:
+    text_encoder = CLIPTextModel.from_pretrained(clip_model_name)
+    tokenizer = CLIPTokenizer.from_pretrained(clip_model_name)
+    # Hard code the sheduler config
+    noise_scheduler = DDPMScheduler(num_train_timesteps=1000,
+                                    beta_start=0.00085,
+                                    beta_end=0.012,
+                                    beta_schedule='scaled_linear',
+                                    trained_betas=None,
+                                    variance_type='fixed_small',
+                                    clip_sample=False,
+                                    prediction_type=prediction_type,
+                                    thresholding=False,
+                                    dynamic_thresholding_ratio=0.995,
+                                    clip_sample_range=1.0,
+                                    sample_max_value=1.0)
+    inference_scheduler = DDIMScheduler(num_train_timesteps=1000,
+                                        beta_start=0.00085,
+                                        beta_end=0.012,
+                                        beta_schedule='scaled_linear',
+                                        trained_betas=None,
+                                        clip_sample=False,
+                                        set_alpha_to_one=False,
+                                        steps_offset=1,
+                                        prediction_type=prediction_type,
+                                        thresholding=False,
+                                        dynamic_thresholding_ratio=0.995,
+                                        clip_sample_range=1.0,
+                                        sample_max_value=1.0)
+
+    # Create the pixel space diffusion model
+    model = PixelDiffusion(unet,
+                           text_encoder,
+                           tokenizer,
+                           noise_scheduler,
+                           inference_scheduler=inference_scheduler,
+                           prediction_type=prediction_type,
+                           train_metrics=[MeanSquaredError()],
+                           val_metrics=[MeanSquaredError()])
+
+    if torch.cuda.is_available():
+        model = DeviceGPU().module_to_device(model)
+        if is_xformers_installed:
+            model.model.enable_xformers_memory_efficient_attention()
+    return model
+
+
+def continuous_pixel_diffusion(clip_model_name: str = 'openai/clip-vit-large-patch14',
+                               prediction_type='epsilon',
+                               use_ode=False,
+                               train_t_max=1.570795,
+                               inference_t_max=1.56):
+    """Continuous pixel diffusion training setup.
+
+    Uses the same clip and unet config as `discrete_pixel_diffusion`, but operates in continous time as in the VP
+    process in https://arxiv.org/abs/2011.13456.
+
+    Args:
+        clip_model_name (str, optional): Name of the clip model to load. Defaults to 'openai/clip-vit-large-patch14'.
+        prediction_type (str, optional): Type of prediction to use. One of 'sample', 'epsilon', 'v_prediction'.
+            Defaults to 'epsilon'.
+        use_ode (bool, optional): Whether to do generation using the probability flow ODE. If not used, uses the
+            reverse diffusion process. Defaults to False.
+        train_t_max (float, optional): Maximum timestep during training. Defaults to 1.570795 (pi/2).
+        inference_t_max (float, optional): Maximum timestep during inference.
+            Defaults to 1.56 (pi/2 - 0.01 for stability).
+    """
+    # Create a pixel space unet
+    unet = UNet2DConditionModel(in_channels=3,
+                                out_channels=3,
+                                attention_head_dim=[5, 10, 20, 20],
+                                cross_attention_dim=768,
+                                flip_sin_to_cos=True,
+                                use_linear_projection=True)
+    # Get the CLIP text encoder and tokenizer:
+    text_encoder = CLIPTextModel.from_pretrained(clip_model_name)
+    tokenizer = CLIPTokenizer.from_pretrained(clip_model_name)
+    # Need to use the continuous time schedulers for training and inference.
+    noise_scheduler = ContinuousTimeScheduler(t_max=train_t_max, prediction_type=prediction_type)
+    inference_scheduler = ContinuousTimeScheduler(t_max=inference_t_max,
+                                                  prediction_type=prediction_type,
+                                                  use_ode=use_ode)
+
+    # Create the pixel space diffusion model
+    model = PixelDiffusion(unet,
+                           text_encoder,
+                           tokenizer,
+                           noise_scheduler,
+                           inference_scheduler=inference_scheduler,
+                           prediction_type=prediction_type,
+                           continuous_time=True,
+                           train_metrics=[MeanSquaredError()],
+                           val_metrics=[MeanSquaredError()])
+
+    if torch.cuda.is_available():
+        model = DeviceGPU().module_to_device(model)
+        if is_xformers_installed:
+            model.model.enable_xformers_memory_efficient_attention()
     return model

@@ -20,11 +20,13 @@ class LogDiffusionImages(Callback):
     Args:
         prompts (List[str]): List of prompts to use for evaluation.
         size (int, optional): Image size to use during generation. Default: ``256``.
+        num_inference_steps (int, optional): Number of inference steps to use during generation. Default: ``50``.
         guidance_scale (float, optional): guidance_scale is defined as w of equation 2
             of the Imagen Paper. Guidance scale is enabled by setting guidance_scale > 1.
             A larger guidance scale generates images that are more aligned to
             the text prompt, usually at the expense of lower image quality.
             Default: ``0.0``.
+        text_key (str, optional): Key in the batch to use for text prompts. Default: ``'captions'``.
         tokenized_prompts (torch.LongTensor, optional): Batch of pre-tokenized prompts
             to use for evaluation. Default: ``None``.
         seed (int, optional): Random seed to use for generation. Set a seed for reproducible generation.
@@ -34,12 +36,16 @@ class LogDiffusionImages(Callback):
     def __init__(self,
                  prompts: List[str],
                  size: Optional[int] = 256,
+                 num_inference_steps=50,
                  guidance_scale: Optional[float] = 0.0,
+                 text_key: Optional[str] = 'captions',
                  tokenized_prompts: Optional[torch.LongTensor] = None,
                  seed: Optional[int] = 1138):
         self.prompts = prompts
         self.size = size
+        self.num_inference_steps = num_inference_steps
         self.guidance_scale = guidance_scale
+        self.text_key = text_key
         self.seed = seed
         self.tokenized_prompts = tokenized_prompts
 
@@ -60,7 +66,7 @@ class LogDiffusionImages(Callback):
                     for p in self.prompts
                 ]
                 self.tokenized_prompts = torch.cat(tokenized_prompts)
-            self.tokenized_prompts = self.tokenized_prompts.to(state.batch[model.text_key].device)
+            self.tokenized_prompts = self.tokenized_prompts.to(state.batch[self.text_key].device)
 
             # Generate images
             with get_precision_context(state.precision):
@@ -70,6 +76,7 @@ class LogDiffusionImages(Callback):
                     width=self.size,
                     guidance_scale=self.guidance_scale,
                     progress_bar=False,
+                    num_inference_steps=self.num_inference_steps,
                     seed=self.seed)
 
             # Log images to wandb
