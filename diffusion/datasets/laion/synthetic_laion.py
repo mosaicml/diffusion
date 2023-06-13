@@ -4,6 +4,7 @@
 """Synthetic LAION dataset."""
 
 import torch
+from composer.utils import dist
 from torch.utils.data import DataLoader, Dataset
 
 
@@ -51,5 +52,11 @@ def build_synthetic_laion_dataloader(
         num_samples=num_samples,
     )
 
-    dataloader = DataLoader(dataset=dataset, batch_size=batch_size, **dataloader_kwargs)
+    dataloader = DataLoader(
+        dataset=dataset,
+        sampler=dist.get_sampler(dataset),
+        batch_size=batch_size,
+        **dataloader_kwargs,
+    )
+
     return dataloader
