@@ -53,7 +53,7 @@ def main(args):
         coco_captions_subset_10k_1[idx] = coco_captions[idx]
 
     fields = {'image': 'jpeg', 'captions': 'json'}
-    with MDSWriter(out=args.remote, columns=fields) as out:
+    with MDSWriter(args.remote, fields) as out:
         for sample in tqdm(coco_captions_subset_10k_1):
             image = Image.open(coco_captions_subset_10k_1[sample]['image_file'])
             captions = coco_captions_subset_10k_1[sample]['captions']
