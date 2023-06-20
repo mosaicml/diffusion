@@ -46,13 +46,13 @@ class StreamingLAIONDataset(StreamingDataset):
                  remote: Optional[str] = None,
                  local: Optional[str] = None,
                  split: Optional[str] = None,
-                 shuffle: Optional[bool] = False,
+                 shuffle: bool = False,
                  tokenizer_name_or_path: Optional[str] = 'stabilityai/stable-diffusion-2-base',
                  caption_drop_prob: Optional[float] = 0.0,
                  transform: Optional[List[Callable]] = None,
                  predownload: Optional[int] = 100_000,
-                 download_retry: Optional[int] = 2,
-                 download_timeout: Optional[float] = 120,
+                 download_retry: int = 2,
+                 download_timeout: float = 120,
                  batch_size: Optional[int] = None) -> None:
 
         super().__init__(
@@ -113,8 +113,8 @@ def build_streaming_laion_dataloader(
     resize_size: Optional[List[int]] = None,
     num_samples: Optional[int] = None,
     predownload: Optional[int] = 100_000,
-    download_retry: Optional[int] = 2,
-    download_timeout: Optional[float] = 120,
+    download_retry: int = 2,
+    download_timeout: float = 120,
     drop_last: bool = True,
     shuffle: bool = True,
     **dataloader_kwargs,
