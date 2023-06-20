@@ -46,13 +46,13 @@ class StreamingLAIONDataset(StreamingDataset):
                  remote: Optional[str] = None,
                  local: Optional[str] = None,
                  split: Optional[str] = None,
-                 shuffle: Optional[bool] = False,
-                 tokenizer_name_or_path: Optional[str] = 'stabilityai/stable-diffusion-2-base',
-                 caption_drop_prob: Optional[float] = 0.0,
+                 shuffle: bool = False,
+                 tokenizer_name_or_path: str = 'stabilityai/stable-diffusion-2-base',
+                 caption_drop_prob: float = 0.0,
                  transform: Optional[List[Callable]] = None,
-                 predownload: Optional[int] = 100_000,
-                 download_retry: Optional[int] = 2,
-                 download_timeout: Optional[float] = 120,
+                 predownload: int = 100_000,
+                 download_retry: int = 2,
+                 download_timeout: float = 120,
                  batch_size: Optional[int] = None) -> None:
 
         super().__init__(
