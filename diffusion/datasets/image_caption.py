@@ -97,7 +97,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
                                            padding='max_length',
                                            max_length=self.tokenizer.model_max_length,
                                            truncation=True,
-                                           return_tensor='pt')['input_ids'][0]
+                                           return_tensors='pt')['input_ids'][0]
 
         return {'image': img, 'captions': tokenized_caption}
 
