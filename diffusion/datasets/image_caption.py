@@ -5,7 +5,7 @@
 
 import random
 from io import BytesIO
-from typing import Callable, List, Optional, Sequence, Union
+from typing import Callable, Dict, List, Optional, Sequence, Union
 
 import torch
 from PIL import Image
@@ -113,18 +113,14 @@ def build_streaming_image_caption_dataloader(
     tokenizer_name_or_path: str = 'stabilityai/stable-diffusion-2-base',
     caption_drop_prob: float = 0.0,
     resize_size: int = 256,
-    num_samples: Optional[int] = None,
-    predownload: Optional[int] = 100_000,
-    download_retry: int = 2,
-    download_timeout: float = 120,
     drop_last: bool = True,
     shuffle: bool = True,
-    num_canonical_nodes: Optional[int] = None,
     caption_selection: str = 'first',
-    transform: Optional[List[torch.nn.Module]] = None,
+    transform: Optional[List[Callable]] = None,
     image_key: str = 'image',
     caption_key: str = 'caption',
-    **dataloader_kwargs,
+    streaming_kwargs: Optional[Dict] = None,
+    dataloader_kwargs: Optional[Dict] = None,
 ):
     """Builds a streaming LAION dataloader.
 
@@ -135,23 +131,24 @@ def build_streaming_image_caption_dataloader(
         tokenizer_name_or_path (str): The name or path of the tokenizer to use. Default: ``'stabilityai/stable-diffusion-2-base'``.
         caption_drop_prob (float): The probability of dropping a caption. Default: ``0.0``.
         resize_size (int): The size to resize the image to. Default: ``256``.
-        num_samples (int, optional): The number of samples to use. Default: ``None`` uses all available samples.
-        predownload (int, optional): The number of samples to prefetch. Default: ``100_000``.
-        download_retry (int): The number of times to retry a download. Default: ``2``.
-        download_timeout (float): The timeout for a download. Default: ``120``.
         drop_last (bool): Whether to drop the last batch if it is incomplete. Default: ``True``.
         shuffle (bool): Whether to shuffle the samples in this dataset. Default: ``True``.
-        num_canonical_nodes (int, optional): The number of canonical nodes for shuffle. Default: ``None``.
         caption_selection (str): If there are multiple captions, specifies how to select a single caption.
             'first' selects the first caption in the list and 'random' selects a random caption in the list.
             If there is only one caption, this argument is ignored. Default: ``'first'``.
         transform (Optional[Callable]): The transforms to apply to the image. Default: ``None``.
         image_key (str): Key associated with the image in the streaming dataset. Default: ``'image'``.
         caption_key (str): Key associated with the caption in the streaming dataset. Default: ``'caption'``.
-        is_precomputed_latents (bool): Whether or not to use the precomputed latents streaming dataset.
-            Default: ``False``
-        **dataloader_kwargs: Additional arguments to pass to the dataloader.
+        streaming_kwargs (dict, optional): Additional arguments to pass to the ``StreamingDataset``. Default: ``None``.
+        dataloader_kwargs (dict, optional): Additional arguments to pass to the ``DataLoader``. Default: ``None``.
     """
+    # Handle ``None`` kwargs
+    if streaming_kwargs is None:
+        streaming_kwargs = {}
+    if dataloader_kwargs is None:
+        dataloader_kwargs = {}
+
+    # Check types for remote and local
     if isinstance(remote, str) and isinstance(local, str):
         # Hacky... make remote and local lists to simplify downstream code
         remote, local = [remote], [local]
@@ -165,7 +162,7 @@ def build_streaming_image_caption_dataloader(
     # Create a Stream for each (remote, local) pair
     streams = []
     for r, l in zip(remote, local):
-        streams.append(Stream(remote=r, local=l, download_retry=download_retry, download_timeout=download_timeout))
+        streams.append(Stream(remote=r, local=l))
 
     # Setup the transforms to apply
     if transform is None:
@@ -175,6 +172,7 @@ def build_streaming_image_caption_dataloader(
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),  # # Normalize from 0 to 1 to -1 to 1
         ]
     transform = transforms.Compose(transform)
+    assert isinstance(transform, Callable)
 
     dataset = StreamingImageCaptionDataset(
         streams=streams,
@@ -187,15 +185,9 @@ def build_streaming_image_caption_dataloader(
         image_size=resize_size,
         image_key=image_key,
         caption_key=caption_key,
-        predownload=predownload,
-        download_retry=download_retry,
-        download_timeout=download_timeout,
         batch_size=batch_size,
-        num_canonical_nodes=num_canonical_nodes,
+        **streaming_kwargs,
     )
-    # Create a subset of the dataset
-    if num_samples is not None:
-        dataset = torch.utils.data.Subset(dataset, range(num_samples))  # type: ignore
 
     dataloader = DataLoader(
         dataset=dataset,
