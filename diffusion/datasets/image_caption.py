@@ -76,7 +76,9 @@ class StreamingImageCaptionDataset(StreamingDataset):
         sample = super().__getitem__(index)
 
         # Image
-        img = Image.open(BytesIO(sample[self.image_key]))
+        img = sample[self.image_key]
+        if not isinstance(img, Image.Image):
+            img = Image.open(BytesIO(sample[self.image_key]))
         if img.mode != 'RGB':
             img = img.convert('RGB')
         if self.transform is not None:
