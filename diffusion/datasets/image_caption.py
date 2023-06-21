@@ -28,8 +28,6 @@ class StreamingImageCaptionDataset(StreamingDataset):
             ``StreamingImageCaptionDataset`` uses either ``streams`` or ``remote``/``local``. Default:``None``.
         remote (str, optional): Remote directory (S3 or local filesystem) where dataset is stored. Default: ``None``.
         local (str, optional): Local filesystem directory where dataset is cached during operation. Default: ``None``.
-        split (str, optional): The dataset split to use. Currently, only ``None`` is supported. Default: ``None``.
-        shuffle (bool): Whether to shuffle the samples in this dataset. Default: ``False``.
         tokenizer_name_or_path (str): The name or path of the tokenizer to use. Default: ``'stabilityai/stable-diffusion-2-base'``.
         caption_selection (str): If there are multiple captions, specifies how to select a single caption.
             'first' selects the first caption in the list and 'random' selects a random caption in the list.
@@ -46,8 +44,6 @@ class StreamingImageCaptionDataset(StreamingDataset):
         streams: Optional[Sequence[Stream]] = None,
         remote: Optional[str] = None,
         local: Optional[str] = None,
-        split: Optional[str] = None,
-        shuffle: bool = False,
         tokenizer_name_or_path: str = 'stabilityai/stable-diffusion-2-base',
         caption_drop_prob: float = 0.0,
         caption_selection: str = 'first',
@@ -62,8 +58,6 @@ class StreamingImageCaptionDataset(StreamingDataset):
             streams=streams,
             remote=remote,
             local=local,
-            split=split,
-            shuffle=shuffle,
             **streaming_kwargs,
         )
         caption_selection = caption_selection.lower()
@@ -113,8 +107,6 @@ def build_streaming_image_caption_dataloader(
     tokenizer_name_or_path: str = 'stabilityai/stable-diffusion-2-base',
     caption_drop_prob: float = 0.0,
     resize_size: int = 256,
-    drop_last: bool = True,
-    shuffle: bool = True,
     caption_selection: str = 'first',
     transform: Optional[List[Callable]] = None,
     image_key: str = 'image',
@@ -127,12 +119,10 @@ def build_streaming_image_caption_dataloader(
     Args:
         remote (str, Sequence[str]): One or more remote directories (S3 or local filesystem) where dataset is stored.
         local (str, Sequence[str]): One or more local filesystem directories where dataset is cached during operation.
-        batch_size (int): The batch size to use.
+        batch_size (int): The batch size to use for both the ``StreamingDataset`` and ``DataLoader``.
         tokenizer_name_or_path (str): The name or path of the tokenizer to use. Default: ``'stabilityai/stable-diffusion-2-base'``.
         caption_drop_prob (float): The probability of dropping a caption. Default: ``0.0``.
         resize_size (int): The size to resize the image to. Default: ``256``.
-        drop_last (bool): Whether to drop the last batch if it is incomplete. Default: ``True``.
-        shuffle (bool): Whether to shuffle the samples in this dataset. Default: ``True``.
         caption_selection (str): If there are multiple captions, specifies how to select a single caption.
             'first' selects the first caption in the list and 'random' selects a random caption in the list.
             If there is only one caption, this argument is ignored. Default: ``'first'``.
@@ -176,8 +166,6 @@ def build_streaming_image_caption_dataloader(
 
     dataset = StreamingImageCaptionDataset(
         streams=streams,
-        split=None,
-        shuffle=shuffle,
         tokenizer_name_or_path=tokenizer_name_or_path,
         caption_drop_prob=caption_drop_prob,
         caption_selection=caption_selection,
@@ -193,7 +181,6 @@ def build_streaming_image_caption_dataloader(
         dataset=dataset,
         batch_size=batch_size,
         sampler=None,
-        drop_last=drop_last,
         **dataloader_kwargs,
     )
 
