@@ -66,14 +66,14 @@ class StreamingImageCaptionDataset(StreamingDataset):
             shuffle=shuffle,
             **streaming_kwargs,
         )
-
+        caption_selection = caption_selection.lower()
         if caption_selection not in ['first', 'random']:
             raise ValueError(f'Invalid caption selection: {caption_selection}. Must be one of [random, first]')
 
         self.transform = transform
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, subfolder='tokenizer')
         self.caption_drop_prob = caption_drop_prob
-        self.caption_selection = caption_selection.lower()
+        self.caption_selection = caption_selection
         self.image_size = image_size
         self.image_key = image_key
         self.caption_key = caption_key
