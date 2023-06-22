@@ -69,13 +69,13 @@ pip install -e .
 
 # Data Prep
 
-If you are interested in training on LAION-5B or evaluating on COCO Captions, we provide [scripts](https://github.com/mosaicml/diffusion2/tree/main/scripts) to download and process these datasets into Streaming datasets.
+If you are interested in training on LAION-5B or evaluating on COCO Captions, we provide [scripts](https://github.com/mosaicml/diffusion/tree/main/scripts) to download and process these datasets into Streaming datasets.
 
-Alternatively, you can use your own image-caption dataset(s) as long as samples are returned as a dictionary from a PyTorch Dataset class. To use a custom dataset with our configurations, define a function that returns a PyTorch DataLoader for the custom dataset (for an example, see [`build_streaming_laion_dataloader()`](https://github.com/mosaicml/diffusion2/blob/34e95ef50836581fab1bec3effaed8fa9d0ae464/diffusion/datasets/laion/laion.py#L115)). The best way to add custom code is to fork this repo, then add the python scripts to `diffusion/datasets`.
+Alternatively, you can use your own image-caption dataset(s) as long as samples are returned as a dictionary from a PyTorch Dataset class. To use a custom dataset with our configurations, define a function that returns a PyTorch DataLoader for the custom dataset (for an example, see [`build_streaming_laion_dataloader()`](https://github.com/mosaicml/diffusion/blob/34e95ef50836581fab1bec3effaed8fa9d0ae464/diffusion/datasets/laion/laion.py#L115)). The best way to add custom code is to fork this repo, then add the python scripts to `diffusion/datasets`.
 
 # Adjust config
 
-The configurations for the two phases of training are specified at [`SD-2-base-256.yaml`](https://github.com/mosaicml/diffusion2/blob/main/yamls/hydra-yamls/SD-2-base-256.yaml) and [`SD-2-base-512.yaml`](https://github.com/mosaicml/diffusion2/blob/main/yamls/hydra-yamls/SD-2-base-512.yaml). A few fields are left blank that need to be filled in to start training. The `dataset` field is the primary field to change. If you downloaded and converted the LAION-5B dataset into your own Streaming dataset, change the `remote` field under `train_dataset` to the bucket containing your streaming LAION-5B. Similarly for COCO validation, change the `remote` field under `eval_dataset` to the bucket containing your streaming COCO.
+The configurations for the two phases of training are specified at [`SD-2-base-256.yaml`](https://github.com/mosaicml/diffusion/blob/main/yamls/hydra-yamls/SD-2-base-256.yaml) and [`SD-2-base-512.yaml`](https://github.com/mosaicml/diffusion/blob/main/yamls/hydra-yamls/SD-2-base-512.yaml). A few fields are left blank that need to be filled in to start training. The `dataset` field is the primary field to change. If you downloaded and converted the LAION-5B dataset into your own Streaming dataset, change the `remote` field under `train_dataset` to the bucket containing your streaming LAION-5B. Similarly for COCO validation, change the `remote` field under `eval_dataset` to the bucket containing your streaming COCO.
 
 If you opted to use your own datasets, change the `_target_` field under both `train_dataset` and `eval_dataset` to contain the absolute path to the function that returns the PyTorch DataLoader for your dataset. Replace the fields after `_target_` with the arguments for your function.
 
