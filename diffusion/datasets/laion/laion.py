@@ -97,9 +97,10 @@ class StreamingLAIONDataset(StreamingDataset):
             padding='max_length',
             max_length=self.tokenizer.model_max_length,
             truncation=True,
-        )['input_ids']
-        tokenized_caption = torch.tensor(tokenized_caption)
-        out = {'image': img, 'captions': tokenized_caption}
+        )
+        input_ids = torch.tensor(tokenized_caption['input_ids'])
+        attention_mask = torch.tensor(tokenized_caption['attention_mask'])
+        out = {'image': img, 'captions': input_ids, 'attention_mask': attention_mask}
         if 'caption_latents' in sample:
             out['caption_latents'] = torch.from_numpy(
                 np.frombuffer(sample['caption_latents'], dtype=np.float16).copy()).reshape(77, 1024)
