@@ -82,9 +82,10 @@ class StableDiffusionInference():
         png_images = []
         for i in range(imgs.shape[0]):
             img = (imgs[i].permute(1, 2, 0).numpy() * 255).round().astype('uint8')
-            pil_image = Image.fromarray(img, 'RGB')
-            img_byte_arr = io.BytesIO()
-            pil_image.save(img_byte_arr, format='PNG')
-            base64_encoded_image = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
-            png_images.append(bytes(base64_encoded_image, 'utf-8'))
-        return ['test']
+            # pil_image = Image.fromarray(img, 'RGB')
+            # img_byte_arr = io.BytesIO()
+            # pil_image.save(img_byte_arr, format='PNG')
+            # base64_encoded_image = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
+            # png_images.append(bytes(base64_encoded_image, 'utf-8'))
+            png_images.append(img)
+        return png_images
