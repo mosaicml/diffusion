@@ -50,7 +50,7 @@ class StableDiffusionInference():
         for req in model_requests:
             if 'input' not in req:
                 raise RuntimeError('"input" must be provided to generate call')
-            inputs = model_requests['input']
+            inputs = req['input']
 
             # Prompts and negative prompts if available
             if isinstance(inputs, str):
@@ -62,7 +62,7 @@ class StableDiffusionInference():
                 if 'negative_prompt' in req:
                     negative_prompts.append(inputs['negative_prompt'])
 
-            generate_kwargs = model_requests['parameters']
+            generate_kwargs = req['parameters']
 
         # Check for prompts
         if len(prompts) == 0:
