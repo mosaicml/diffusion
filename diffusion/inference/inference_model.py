@@ -5,6 +5,7 @@
 
 import base64
 import io
+from typing import Any, Dict, List
 
 import torch
 from composer.utils.file_helpers import get_file
@@ -40,29 +41,42 @@ class StableDiffusionInference():
         model.to(self.device)
         self.model = model.eval()
 
-    def predict(self, **inputs):
-        if 'prompt' not in inputs:
-            print('No prompt provided, returning nothing')
-            return
+    def predict(self, model_requests: List[Dict[str, Any]]):
+        prompts = []
+        negative_prompts = []
+        generate_kwargs = {}
 
-        # Parse and cast args
-        kwargs = {}
-        for arg in ['prompt', 'negative_prompt']:
-            if arg in inputs:
-                kwargs[arg] = inputs[arg]
-        for arg in ['height', 'width', 'num_inference_steps', 'num_images_per_prompt', 'seed']:
-            if arg in inputs:
-                kwargs[arg] = int(inputs[arg])
-        for arg in ['guidance_scale']:
-            if arg in inputs:
-                kwargs[arg] = float(inputs[arg])
+        # assumes the same generate_kwargs across all samples
+        for req in model_requests:
+            if 'input' not in req:
+                raise RuntimeError('"input" must be provided to generate call')
+            inputs = model_requests['input']
 
-        prompt = kwargs.pop('prompt')
-        prompts = [prompt] if isinstance(prompt, str) else prompt
+            # Prompts and negative prompts if available
+            if isinstance(inputs, str):
+                prompts.append(inputs)
+            elif isinstance(input, Dict):
+                if 'prompt' not in req:
+                    raise RuntimeError('"prompt" must be provided to generate call if using a dict as input')
+                prompts.append(inputs['prompt'])
+                if 'negative_prompt' in req:
+                    negative_prompts.append(inputs['negative_prompt'])
+
+            generate_kwargs = model_requests['parameters']
+
+        # Check for prompts
+        if len(prompts) == 0:
+            raise RuntimeError('No prompts provided, must be either a string or dictionary with "prompt"')
+
+        # Check negative prompt length
+        if len(negative_prompts) == 0:
+            negative_prompts = None
+        elif len(prompts) != len(negative_prompts):
+            raise RuntimeError('There must be the same number of negative prompts as prompts.')
 
         # Generate images
         with torch.cuda.amp.autocast(True):
-            imgs = self.model.generate(prompt=prompts, **kwargs).cpu()
+            imgs = self.model.generate(prompt=prompts, negative_prompt=negative_prompts, **generate_kwargs).cpu()
 
         # Send as bytes
         png_images = []
