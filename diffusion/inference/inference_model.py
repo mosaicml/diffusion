@@ -87,4 +87,4 @@ class StableDiffusionInference():
             pil_image.save(img_byte_arr, format='PNG')
             base64_encoded_image = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
             png_images.append(bytes(base64_encoded_image, 'utf-8'))
-        return png_images
+        return ['test']
