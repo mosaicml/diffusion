@@ -37,10 +37,8 @@ class StableDiffusion(ComposerModel):
         num_images_per_prompt (int): How many images to generate per prompt
             for evaluation. Default: `1`.
         loss_fn (torch.nn.Module): torch loss function. Default: `F.mse_loss`.
-        prediction_type (str): `epsilon` or `v_prediction`. `v_prediction` is
-            used in parts of the stable diffusion v2.1 training process.
-            See https://arxiv.org/pdf/2202.00512.pdf.
-            Default: `None` (uses whatever the pretrained model used)
+        prediction_type (str): The type of prediction to use. Must be one of 'sample',
+            'epsilon', or 'v_prediction'. Default: `epsilon`.
         train_metrics (list): List of torchmetrics to calculate during training.
             Default: `None`.
         val_metrics (list): List of torchmetrics to calculate during validation.
@@ -74,6 +72,7 @@ class StableDiffusion(ComposerModel):
                  noise_scheduler,
                  inference_noise_scheduler,
                  loss_fn=F.mse_loss,
+                 prediction_type: str = 'epsilon',
                  train_metrics: Optional[List] = None,
                  val_metrics: Optional[List] = None,
                  val_seed: int = 1138,
@@ -91,6 +90,9 @@ class StableDiffusion(ComposerModel):
         self.vae = vae
         self.noise_scheduler = noise_scheduler
         self.loss_fn = loss_fn
+        if prediction_type.lower() not in ['sample', 'epsilon', 'v_prediction']:
+            raise ValueError(f'prediction type must be one of sample, epsilon, or v_prediction. Got {prediction_type}')
+        self.prediction_type = prediction_type.lower()
         self.val_seed = val_seed
         self.image_key = image_key
         self.image_latents_key = image_latents_key
@@ -178,9 +180,18 @@ class StableDiffusion(ComposerModel):
         # Add noise to the inputs (forward diffusion)
         noise = torch.randn_like(latents)
         noised_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
-
+        # Generate the targets
+        if self.prediction_type == 'epsilon':
+            targets = noise
+        elif self.prediction_type == 'sample':
+            targets = latents
+        elif self.prediction_type == 'v_prediction':
+            targets = self.scheduler.get_velocity(latents, noise, timesteps)
+        else:
+            raise ValueError(
+                f'prediction type must be one of sample, epsilon, or v_prediction. Got {self.prediction_type}')
         # Forward through the model
-        return self.unet(noised_latents, timesteps, conditioning)['sample'], noise, timesteps
+        return self.unet(noised_latents, timesteps, conditioning)['sample'], targets, timesteps
 
     def loss(self, outputs, batch):
         """Loss between unet output and added noise, typically mse."""
@@ -363,16 +374,16 @@ class StableDiffusion(ComposerModel):
                 latent_model_input = latents
 
             latent_model_input = self.inference_scheduler.scale_model_input(latent_model_input, t)
-            # predict the noise residual
-            noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=text_embeddings).sample
+            # Model prediction
+            pred = self.unet(latent_model_input, t, encoder_hidden_states=text_embeddings).sample
 
             if do_classifier_free_guidance:
-                # perform guidance
-                noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-                noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+                # perform guidance. Note this is only techincally correct for prediction_type 'epsilon'
+                pred_uncond, pred_text = pred.chunk(2)
+                pred = pred_uncond + guidance_scale * (pred_text - pred_uncond)
 
             # compute the previous noisy sample x_t -> x_t-1
-            latents = self.inference_scheduler.step(noise_pred, t, latents, generator=rng_generator).prev_sample
+            latents = self.inference_scheduler.step(pred, t, latents, generator=rng_generator).prev_sample
 
         # We now use the vae to decode the generated latents back into the image.
         # scale and decode the image latents with vae
