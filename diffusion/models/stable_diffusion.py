@@ -186,7 +186,7 @@ class StableDiffusion(ComposerModel):
         elif self.prediction_type == 'sample':
             targets = latents
         elif self.prediction_type == 'v_prediction':
-            targets = self.scheduler.get_velocity(latents, noise, timesteps)
+            targets = self.noise_scheduler.get_velocity(latents, noise, timesteps)
         else:
             raise ValueError(
                 f'prediction type must be one of sample, epsilon, or v_prediction. Got {self.prediction_type}')
