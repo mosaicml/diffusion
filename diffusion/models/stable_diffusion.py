@@ -203,7 +203,7 @@ class StableDiffusion(ComposerModel):
         if outputs is not None:
             return outputs
         # Get unet outputs
-        unet_out, noise, timesteps = self.forward(batch)
+        unet_out, targets, timesteps = self.forward(batch)
         # Sample images from the prompts in the batch
         prompts = batch[self.text_key]
         height, width = batch[self.image_key].shape[-2], batch[self.image_key].shape[-1]
@@ -216,7 +216,7 @@ class StableDiffusion(ComposerModel):
                                        seed=self.val_seed,
                                        progress_bar=False)
             generated_images[guidance_scale] = gen_images
-        return unet_out, noise, timesteps, generated_images
+        return unet_out, targets, timesteps, generated_images
 
     def get_metrics(self, is_train: bool = False):
         if is_train:
