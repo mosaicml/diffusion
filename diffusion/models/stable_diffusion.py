@@ -90,9 +90,9 @@ class StableDiffusion(ComposerModel):
         self.vae = vae
         self.noise_scheduler = noise_scheduler
         self.loss_fn = loss_fn
-        if prediction_type.lower() not in ['sample', 'epsilon', 'v_prediction']:
-            raise ValueError(f'prediction type must be one of sample, epsilon, or v_prediction. Got {prediction_type}')
         self.prediction_type = prediction_type.lower()
+        if self.prediction_type not in ['sample', 'epsilon', 'v_prediction']:
+            raise ValueError(f'prediction type must be one of sample, epsilon, or v_prediction. Got {prediction_type}')
         self.val_seed = val_seed
         self.image_key = image_key
         self.image_latents_key = image_latents_key
