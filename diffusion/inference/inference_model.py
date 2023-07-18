@@ -19,11 +19,12 @@ LOCAL_CHECKPOINT_PATH = '/tmp/model.pt'
 
 class StableDiffusionInference():
     """Inference endpoint class for Stable Diffusion.
-    
+
     Args:
         chkpt_path (str, optional): The path to the local folder, URL or object score that contains the checkpoint.
             If not specified, pulls the pretrained Stable Diffusion 2.0 base weights from HuggingFace.
-            Default: ``None``."""
+            Default: ``None``.
+    """
 
     def __init__(self, chkpt_url: Optional[str] = None):
         pretrained_flag = chkpt_url is None
