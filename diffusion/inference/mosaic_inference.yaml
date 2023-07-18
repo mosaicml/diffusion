@@ -1,7 +1,7 @@
 name: sd-o1ema
-cluster: r7z13
-gpu_num: 1
-gpu_type: a100_40gb
+cluster:
+gpu_num:
+gpu_type:
 image: mosaicml/inference:latest
 replicas: 1
 integrations:
@@ -10,7 +10,9 @@ integrations:
     git_branch: main
     pip_install: .[all]
 model:
-  checkpoint_path: hkunlp/instructor-large
-  custom_model:
-    model_handler: diffusion.inference.inference_model.StableDiffusionInference
-command: uvicorn serve:app --host 0.0.0.0 --port 8080
+  model_handler: diffusion.inference.inference_model.StableDiffusionInference
+command: |
+  export PYTHONPATH=$PYTHONPATH:/code/diffusion
+  rm /usr/lib/python3/dist-packages/packaging-23.1.dist-info/REQUESTED
+  pip install --force-reinstall --no-deps packaging==23.1
+  pip install --upgrade xformers
