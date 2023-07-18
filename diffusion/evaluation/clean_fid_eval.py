@@ -81,6 +81,12 @@ class CleanFIDEvaluator:
         self.precision = precision
         self.prompts = prompts if prompts is not None else ['A shiba inu wearing a blue sweater']
 
+        # Init loggers
+        if self.loggers:
+            for logger in self.loggers:
+                if isinstance(logger, WandBLogger):
+                    wandb.init(**logger._init_kwargs)
+
         # Load the model
         Trainer(model=self.model,
                 load_path=self.load_path,
@@ -213,11 +219,6 @@ class CleanFIDEvaluator:
     def evaluate(self):
         # Generate images and compute metrics for each guidance scale
         for guidance_scale in self.guidance_scales:
-            # Init loggers
-            if self.loggers:
-                for logger in self.loggers:
-                    if isinstance(logger, WandBLogger):
-                        wandb.init(**logger._init_kwargs)
             dist.barrier()
             # Generate images and compute metrics
             self._generate_images(guidance_scale=guidance_scale)
