@@ -26,13 +26,13 @@ class StableDiffusionInference():
             Default: ``None``.
     """
 
-    def __init__(self, chkpt_url: Optional[str] = None):
-        pretrained_flag = chkpt_url is None
+    def __init__(self, chkpt_path: Optional[str] = None):
+        pretrained_flag = chkpt_path is None
         self.device = torch.cuda.current_device()
 
         model = stable_diffusion_2(pretrained=pretrained_flag, encode_latents_in_fp16=True, fsdp=False)
         if not pretrained_flag:
-            get_file(path=chkpt_url, destination=LOCAL_CHECKPOINT_PATH)
+            get_file(path=chkpt_path, destination=LOCAL_CHECKPOINT_PATH)
             state_dict = torch.load(LOCAL_CHECKPOINT_PATH)
             for key in list(state_dict['state']['model'].keys()):
                 if 'val_metrics.' in key:
