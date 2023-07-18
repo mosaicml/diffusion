@@ -82,7 +82,7 @@ class CleanFIDEvaluator:
         self.prompts = prompts if prompts is not None else ['A shiba inu wearing a blue sweater']
 
         # Init loggers
-        if self.loggers:
+        if self.loggers and dist.get_local_rank() == 0:
             for logger in self.loggers:
                 if isinstance(logger, WandBLogger):
                     wandb.init(**logger._init_kwargs)
