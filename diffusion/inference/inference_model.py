@@ -5,6 +5,7 @@
 
 import base64
 import io
+from typing import Any, Dict, List, Optional
 
 import torch
 from composer.utils.file_helpers import get_file
@@ -16,22 +17,22 @@ from diffusion.models import stable_diffusion_2
 LOCAL_CHECKPOINT_PATH = '/tmp/model.pt'
 
 
-def download_model():
-    """Download model from remote storage."""
-    model_uri = 'oci://mosaicml-internal-checkpoints/stable-diffusion-hero-run/4-13-512-ema/ep5-ba850000-rank0.pt'
-    get_file(path=model_uri, destination=LOCAL_CHECKPOINT_PATH)
-
-
 class StableDiffusionInference():
-    """Inference endpoint class for Stable Diffusion."""
+    """Inference endpoint class for Stable Diffusion.
 
-    def __init__(self):
-        pretrained_flag = False
+    Args:
+        chkpt_path (str, optional): The path to the local folder, URL or object score that contains the checkpoint.
+            If not specified, pulls the pretrained Stable Diffusion 2.0 base weights from HuggingFace.
+            Default: ``None``.
+    """
+
+    def __init__(self, chkpt_path: Optional[str] = None):
+        pretrained_flag = chkpt_path is None
         self.device = torch.cuda.current_device()
 
         model = stable_diffusion_2(pretrained=pretrained_flag, encode_latents_in_fp16=True, fsdp=False)
         if not pretrained_flag:
-            download_model()
+            get_file(path=chkpt_path, destination=LOCAL_CHECKPOINT_PATH)
             state_dict = torch.load(LOCAL_CHECKPOINT_PATH)
             for key in list(state_dict['state']['model'].keys()):
                 if 'val_metrics.' in key:
@@ -40,29 +41,42 @@ class StableDiffusionInference():
         model.to(self.device)
         self.model = model.eval()
 
-    def predict(self, **inputs):
-        if 'prompt' not in inputs:
-            print('No prompt provided, returning nothing')
-            return
+    def predict(self, model_requests: List[Dict[str, Any]]):
+        prompts = []
+        negative_prompts = []
+        generate_kwargs = {}
 
-        # Parse and cast args
-        kwargs = {}
-        for arg in ['prompt', 'negative_prompt']:
-            if arg in inputs:
-                kwargs[arg] = inputs[arg]
-        for arg in ['height', 'width', 'num_inference_steps', 'num_images_per_prompt', 'seed']:
-            if arg in inputs:
-                kwargs[arg] = int(inputs[arg])
-        for arg in ['guidance_scale']:
-            if arg in inputs:
-                kwargs[arg] = float(inputs[arg])
+        # assumes the same generate_kwargs across all samples
+        for req in model_requests:
+            if 'input' not in req:
+                raise RuntimeError('"input" must be provided to generate call')
+            inputs = req['input']
 
-        prompt = kwargs.pop('prompt')
-        prompts = [prompt] if isinstance(prompt, str) else prompt
+            # Prompts and negative prompts if available
+            if isinstance(inputs, str):
+                prompts.append(inputs)
+            elif isinstance(input, Dict):
+                if 'prompt' not in req:
+                    raise RuntimeError('"prompt" must be provided to generate call if using a dict as input')
+                prompts.append(inputs['prompt'])
+                if 'negative_prompt' in req:
+                    negative_prompts.append(inputs['negative_prompt'])
+
+            generate_kwargs = req['parameters']
+
+        # Check for prompts
+        if len(prompts) == 0:
+            raise RuntimeError('No prompts provided, must be either a string or dictionary with "prompt"')
+
+        # Check negative prompt length
+        if len(negative_prompts) == 0:
+            negative_prompts = None
+        elif len(prompts) != len(negative_prompts):
+            raise RuntimeError('There must be the same number of negative prompts as prompts.')
 
         # Generate images
         with torch.cuda.amp.autocast(True):
-            imgs = self.model.generate(prompt=prompts, **kwargs).cpu()
+            imgs = self.model.generate(prompt=prompts, negative_prompt=negative_prompts, **generate_kwargs).cpu()
 
         # Send as bytes
         png_images = []
@@ -72,5 +86,5 @@ class StableDiffusionInference():
             img_byte_arr = io.BytesIO()
             pil_image.save(img_byte_arr, format='PNG')
             base64_encoded_image = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
-            png_images.append(bytes(base64_encoded_image, 'utf-8'))
+            png_images.append(base64_encoded_image)
         return png_images
