@@ -5,7 +5,7 @@
 
 import base64
 import io
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import torch
 from composer.utils.file_helpers import get_file
@@ -17,22 +17,21 @@ from diffusion.models import stable_diffusion_2
 LOCAL_CHECKPOINT_PATH = '/tmp/model.pt'
 
 
-def download_model():
-    """Download model from remote storage."""
-    model_uri = 'oci://mosaicml-internal-checkpoints/stable-diffusion-hero-run/4-13-512-ema/ep5-ba850000-rank0.pt'
-    get_file(path=model_uri, destination=LOCAL_CHECKPOINT_PATH)
-
-
 class StableDiffusionInference():
-    """Inference endpoint class for Stable Diffusion."""
+    """Inference endpoint class for Stable Diffusion.
+    
+    Args:
+        chkpt_path (str, optional): The path to the local folder, URL or object score that contains the checkpoint.
+            If not specified, pulls the pretrained Stable Diffusion 2.0 base weights from HuggingFace.
+            Default: ``None``."""
 
-    def __init__(self):
-        pretrained_flag = False
+    def __init__(self, chkpt_url: Optional[str] = None):
+        pretrained_flag = chkpt_url is None
         self.device = torch.cuda.current_device()
 
         model = stable_diffusion_2(pretrained=pretrained_flag, encode_latents_in_fp16=True, fsdp=False)
         if not pretrained_flag:
-            download_model()
+            get_file(path=chkpt_url, destination=LOCAL_CHECKPOINT_PATH)
             state_dict = torch.load(LOCAL_CHECKPOINT_PATH)
             for key in list(state_dict['state']['model'].keys()):
                 if 'val_metrics.' in key:
