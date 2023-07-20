@@ -24,6 +24,10 @@ eval_dataloader:
   resize_size: ${image_size}
   image_key: image # This should be set to the image key specific to the eval dataset
   caption_key: captions # This should be set to the caption key specific to the eval dataset
+  transform: # How to transform the images for evaluation
+    - _target_ : diffusion.datasets.laion.transforms.LargestCenterSquare
+      size: ${image_size}
+    - _target_: torchvision.transforms.ToTensor
   dataloader_kwargs:
     drop_last: false
     shuffle: false

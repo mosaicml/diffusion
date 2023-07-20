@@ -60,6 +60,8 @@ class CleanFIDEvaluator:
                  guidance_scales: Optional[List[float]] = None,
                  size: int = 256,
                  batch_size: int = 16,
+                 image_key: str = 'image',
+                 caption_key: str = 'caption',
                  loggers: Optional[List[LoggerDestination]] = None,
                  seed: int = 17,
                  output_dir: str = '/tmp/',
@@ -74,6 +76,8 @@ class CleanFIDEvaluator:
         self.guidance_scales = guidance_scales if guidance_scales is not None else [1.0]
         self.size = size
         self.batch_size = batch_size
+        self.image_key = image_key
+        self.caption_key = caption_key
         self.loggers = loggers
         self.seed = seed
         self.output_dir = output_dir
@@ -91,7 +95,8 @@ class CleanFIDEvaluator:
         Trainer(model=self.model,
                 load_path=self.load_path,
                 load_weights_only=True,
-                eval_dataloader=self.eval_dataloader)
+                eval_dataloader=self.eval_dataloader,
+                seed=self.seed)
 
         # Move CLIP metric to device
         self.device = dist.get_local_rank()
@@ -121,15 +126,15 @@ class CleanFIDEvaluator:
         prompts = {}
         # Iterate over the eval dataloader
         num_batches = len(self.eval_dataloader)
+        starting_seed = self.seed + num_batches * dist.get_local_rank()
         for batch_id, batch in tqdm(enumerate(self.eval_dataloader)):
             # Break if enough samples have been generated
             if batch_id * self.batch_size * dist.get_world_size() >= self.num_samples:
                 break
 
-            real_images = batch['image']
-            captions = batch['captions']
+            real_images = batch[self.image_key]
+            captions = batch[self.caption_key]
             # Ensure a new seed for each batch, as randomness in model.generate is fixed.
-            starting_seed = self.seed + num_batches * dist.get_local_rank()
             seed = starting_seed + batch_id
             # Generate images from the captions
             with get_precision_context(self.precision):
@@ -140,12 +145,16 @@ class CleanFIDEvaluator:
                                                        seed=seed,
                                                        progress_bar=False)  # type: ignore
             # Get the prompts from the tokens
-            text_captions = [self.tokenizer.decode(caption, skip_special_tokens=True) for caption in captions]
+            text_captions = self.tokenizer.batch_decode(captions, skip_special_tokens=True)
             self.clip_metric.update((generated_images * 255).to(torch.uint8), text_captions)
             # Save the real images
+            # Verify that the real images are in the proper range
+            if real_images.min() < 0.0 or real_images.max() > 1.0:
+                raise ValueError(
+                    f'Images are expected to be in the range [0, 1]. Got max {real_images.max()} and min {real_images.min()}'
+                )
             for i, img in enumerate(real_images):
-                # Real images are -1, 1, so rescale to 0, 1.
-                to_pil_image((img + 1) / 2).save(f'{real_image_path}/{batch_id}_{i}_rank_{dist.get_local_rank()}.png')
+                to_pil_image(img).save(f'{real_image_path}/{batch_id}_{i}_rank_{dist.get_local_rank()}.png')
                 prompts[f'{batch_id}_{i}_rank_{dist.get_local_rank()}'] = text_captions[i]
             # Save the generated images
             for i, img in enumerate(generated_images):
