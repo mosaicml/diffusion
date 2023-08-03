@@ -17,6 +17,15 @@ from diffusion.models import stable_diffusion_2
 LOCAL_CHECKPOINT_PATH = '/tmp/model.pt'
 
 
+def download_checkpoint(chkpt_path: str):
+    """Downloads the Stable Diffusion checkpoint to the local filesystem.
+
+    Args:
+        chkpt_path (str): The path to the local folder, URL or object score that contains the checkpoint.
+    """
+    get_file(path=chkpt_path, destination=LOCAL_CHECKPOINT_PATH)
+
+
 class StableDiffusionInference():
     """Inference endpoint class for Stable Diffusion.
 
@@ -26,13 +35,11 @@ class StableDiffusionInference():
             Default: ``None``.
     """
 
-    def __init__(self, chkpt_path: Optional[str] = None):
-        pretrained_flag = chkpt_path is None
+    def __init__(self, pretrained: bool = False):
         self.device = torch.cuda.current_device()
 
-        model = stable_diffusion_2(pretrained=pretrained_flag, encode_latents_in_fp16=True, fsdp=False)
-        if not pretrained_flag:
-            get_file(path=chkpt_path, destination=LOCAL_CHECKPOINT_PATH)
+        model = stable_diffusion_2(pretrained=pretrained, encode_latents_in_fp16=True, fsdp=False)
+        if not pretrained:
             state_dict = torch.load(LOCAL_CHECKPOINT_PATH)
             for key in list(state_dict['state']['model'].keys()):
                 if 'val_metrics.' in key:
