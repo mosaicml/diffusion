@@ -10,7 +10,7 @@ install_requires = [
     'mosaicml-streaming>=0.4.0,<1.0',
     'hydra-core>=1.2',
     'hydra-colorlog>=1.1.0',
-    'diffusers[torch]==0.16.0',
+    'diffusers[torch]==0.19.0',
     'transformers[torch]==4.29.2',
     'wandb==0.15.4',
     'xformers==0.0.16',
