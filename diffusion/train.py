@@ -7,6 +7,7 @@ import operator
 from collections.abc import Iterable
 from typing import Any, Dict, List, Optional, Union
 
+import time
 import hydra
 from composer import Algorithm, Callback, ComposerModel, DataSpec, Evaluator, Trainer
 from composer.algorithms.low_precision_groupnorm import apply_low_precision_groupnorm
@@ -38,6 +39,9 @@ def train(config: DictConfig) -> None:
         config.dataset.train_dataset,
         batch_size=config.dataset.train_batch_size // dist.get_world_size(),
     )
+    
+    # fix stochastic failures in streaming datasets
+    time.sleep(10)
 
     # Composer can take dataloaders, dataspecs, evaluators, or list of evaluators
     eval_set: Optional[Union[DataSpec, List[Evaluator]]] = None
@@ -59,6 +63,9 @@ def train(config: DictConfig) -> None:
     else:
         eval_set = hydra.utils.instantiate(config.dataset.eval_dataset,
                                            batch_size=config.dataset.eval_batch_size // dist.get_world_size())
+        
+    # fix stochastic failures in streaming datasets
+    time.sleep(10)
 
     # Build list of loggers, callbacks, and algorithms to pass to trainer
     logger: List[LoggerDestination] = []
