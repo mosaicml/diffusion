@@ -1,0 +1,212 @@
+run_name: sd2-sdxl-unet-256
+cluster: r9z1
+gpu_num: 32
+env_variables:
+  - key: NCCL_IB_PCI_RELAXED_ORDERING
+    value: "0"
+image: mosaicml/pytorch_vision:2.0.1_cu118-python3.10-ubuntu20.04
+compute:
+  instance: coreweave.h100-80
+scheduling:
+    resumable: true
+    priority: medium
+integrations:
+  - integration_type: "git_repo"
+    git_repo: jazcollins/diffusion
+    git_branch: sdxl
+    pip_install: .[all]
+  - integration_type: "wandb"
+    project: jasmine-sd2-sdxl-unet
+    entity: mosaic-ml
+command: |
+  pip install -U ninja
+  pip install -U git+https://github.com/facebookresearch/xformers
+  cd diffusion
+  HYDRA_FULL_ERROR=1 composer run.py --config-path /mnt/config --config-name parameters
+  (echo "Command failed - killing python" && pkill python && exit 1)
+
+parameters:
+  project:  jasmine-sd2-sdxl-unet
+  batch_size: 2048
+  seed: 17
+  scale_schedule_ratio: 1.0
+  name: 90m-sdxl-unet # wandb run name
+  eval_first: true
+  algorithms:
+    low_precision_groupnorm:
+      attribute: unet
+      precision: amp_fp16
+    low_precision_layernorm:
+      attribute: unet
+      precision: amp_fp16
+  model:
+    _target_: diffusion.models.models.stable_diffusion_2
+    pretrained: false
+    model_name: stabilityai/stable-diffusion-2-base
+    unet_model_name: stabilityai/stable-diffusion-xl-refiner-1.0
+    precomputed_latents: true
+    encode_latents_in_fp16: true
+    fsdp: true
+    val_metrics:
+      - _target_: torchmetrics.MeanSquaredError
+    val_guidance_scales: []
+    loss_bins: []
+  dataset:
+    train_batch_size: ${batch_size}
+    eval_batch_size: 1024 # Should be 8 per device
+    train_dataset:
+      _target_: diffusion.datasets.laion.laion.build_streaming_laion_dataloader
+      remote:
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/0/256-512
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/0/512-768
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/0/768-1024
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/0/1024-1048576
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/1/256-512
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/1/512-768
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/1/768-1024
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/1/1024-1048576
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/2/256-512
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/2/512-768
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/2/768-1024
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/2/1024-1048576
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/3/256-512
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/3/512-768
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/3/768-1024
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/3/1024-1048576
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/4/256-512
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/4/512-768
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/4/768-1024
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/4/1024-1048576
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/5/256-512
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/5/512-768
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/5/768-1024
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/5/1024-1048576
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/6/256-512
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/6/512-768
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/6/768-1024
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/6/1024-1048576
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/7/256-512
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/7/512-768
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/7/768-1024
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/7/1024-1048576
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/8/256-512
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/8/512-768
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/8/768-1024
+        - oci://mosaicml-internal-dataset-laion2b-en/4.5v2/10m-subsets/8/1024-1048576
+      local:
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/0/256-512
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/0/512-768
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/0/768-1024
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/0/1024-1048576
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/1/256-512
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/1/512-768
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/1/768-1024
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/1/1024-1048576
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/2/256-512
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/2/512-768
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/2/768-1024
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/2/1024-1048576
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/3/256-512
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/3/512-768
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/3/768-1024
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/3/1024-1048576
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/4/256-512
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/4/512-768
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/4/768-1024
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/4/1024-1048576
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/5/256-512
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/5/512-768
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/5/768-1024
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/5/1024-1048576
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/6/256-512
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/6/512-768
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/6/768-1024
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/6/1024-1048576
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/7/256-512
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/7/512-768
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/7/768-1024
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/7/1024-1048576
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/8/256-512
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/8/512-768
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/8/768-1024
+        - /tmp/mds-cache/mds-laion2b-en/4.5v2/10m-subsets/8/1024-1048576
+      batch_size: ${batch_size}
+      tokenizer_name_or_path: stabilityai/stable-diffusion-2-base
+      caption_drop_prob: 0.1
+      resize_size: 256
+      drop_last: true
+      shuffle: true
+      prefetch_factor: 2
+      num_workers: 8
+      persistent_workers: true
+      pin_memory: true
+      download_timeout: 900
+      num_canonical_nodes: 32
+    eval_dataset:
+      _target_: diffusion.datasets.coco.coco_captions.build_streaming_cocoval_dataloader
+      remote:  oci://mosaicml-internal-dataset-coco/2014/val/10k-1/
+      local: /tmp/mds-cache/mds-coco-10k-1/
+      batch_size: 8
+      resize_size: 256
+      prefetch_factor: 2
+      num_workers: 8
+      persistent_workers: True
+      pin_memory: True
+  optimizer:
+    _target_: torch.optim.AdamW
+    lr: 1.0e-4
+    weight_decay: 0.01
+  scheduler:
+    _target_: composer.optim.MultiStepWithWarmupScheduler
+    t_warmup: 10000ba
+    milestones:
+      - 2000ep
+  logger:
+    wandb:
+      _target_: composer.loggers.wandb_logger.WandBLogger
+      name: ${name}
+      project: ${project}
+      group: ${name}
+  callbacks:
+    speed_monitor:
+      _target_: composer.callbacks.speed_monitor.SpeedMonitor
+      window_size: 10
+    lr_monitor:
+      _target_: composer.callbacks.lr_monitor.LRMonitor
+    memory_monitor:
+      _target_: composer.callbacks.memory_monitor.MemoryMonitor
+    runtime_estimator:
+      _target_: composer.callbacks.runtime_estimator.RuntimeEstimator
+    optimizer_monitor:
+      _target_: composer.callbacks.OptimizerMonitor
+    image_logger:
+      _target_: diffusion.callbacks.log_diffusion_images.LogDiffusionImages
+      prompts:
+        - a couple waiting to cross the street underneath an umbrella.
+        - three men walking in the rain with umbrellas.
+        - a man is riding a red motor cycle, with baskets.
+        - a clock that has animal pictures instead of numbers.
+        - a brightly decorated bus sits on the road.
+        - a horse bucking with a rider on it, completely vertical, with another horse and onlookers.
+        - a white and blue bus is on a city street at night.
+        - a large clock tower on a building by a river
+        - beans and other food is sitting on a plate.
+        - a group of people that are standing up on a tennis court
+      size: 256
+      guidance_scale: 5.0
+  trainer:
+    _target_: composer.Trainer
+    device: gpu
+    max_duration: 550000ba
+    eval_interval: 1000ba
+    device_train_microbatch_size: 64
+    run_name: ${name}
+    seed: ${seed}
+    scale_schedule_ratio: ${scale_schedule_ratio}
+    save_folder:  oci://mosaicml-internal-checkpoints/jasmine/stable-diffusion-sdxl-unet-256-90m-h100/
+    save_interval: 10000ba
+    save_overwrite: false
+    autoresume: true
+    fsdp_config:
+      sharding_strategy: "SHARD_GRAD_OP"
+    progress_bar: false
