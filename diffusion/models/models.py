@@ -28,6 +28,7 @@ except:
 def stable_diffusion_2(
     model_name: str = 'stabilityai/stable-diffusion-2-base',
     unet_model_name: str = 'stabilityai/stable-diffusion-2-base',
+    vae_model_name: str = 'stabilityai/stable-diffusion-2-base',
     pretrained: bool = True,
     prediction_type: str = 'epsilon',
     train_metrics: Optional[List] = None,
@@ -48,7 +49,9 @@ def stable_diffusion_2(
         model_name (str, optional): Name of the model to load. Determines the text encoder and autoencder.
             Defaults to 'stabilityai/stable-diffusion-2-base'.
         unet_model_name (str, optional): Name of the UNet model to load. Defaults to 
-            'stabilityai/stable-diffusion-2-base'
+            'stabilityai/stable-diffusion-2-base'.
+        vae_model_name (str, optional): Name of the VAE model to load. Defaults to 
+            'stabilityai/stable-diffusion-2-base'.
         pretrained (bool, optional): Whether to load pretrained weights. Defaults to True.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
@@ -84,6 +87,7 @@ def stable_diffusion_2(
         config = PretrainedConfig.get_config_dict(unet_model_name, subfolder='unet')
 
         if unet_model_name == 'stabilityai/stable-diffusion-xl-refiner-1.0': # SDXL
+            print('using SDXL unet!')
             config[0]['addition_embed_type'] = None
             config[0]['cross_attention_dim'] = 1024
 
@@ -95,10 +99,13 @@ def stable_diffusion_2(
         unet.down_blocks._fsdp_wrap = False
 
     if encode_latents_in_fp16:
-        vae = AutoencoderKL.from_pretrained(model_name, subfolder='vae', torch_dtype=torch.float16)
+        try: 
+            vae = AutoencoderKL.from_pretrained(vae_model_name, subfolder='vae', torch_dtype=torch.float16)
+        except: # for handling SDXL vae fp16 fixed checkpoint
+            vae = AutoencoderKL.from_pretrained(vae_model_name, torch_dtype=torch.float16)
         text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder', torch_dtype=torch.float16)
     else:
-        vae = AutoencoderKL.from_pretrained(model_name, subfolder='vae')
+        vae = AutoencoderKL.from_pretrained(vae_model_name, subfolder='vae')
         text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder')
 
     tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer')
