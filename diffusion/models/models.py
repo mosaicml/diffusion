@@ -84,7 +84,6 @@ def stable_diffusion_2(
         config = PretrainedConfig.get_config_dict(unet_model_name, subfolder='unet')
 
         if unet_model_name == 'stabilityai/stable-diffusion-xl-refiner-1.0': # SDXL
-            print('running SDXL!')
             config[0]['addition_embed_type'] = None
             config[0]['cross_attention_dim'] = 1024
 

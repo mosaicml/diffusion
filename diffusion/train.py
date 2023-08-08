@@ -42,7 +42,6 @@ def train(config: DictConfig) -> None:
 
     # fix stochastic failures in streaming datasets
     time.sleep(10)
-    print('sleeping afer dataset creation')
 
     # Composer can take dataloaders, dataspecs, evaluators, or list of evaluators
     eval_set: Optional[Union[DataSpec, List[Evaluator]]] = None
@@ -67,7 +66,6 @@ def train(config: DictConfig) -> None:
         
     # fix stochastic failures in streaming datasets
     time.sleep(10)
-    print('sleeping afer dataset creation')
 
     # Build list of loggers, callbacks, and algorithms to pass to trainer
     logger: List[LoggerDestination] = []
