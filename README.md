@@ -47,6 +47,19 @@ Here are the system settings we recommend to start training your own diffusion m
     - Ubuntu Version: 20.04
 - Use a system with NVIDIA GPUs
 
+- For running on NVIDIA H100s, use a docker image with PyTorch 2.0+ e.g. [MosaicML's PyTorch base image](https://hub.docker.com/r/mosaicml/pytorch/tags)
+  - Recommended tag: `mosaicml/pytorch_vision:2.0.1_cu118-python3.10-ubuntu20.04`
+  - This image comes pre-configured with the following dependencies:
+    - PyTorch Version: 2.0.1
+    - CUDA Version: 11.8
+    - Python Version: 3.10
+    - Ubuntu Version: 20.04
+  - Depending on the training config, an additional install of `xformers` may be needed:
+    ```
+    pip install -U ninja
+    pip install -U git+https://github.com/facebookresearch/xformers
+    ```
+
 # How many GPUs do I need?
 
 We benchmarked the U-Net training throughput as we scale the number of A100 GPUs from 8 to 128. Our time estimates are based on training Stable Diffusion 2.0 base on 1,126,400,000 images at 256x256 resolution and 1,740,800,000 images at 512x512 resolution. Our cost estimates are based on $2 / A100-hour. Since the time and cost estimates are for the U-Net only, these only hold if the VAE and CLIP latents are computed before training. It took 3,784 A100-hours (cost of $7,600) to pre-compute the VAE and CLIP latents offline. If you are computing VAE and CLIP latents while training, expect a 1.4x increase in time and cost.
