@@ -86,17 +86,22 @@ def stable_diffusion_2(
     else:
         config = PretrainedConfig.get_config_dict(unet_model_name, subfolder='unet')
 
-        if unet_model_name == 'stabilityai/stable-diffusion-xl-refiner-1.0': # SDXL
+        if unet_model_name == 'stabilityai/stable-diffusion-xl-refiner-1.0' or unet_model_name == 'stabilityai/stable-diffusion-xl-base-1.0': # SDXL
             print('using SDXL unet!')
             config[0]['addition_embed_type'] = None
             config[0]['cross_attention_dim'] = 1024
 
         unet = UNet2DConditionModel(**config[0])
 
-    if unet_model_name == 'stabilityai/stable-diffusion-xl-refiner-1.0': # SDXL
+    if unet_model_name == 'stabilityai/stable-diffusion-xl-refiner-1.0' or unet_model_name == 'stabilityai/stable-diffusion-xl-base-1.0': # SDXL
         # Can't fsdp wrap up_blocks or down_blocks because the forward pass calls length on these
         unet.up_blocks._fsdp_wrap = False
         unet.down_blocks._fsdp_wrap = False
+        # for block in unet.up_blocks:
+        #     block._fsdp_wrap = False
+        # for block in unet.down_blocks:
+        #     block._fsdp_wrap = False
+
 
     if encode_latents_in_fp16:
         try: 
