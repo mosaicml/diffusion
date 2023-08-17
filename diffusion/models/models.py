@@ -144,8 +144,8 @@ def stable_diffusion_xl(
     prompts. Currently uses UNet and VAE config from SDXL, but text encoder/tokenizer from SD2.
 
     Args:
-        model_name (str, optional): Name of the model to load. Determines the text encoder and autoencder.
-            Defaults to 'stabilityai/stable-diffusion-2-base'.
+        model_name (str, optional): Name of the model to load. Determines the text encoder, tokenizer,
+            and noise scheduler. Defaults to 'stabilityai/stable-diffusion-2-base'.
         unet_model_name (str, optional): Name of the UNet model to load. Defaults to
             'stabilityai/stable-diffusion-xl-base-1.0'.
         vae_model_name (str, optional): Name of the VAE model to load. Defaults to
