@@ -6,16 +6,16 @@
 from setuptools import find_packages, setup
 
 install_requires = [
-    'mosaicml',
+    'mosaicml==0.15.1',
     'mosaicml-streaming>=0.4.0,<1.0',
     'hydra-core>=1.2',
     'hydra-colorlog>=1.1.0',
-    'diffusers[torch]==0.19.0',
-    'transformers[torch]',
+    'diffusers[torch]==0.19.3',
+    'transformers[torch]==4.31.0',
     'wandb==0.15.4',
-    'xformers',
-    'triton',
-    'torchmetrics[image]',
+    'xformers==0.0.20',
+    'triton==2.0.0',
+    'torchmetrics[image]==0.11.4',
     'clean-fid',
     'clip@git+https://github.com/openai/CLIP.git',
 ]

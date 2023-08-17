@@ -10,7 +10,12 @@ integrations:
     git_branch: main
     pip_install: .[all]
 model:
+  downloader: diffusion.inference.inference_model.download_checkpoint
+  download_parameters:
+    chkpt_path:  # Path to download the checkpoint to evaluate
   model_handler: diffusion.inference.inference_model.StableDiffusionInference
+  model_parameters:
+    pretrained: false
 command: |
   export PYTHONPATH=$PYTHONPATH:/code/diffusion
   rm /usr/lib/python3/dist-packages/packaging-23.1.dist-info/REQUESTED
