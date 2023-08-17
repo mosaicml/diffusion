@@ -44,8 +44,7 @@ def stable_diffusion_2(
     prompts.
 
     Args:
-        model_name (str, optional): Name of the model to load. Determines the text encoder and autoencder.
-            Defaults to 'stabilityai/stable-diffusion-2-base'.
+        model_name (str, optional): Name of the model to load. Defaults to 'stabilityai/stable-diffusion-2-base'.
         pretrained (bool, optional): Whether to load pretrained weights. Defaults to True.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
