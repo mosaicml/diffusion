@@ -48,9 +48,9 @@ def stable_diffusion_2(
     Args:
         model_name (str, optional): Name of the model to load. Determines the text encoder and autoencder.
             Defaults to 'stabilityai/stable-diffusion-2-base'.
-        unet_model_name (str, optional): Name of the UNet model to load. Defaults to 
+        unet_model_name (str, optional): Name of the UNet model to load. Defaults to
             'stabilityai/stable-diffusion-2-base'.
-        vae_model_name (str, optional): Name of the VAE model to load. Defaults to 
+        vae_model_name (str, optional): Name of the VAE model to load. Defaults to
             'stabilityai/stable-diffusion-2-base'.
         pretrained (bool, optional): Whether to load pretrained weights. Defaults to True.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
@@ -86,14 +86,14 @@ def stable_diffusion_2(
     else:
         config = PretrainedConfig.get_config_dict(unet_model_name, subfolder='unet')
 
-        if unet_model_name == 'stabilityai/stable-diffusion-xl-refiner-1.0' or unet_model_name == 'stabilityai/stable-diffusion-xl-base-1.0': # SDXL
+        if unet_model_name == 'stabilityai/stable-diffusion-xl-refiner-1.0' or unet_model_name == 'stabilityai/stable-diffusion-xl-base-1.0':  # SDXL
             print('using SDXL unet!')
             config[0]['addition_embed_type'] = None
             config[0]['cross_attention_dim'] = 1024
 
         unet = UNet2DConditionModel(**config[0])
 
-    if unet_model_name == 'stabilityai/stable-diffusion-xl-refiner-1.0' or unet_model_name == 'stabilityai/stable-diffusion-xl-base-1.0': # SDXL
+    if unet_model_name == 'stabilityai/stable-diffusion-xl-refiner-1.0' or unet_model_name == 'stabilityai/stable-diffusion-xl-base-1.0':  # SDXL
         # Can't fsdp wrap up_blocks or down_blocks because the forward pass calls length on these
         unet.up_blocks._fsdp_wrap = False
         unet.down_blocks._fsdp_wrap = False
@@ -102,11 +102,10 @@ def stable_diffusion_2(
         # for block in unet.down_blocks:
         #     block._fsdp_wrap = False
 
-
     if encode_latents_in_fp16:
-        try: 
+        try:
             vae = AutoencoderKL.from_pretrained(vae_model_name, subfolder='vae', torch_dtype=torch.float16)
-        except: # for handling SDXL vae fp16 fixed checkpoint
+        except:  # for handling SDXL vae fp16 fixed checkpoint
             vae = AutoencoderKL.from_pretrained(vae_model_name, torch_dtype=torch.float16)
         text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder', torch_dtype=torch.float16)
     else:
