@@ -35,10 +35,11 @@ class StableDiffusionInference():
             Default: ``None``.
     """
 
-    def __init__(self, pretrained: bool = False, prediction_type: str = 'epsilon'):
+    def __init__(self, model_name: str = 'stabilityai/stable-diffusion-2-base', pretrained: bool = False, prediction_type: str = 'epsilon'):
         self.device = torch.cuda.current_device()
 
         model = stable_diffusion_2(
+            model_name=model_name,
             pretrained=pretrained,
             prediction_type=prediction_type,
             encode_latents_in_fp16=True,
