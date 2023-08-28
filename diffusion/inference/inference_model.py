@@ -59,6 +59,7 @@ class StableDiffusionInference():
         prompts = []
         negative_prompts = []
         generate_kwargs = {}
+        print(model_requests)
 
         # assumes the same generate_kwargs across all samples
         for req in model_requests:
