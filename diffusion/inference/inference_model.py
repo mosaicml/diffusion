@@ -70,10 +70,10 @@ class StableDiffusionInference():
             if isinstance(inputs, str):
                 prompts.append(inputs)
             elif isinstance(inputs, Dict):
-                if 'prompt' not in req:
+                if 'prompt' not in inputs:
                     raise RuntimeError('"prompt" must be provided to generate call if using a dict as input')
                 prompts.append(inputs['prompt'])
-                if 'negative_prompt' in req:
+                if 'negative_prompt' in inputs:
                     negative_prompts.append(inputs['negative_prompt'])
             else:
                 raise RuntimeError(f'Input must be of type string or dict, but it is type: {type(inputs)}')
