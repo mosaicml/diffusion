@@ -59,7 +59,6 @@ class StableDiffusionInference():
         prompts = []
         negative_prompts = []
         generate_kwargs = {}
-        print(model_requests)
 
         # assumes the same generate_kwargs across all samples
         for req in model_requests:
@@ -70,7 +69,7 @@ class StableDiffusionInference():
             # Prompts and negative prompts if available
             if isinstance(inputs, str):
                 prompts.append(inputs)
-            elif isinstance(input, Dict):
+            elif isinstance(inputs, Dict):
                 if 'prompt' not in req:
                     raise RuntimeError('"prompt" must be provided to generate call if using a dict as input')
                 prompts.append(inputs['prompt'])
