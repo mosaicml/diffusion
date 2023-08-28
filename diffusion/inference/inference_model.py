@@ -75,6 +75,8 @@ class StableDiffusionInference():
                 prompts.append(inputs['prompt'])
                 if 'negative_prompt' in req:
                     negative_prompts.append(inputs['negative_prompt'])
+            else:
+                raise RuntimeError(f'Input must be of type string or dict, but it is type: {type(inputs)}')
 
             generate_kwargs = req['parameters']
 
