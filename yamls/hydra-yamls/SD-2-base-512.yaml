@@ -1,8 +1,6 @@
 project: # Insert wandb project name
-batch_size: 2048
-seed: 17
-scale_schedule_ratio: 1.0
 name: # Insert wandb run name
+seed: 17
 eval_first: false
 algorithms:
   ema:
@@ -28,15 +26,14 @@ model:
   val_guidance_scales: []
   loss_bins: []
 dataset:
-  train_batch_size: ${batch_size}
-  eval_batch_size: 1024 # Should be 8 per device
+  train_batch_size: 2048 # Global training batch size
+  eval_batch_size: 1024  # Global evaluation batch size
   train_dataset:
     _target_: diffusion.datasets.laion.laion.build_streaming_laion_dataloader
     remote:
       # Path to object store bucket(s)
     local:
       # Path to corresponding local dataset(s)
-    batch_size: ${batch_size}
     tokenizer_name_or_path: stabilityai/stable-diffusion-2-base
     caption_drop_prob: 0.1
     resize_size: 512
@@ -52,7 +49,6 @@ dataset:
     _target_: diffusion.datasets.coco.coco_captions.build_streaming_cocoval_dataloader
     remote: # Path to object store bucket
     local: # Path to local dataset cache
-    batch_size: 8
     resize_size: 512
     prefetch_factor: 2
     num_workers: 8
@@ -63,10 +59,9 @@ optimizer:
   lr: 1.0e-4
   weight_decay: 0.01
 scheduler:
-  _target_: composer.optim.MultiStepWithWarmupScheduler
+  _target_: composer.optim.LinearWithWarmupScheduler
   t_warmup: 10000ba
-  milestones:
-    - 200ep
+  alpha_f: 1.0
 logger:
   wandb:
     _target_: composer.loggers.wandb_logger.WandBLogger
@@ -93,7 +88,6 @@ trainer:
   device_train_microbatch_size: 16
   run_name: ${name}
   seed: ${seed}
-  scale_schedule_ratio: ${scale_schedule_ratio}
   save_folder:  # Insert path to save folder or bucket
   save_interval: 10000ba
   save_overwrite: true

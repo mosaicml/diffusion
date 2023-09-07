@@ -1,7 +1,7 @@
 <h2><p align="center">Stable Diffusion Training with MosaicML</p></h2>
 
 <p align="center">
-    <a href="https://join.slack.com/t/mosaicml-community/shared_invite/zt-1btms90mc-GipE2ufuPkKY0QBrmF3LSA">
+    <a href="https://mosaicml.me/slack">
         <img alt="Chat @ Slack" src="https://img.shields.io/badge/slack-chat-2eb67d.svg?logo=slack">
     </a>
     <a href="https://github.com/mosaicml/examples/blob/main/LICENSE">
@@ -47,6 +47,19 @@ Here are the system settings we recommend to start training your own diffusion m
     - Ubuntu Version: 20.04
 - Use a system with NVIDIA GPUs
 
+- For running on NVIDIA H100s, use a docker image with PyTorch 2.0+ e.g. [MosaicML's PyTorch base image](https://hub.docker.com/r/mosaicml/pytorch/tags)
+  - Recommended tag: `mosaicml/pytorch_vision:2.0.1_cu118-python3.10-ubuntu20.04`
+  - This image comes pre-configured with the following dependencies:
+    - PyTorch Version: 2.0.1
+    - CUDA Version: 11.8
+    - Python Version: 3.10
+    - Ubuntu Version: 20.04
+  - Depending on the training config, an additional install of `xformers` may be needed:
+    ```
+    pip install -U ninja
+    pip install -U git+https://github.com/facebookresearch/xformers
+    ```
+
 # How many GPUs do I need?
 
 We benchmarked the U-Net training throughput as we scale the number of A100 GPUs from 8 to 128. Our time estimates are based on training Stable Diffusion 2.0 base on 1,126,400,000 images at 256x256 resolution and 1,740,800,000 images at 512x512 resolution. Our cost estimates are based on $2 / A100-hour. Since the time and cost estimates are for the U-Net only, these only hold if the VAE and CLIP latents are computed before training. It took 3,784 A100-hours (cost of $7,600) to pre-compute the VAE and CLIP latents offline. If you are computing VAE and CLIP latents while training, expect a 1.4x increase in time and cost.
@@ -69,13 +82,13 @@ pip install -e .
 
 # Data Prep
 
-If you are interested in training on LAION-5B or evaluating on COCO Captions, we provide [scripts](https://github.com/mosaicml/diffusion2/tree/main/scripts) to download and process these datasets into Streaming datasets.
+If you are interested in training on LAION-5B or evaluating on COCO Captions, we provide [scripts](https://github.com/mosaicml/diffusion/tree/main/scripts) to download and process these datasets into Streaming datasets.
 
-Alternatively, you can use your own image-caption dataset(s) as long as samples are returned as a dictionary from a PyTorch Dataset class. To use a custom dataset with our configurations, define a function that returns a PyTorch DataLoader for the custom dataset (for an example, see [`build_streaming_laion_dataloader()`](https://github.com/mosaicml/diffusion2/blob/34e95ef50836581fab1bec3effaed8fa9d0ae464/diffusion/datasets/laion/laion.py#L115)). The best way to add custom code is to fork this repo, then add the python scripts to `diffusion/datasets`.
+Alternatively, you can use your own image-caption dataset(s) as long as samples are returned as a dictionary from a PyTorch Dataset class. To use a custom dataset with our configurations, define a function that returns a PyTorch DataLoader for the custom dataset (for an example, see [`build_streaming_laion_dataloader()`](https://github.com/mosaicml/diffusion/blob/34e95ef50836581fab1bec3effaed8fa9d0ae464/diffusion/datasets/laion/laion.py#L115)). The best way to add custom code is to fork this repo, then add the python scripts to `diffusion/datasets`.
 
 # Adjust config
 
-The configurations for the two phases of training are specified at [`SD-2-base-256.yaml`](https://github.com/mosaicml/diffusion2/blob/main/yamls/hydra-yamls/SD-2-base-256.yaml) and [`SD-2-base-512.yaml`](https://github.com/mosaicml/diffusion2/blob/main/yamls/hydra-yamls/SD-2-base-512.yaml). A few fields are left blank that need to be filled in to start training. The `dataset` field is the primary field to change. If you downloaded and converted the LAION-5B dataset into your own Streaming dataset, change the `remote` field under `train_dataset` to the bucket containing your streaming LAION-5B. Similarly for COCO validation, change the `remote` field under `eval_dataset` to the bucket containing your streaming COCO.
+The configurations for the two phases of training are specified at [`SD-2-base-256.yaml`](https://github.com/mosaicml/diffusion/blob/main/yamls/hydra-yamls/SD-2-base-256.yaml) and [`SD-2-base-512.yaml`](https://github.com/mosaicml/diffusion/blob/main/yamls/hydra-yamls/SD-2-base-512.yaml). A few fields are left blank that need to be filled in to start training. The `dataset` field is the primary field to change. If you downloaded and converted the LAION-5B dataset into your own Streaming dataset, change the `remote` field under `train_dataset` to the bucket containing your streaming LAION-5B. Similarly for COCO validation, change the `remote` field under `eval_dataset` to the bucket containing your streaming COCO.
 
 If you opted to use your own datasets, change the `_target_` field under both `train_dataset` and `eval_dataset` to contain the absolute path to the function that returns the PyTorch DataLoader for your dataset. Replace the fields after `_target_` with the arguments for your function.
 

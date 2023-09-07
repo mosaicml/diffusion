@@ -4,6 +4,7 @@
 """Train model."""
 
 import operator
+import time
 from collections.abc import Iterable
 from typing import Any, Dict, List, Optional, Union
 
@@ -38,6 +39,8 @@ def train(config: DictConfig) -> None:
         config.dataset.train_dataset,
         batch_size=config.dataset.train_batch_size // dist.get_world_size(),
     )
+    # Need to sleep for a bit to avoid dataloader crash
+    time.sleep(10)
 
     # Composer can take dataloaders, dataspecs, evaluators, or list of evaluators
     eval_set: Optional[Union[DataSpec, List[Evaluator]]] = None
@@ -52,6 +55,8 @@ def train(config: DictConfig) -> None:
                 config.dataset.eval_batch_size // dist.get_world_size(),
             )
             evaluator = hydra.utils.instantiate(eval_conf.evaluator, dataloader=eval_dataloader)
+            # Need to sleep for a bit to avoid dataloader crash
+            time.sleep(10)
             evaluators.append(evaluator)
 
         eval_set = evaluators
@@ -59,6 +64,8 @@ def train(config: DictConfig) -> None:
     else:
         eval_set = hydra.utils.instantiate(config.dataset.eval_dataset,
                                            batch_size=config.dataset.eval_batch_size // dist.get_world_size())
+        # Need to sleep for a bit to avoid dataloader crash
+        time.sleep(10)
 
     # Build list of loggers, callbacks, and algorithms to pass to trainer
     logger: List[LoggerDestination] = []
