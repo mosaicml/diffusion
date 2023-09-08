@@ -3,6 +3,8 @@
 
 """Synthetic Image-Caption dataset."""
 
+from typing import Dict, Optional
+
 import torch
 from composer.utils import dist
 from torch.utils.data import DataLoader, Dataset
@@ -36,7 +38,7 @@ def build_synthetic_image_caption_dataloader(
     image_size: int = 512,
     caption_length: int = 77,
     num_samples: int = 100_000,
-    **dataloader_kwargs,
+    dataloader_kwargs: Optional[Dict] = None,
 ):
     """Builds a dataloader for the Synthetic Image-Caption dataset.
 
@@ -47,6 +49,10 @@ def build_synthetic_image_caption_dataloader(
         num_samples (int): Number of samples in the synthetic dataset. Default: ``100_000``.
         **dataloader_kwargs: Additional arguments to pass to the dataloader.
     """
+
+    if dataloader_kwargs is None:
+        dataloader_kwargs = {}
+
     dataset = SyntheticImageCaptionDataset(
         image_size=image_size,
         caption_length=caption_length,
