@@ -20,7 +20,7 @@ class SyntheticImageCaptionDataset(Dataset):
     """
 
     def __init__(self, image_size: int = 512, caption_length: int = 77, num_samples: int = 100_000):
-        
+
         super().__init__()
         self.num_samples = num_samples
         self.images = torch.randn(num_samples, 3, image_size, image_size)
@@ -47,9 +47,8 @@ def build_synthetic_image_caption_dataloader(
         image_size (int): Size of the synthetic images. Default: ``512``.
         caption_length (int): Length of the synthetic captions. Default: ``77``.
         num_samples (int): Number of samples in the synthetic dataset. Default: ``100_000``.
-        **dataloader_kwargs: Additional arguments to pass to the dataloader.
+        dataloader_kwargs (optional, dict): Additional arguments to pass to the dataloader. Default ``None``.
     """
-
     if dataloader_kwargs is None:
         dataloader_kwargs = {}
 
