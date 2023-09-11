@@ -40,7 +40,7 @@ def build_synthetic_image_caption_dataloader(
     num_samples: int = 100_000,
     dataloader_kwargs: Optional[Dict] = None,
 ):
-    """Builds a dataloader for the Synthetic Image-Caption dataset.
+    """Builds a dataloader for the synthetic image-caption dataset.
 
     Args:
         batch_size (int): Batch size for the dataloader.
