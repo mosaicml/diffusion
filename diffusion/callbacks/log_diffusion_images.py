@@ -31,6 +31,7 @@ class LogDiffusionImages(Callback):
             to use for evaluation. Default: ``None``.
         seed (int, optional): Random seed to use for generation. Set a seed for reproducible generation.
             Default: ``1138``.
+        use_table (bool): Whether to make a table of the images or not. Default: ``False``.
     """
 
     def __init__(self,
@@ -40,7 +41,8 @@ class LogDiffusionImages(Callback):
                  guidance_scale: Optional[float] = 0.0,
                  text_key: Optional[str] = 'captions',
                  tokenized_prompts: Optional[torch.LongTensor] = None,
-                 seed: Optional[int] = 1138):
+                 seed: Optional[int] = 1138,
+                 use_table: bool = False):
         self.prompts = prompts
         self.size = size
         self.num_inference_steps = num_inference_steps
@@ -48,6 +50,7 @@ class LogDiffusionImages(Callback):
         self.text_key = text_key
         self.seed = seed
         self.tokenized_prompts = tokenized_prompts
+        self.use_table = use_table
 
     def eval_batch_end(self, state: State, logger: Logger):
         # Only log once per eval epoch
@@ -81,4 +84,4 @@ class LogDiffusionImages(Callback):
 
             # Log images to wandb
             for prompt, image in zip(self.prompts, gen_images):
-                logger.log_images(images=image, name=prompt, step=state.timestamp.batch.value, use_table=False)
+                logger.log_images(images=image, name=prompt, step=state.timestamp.batch.value, use_table=self.use_table)
