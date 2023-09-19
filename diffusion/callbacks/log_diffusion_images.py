@@ -94,3 +94,49 @@ class LogDiffusionImages(Callback):
             # Log images to wandb
             for prompt, image in zip(self.prompts, gen_images):
                 logger.log_images(images=image, name=prompt, step=state.timestamp.batch.value, use_table=self.use_table)
+
+
+class LogAutoencoderImages(Callback):
+    """Logs images from an autoencoder to compare real inputs to their autoencoded outputs.
+
+    Args:
+        image_key (str): Key in the batch to use for images. Default: ``'image'``.
+        max_images (int): Maximum number of images to log. Default: ``10``.
+        log_latents (bool): Whether to log the latents or not. Default: ``True``.
+        use_table (bool): Whether to make a table of the images or not. Default: ``False``.
+    """
+
+    def __init__(self,
+                 image_key: str = 'image',
+                 max_images: int = 10,
+                 log_latents: bool = True,
+                 use_table: bool = False):
+        self.image_key = image_key
+        self.max_images = max_images
+        self.log_latents = log_latents
+        self.use_table = use_table
+
+    def eval_batch_end(self, state: State, logger: Logger):
+        # Only log once per eval epoch
+        if state.eval_timestamp.get(TimeUnit.BATCH).value == 1:
+            # Get the inputs
+            images = state.batch[self.image_key]
+            if self.max_images > images.shape[0]:
+                max_images = images.shape[0]
+            else:
+                max_images = self.max_images
+
+            # Get the model reconstruction
+            outputs = state.model(state.batch)
+            recon = outputs['x_recon']
+            latents = outputs['latents']
+
+            # Log images to wandb
+            for i, image in enumerate(images[:max_images]):
+                logged_images = [image, recon[i]]
+                if self.log_latents:
+                    logged_images += [latents[i][j] for j in range(latents.shape[1])]
+                logger.log_images(images=logged_images,
+                                  name=f'Image (input, reconstruction, latents) {i}',
+                                  step=state.timestamp.batch.value,
+                                  use_table=self.use_table)
