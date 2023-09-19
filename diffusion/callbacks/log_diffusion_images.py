@@ -133,7 +133,9 @@ class LogAutoencoderImages(Callback):
 
             # Log images to wandb
             for i, image in enumerate(images[:max_images]):
-                logged_images = [image, recon[i]]
+                # Clamp the reconstructed image to be between 0 and 1
+                recon_img = (recon[i] / 2 + 0.5).clamp(0, 1)
+                logged_images = [image, recon_img]
                 if self.log_latents:
                     logged_images += [latents[i][j] for j in range(latents.shape[1])]
                 logger.log_images(images=logged_images,
