@@ -537,7 +537,10 @@ class ComposerAutoEncoder(ComposerModel):
         kl_div_loss = -0.5 * torch.mean(1 + log_var - mean.pow(2) - log_var.exp())
         losses['kl_div_loss'] = kl_div_loss
 
-        lpips_loss = self.lpips(outputs['x_recon'], batch[self.input_key]).mean()
+        # LPIPs loss. Images for LPIPS must be in [-1, 1]
+        recon_img = outputs['x_recon'].clamp(-1, 1)
+        target_img = batch[self.input_key].clamp(-1, 1)
+        lpips_loss = self.lpips(recon_img, target_img).mean()
         losses['lpips_loss'] = lpips_loss
 
         # Discriminator loss

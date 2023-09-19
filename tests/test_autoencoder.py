@@ -3,9 +3,11 @@
 
 import pytest
 import torch
+from diffusers import AutoencoderKL
+from transformers import PretrainedConfig
 
-from diffusion.models.autoencoder import (AttentionLayer, Decoder, Downsample, Encoder, NlayerDiscriminator,
-                                          ResNetBlock, Upsample)
+from diffusion.models.autoencoder import (AttentionLayer, AutoEncoder, Decoder, Downsample, Encoder,
+                                          NlayerDiscriminator, ResNetBlock, Upsample)
 
 
 @pytest.mark.parametrize('input_channels', [32])
@@ -92,3 +94,25 @@ def test_discriminator(height, width, num_layers):
     y = discriminator(x)
     downsample_factor = 2**(num_layers + 1)
     assert y.shape == (1, 1, height // downsample_factor, width // downsample_factor)
+
+
+def test_autoencoder():
+    # Get the HF autoencoder
+    model_name = 'stabilityai/stable-diffusion-2-base'
+    config = PretrainedConfig.get_config_dict(model_name, subfolder='vae')
+    hf_autoencoder = AutoencoderKL(**config[0])
+    # Make the corresponding autoencoder from this codebase
+    autoencoder = AutoEncoder(input_channels=3,
+                              output_channels=3,
+                              hidden_channels=128,
+                              latent_channels=4,
+                              double_latent_channels=True,
+                              channel_multipliers=(1, 2, 4, 4),
+                              num_residual_blocks=2,
+                              use_conv_shortcut=False,
+                              dropout_probability=0.0,
+                              resample_with_conv=True)
+    # Check that the number of parameters is the same
+    hf_params = sum(p.numel() for p in hf_autoencoder.parameters() if p.requires_grad)
+    params = sum(p.numel() for p in autoencoder.parameters() if p.requires_grad)
+    assert hf_params == params
