@@ -545,7 +545,7 @@ class ComposerAutoEncoder(ComposerModel):
 
         # Discriminator loss
         real = self.discriminator(batch[self.input_key])
-        fake = self.discriminator(self.reverse_gradients.apply(outputs['x_recon']))
+        fake = self.discriminator(self.reverse_gradients.apply(recon_img))
         real_loss = F.binary_cross_entropy_with_logits(real, torch.ones_like(real))
         fake_loss = F.binary_cross_entropy_with_logits(fake, torch.zeros_like(fake))
         losses['disc_real_loss'] = real_loss
