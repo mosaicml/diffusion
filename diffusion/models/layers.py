@@ -7,7 +7,11 @@ from typing import Optional
 
 import torch
 import torch.nn.functional as F
-import xformers  # type: ignore
+
+try:
+    import xformers  # type: ignore
+except:
+    pass
 
 
 def zero_module(module):
@@ -17,17 +21,17 @@ def zero_module(module):
     return module
 
 
-class ClampedAttnProcessor2_0:
+class ClippedAttnProcessor2_0:
     """Processor for implementing scaled dot-product attention (enabled by default if you're using PyTorch 2.0).
 
-    Modified from https://github.com/huggingface/diffusers/blob/v0.21.0-release/src/diffusers/models/attention_processor.py.
+    Modified from https://github.com/huggingface/diffusers/blob/v0.21.0-release/src/diffusers/models/attention_processor.py to
+    allow clipping QKV values.
     """
 
     def __init__(self, clip_val=6.0):
         if not hasattr(F, 'scaled_dot_product_attention'):
             raise ImportError('AttnProcessor2_0 requires PyTorch 2.0, to use it, please upgrade PyTorch to 2.0.')
         self.clip_val = clip_val
-        print('initializing ClampedAttnProcessor2_0 with value %f!' % clip_val)
 
     def __call__(
         self,
@@ -113,10 +117,11 @@ class ClampedAttnProcessor2_0:
         return hidden_states
 
 
-class ClampedXFormersAttnProcessor:
+class ClippedXFormersAttnProcessor:
     """Processor for implementing memory efficient attention using xFormers.
 
-    Modified from https://github.com/huggingface/diffusers/blob/v0.21.0-release/src/diffusers/models/attention_processor.py.
+    Modified from https://github.com/huggingface/diffusers/blob/v0.21.0-release/src/diffusers/models/attention_processor.py to
+    allow clipping QKV values.
 
     Args:
         attention_op (`Callable`, *optional*, defaults to `None`):
@@ -129,8 +134,6 @@ class ClampedXFormersAttnProcessor:
     def __init__(self, clip_val=6.0, attention_op=None):
         self.attention_op = attention_op
         self.clip_val = clip_val
-
-        print('initializing ClampedXFormersAttnProcessor with value %f - intentionally buggy version!' % clip_val)
 
     def __call__(
         self,
@@ -182,8 +185,8 @@ class ClampedXFormersAttnProcessor:
         value = attn.to_v(encoder_hidden_states, scale=scale)
 
         query = query.clamp(min=-self.clip_val, max=self.clip_val)
-        key = query.clamp(min=-self.clip_val, max=self.clip_val)  # key.clamp(min=-self.clip_val, max=self.clip_val)
-        value = query.clamp(min=-self.clip_val, max=self.clip_val)  # value.clamp(min=-self.clip_val, max=self.clip_val)
+        key = key.clamp(min=-self.clip_val, max=self.clip_val)
+        value = value.clamp(min=-self.clip_val, max=self.clip_val)
 
         query = attn.head_to_batch_dim(query).contiguous()
         key = attn.head_to_batch_dim(key).contiguous()

@@ -13,7 +13,7 @@ from torchmetrics.image.fid import FrechetInceptionDistance
 from torchmetrics.multimodal.clip_score import CLIPScore
 from transformers import CLIPTextModel, CLIPTokenizer, PretrainedConfig
 
-from diffusion.models.layers import ClampedAttnProcessor2_0, ClampedXFormersAttnProcessor, zero_module
+from diffusion.models.layers import ClippedAttnProcessor2_0, ClippedXFormersAttnProcessor, zero_module
 from diffusion.models.pixel_diffusion import PixelDiffusion
 from diffusion.models.stable_diffusion import StableDiffusion
 from diffusion.schedulers.schedulers import ContinuousTimeScheduler
@@ -126,10 +126,9 @@ def stable_diffusion_2(
 
     if clip_qkv is not None:
         if is_xformers_installed:
-            attn_processor = ClampedXFormersAttnProcessor(clip_val=clip_qkv)
+            attn_processor = ClippedXFormersAttnProcessor(clip_val=clip_qkv)
         else:
-            attn_processor = ClampedAttnProcessor2_0(clip_val=clip_qkv)
-
+            attn_processor = ClippedAttnProcessor2_0(clip_val=clip_qkv)
         model.unet.set_attn_processor(attn_processor)
 
     return model
@@ -257,7 +256,11 @@ def stable_diffusion_xl(
             model.vae.enable_xformers_memory_efficient_attention()
 
     if clip_qkv is not None:
-        raise NotImplementedError('Clipping not implemented for SDXL yet.')
+        if is_xformers_installed:
+            attn_processor = ClippedXFormersAttnProcessor(clip_val=clip_qkv)
+        else:
+            attn_processor = ClippedAttnProcessor2_0(clip_val=clip_qkv)
+        model.unet.set_attn_processor(attn_processor)
 
     return model
 
