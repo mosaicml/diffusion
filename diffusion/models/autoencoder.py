@@ -513,6 +513,9 @@ class ComposerAutoEncoder(ComposerModel):
 
         # Set up LPIPs loss
         self.lpips = lpips.LPIPS(net='vgg').eval()
+        # Ensure that lpips does not get trained
+        for param in self.lpips.parameters():
+            param.requires_grad_(False)
 
         # Set up the discriminator
         self.discriminator_num_filters = discriminator_num_filters
