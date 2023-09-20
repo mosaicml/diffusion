@@ -476,6 +476,7 @@ class ComposerAutoEncoder(ComposerModel):
                  dropout_probability: float = 0.0,
                  resample_with_conv: bool = True,
                  input_key: str = 'image',
+                 learn_log_var: bool = True,
                  kl_divergence_weight: float = 1.0,
                  lpips_weight: float = 0.25,
                  discriminator_weight: float = 0.5,
@@ -505,16 +506,25 @@ class ComposerAutoEncoder(ComposerModel):
                                  resample_with_conv=self.resample_with_conv)
 
         self.input_key = input_key
+        self.learn_log_var = learn_log_var
         self.kl_divergence_weight = kl_divergence_weight
         self.lpips_weight = lpips_weight
 
         self.train_metrics = [MeanSquaredError()]
         self.val_metrics = [MeanSquaredError()]
 
+        # Set up log variance
+        if self.learn_log_var:
+            self.log_var = nn.Parameter(torch.zeros(size=()))
+        else:
+            self.log_var = torch.zeros(size=())
+
         # Set up LPIPs loss
         self.lpips = lpips.LPIPS(net='vgg').eval()
         # Ensure that lpips does not get trained
         for param in self.lpips.parameters():
+            param.requires_grad_(False)
+        for param in self.lpips.net.parameters():
             param.requires_grad_(False)
 
         # Set up the discriminator
@@ -532,12 +542,14 @@ class ComposerAutoEncoder(ComposerModel):
 
     def loss(self, outputs, batch):
         losses = {}
-        ae_loss = F.l1_loss(outputs['x_recon'], batch[self.input_key])
+        # Basic L1 reconstruction loss
+        ae_loss = F.l1_loss(outputs['x_recon'], batch[self.input_key], reduction='none').sum(dim=(-1, -2, -3)).mean()
         losses['ae_loss'] = ae_loss
 
+        # Make the KL divergence loss (effectively regularize the latents)
         mean = outputs['mean']
         log_var = outputs['log_var']
-        kl_div_loss = -0.5 * torch.mean(1 + log_var - mean.pow(2) - log_var.exp())
+        kl_div_loss = -0.5 * torch.sum(1 + log_var - mean.pow(2) - log_var.exp(), dim=(-1, -2, -3)).mean()
         losses['kl_div_loss'] = kl_div_loss
 
         # LPIPs loss. Images for LPIPS must be in [-1, 1]
@@ -545,6 +557,12 @@ class ComposerAutoEncoder(ComposerModel):
         target_img = batch[self.input_key].clamp(-1, 1)
         lpips_loss = self.lpips(recon_img, target_img).mean()
         losses['lpips_loss'] = lpips_loss
+
+        # Make the nll loss
+        rec_loss = ae_loss + self.lpips_weight * lpips_loss
+        nll_loss = rec_loss / torch.exp(self.log_var) + self.log_var
+        losses['nll_loss'] = nll_loss
+        losses['output_variance'] = torch.exp(self.log_var)
 
         # Discriminator loss
         real = self.discriminator(batch[self.input_key])
@@ -555,8 +573,8 @@ class ComposerAutoEncoder(ComposerModel):
         losses['disc_fake_loss'] = fake_loss
         losses['disc_loss'] = 0.5 * (real_loss + fake_loss)
 
-        total_loss = ae_loss + self.kl_divergence_weight * kl_div_loss
-        total_loss += self.lpips_weight * lpips_loss
+        # Combine the losses
+        total_loss = nll_loss + self.kl_divergence_weight * kl_div_loss
         total_loss += 0.5 * self.discriminator_weight * (real_loss + fake_loss)
         losses['total'] = total_loss
         return losses
