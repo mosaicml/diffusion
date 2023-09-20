@@ -13,6 +13,7 @@ from torchmetrics.image.fid import FrechetInceptionDistance
 from torchmetrics.multimodal.clip_score import CLIPScore
 from transformers import CLIPTextModel, CLIPTokenizer, PretrainedConfig
 
+from diffusion.models.layers import zero_module
 from diffusion.models.pixel_diffusion import PixelDiffusion
 from diffusion.models.stable_diffusion import StableDiffusion
 from diffusion.schedulers.schedulers import ContinuousTimeScheduler
@@ -189,13 +190,16 @@ def stable_diffusion_xl(
         config[0]['cross_attention_dim'] = 1024
         unet = UNet2DConditionModel(**config[0])
 
-    # Prevent fsdp from wrapping up_blocks and down_blocks because the forward pass calls length on these
-    unet.up_blocks._fsdp_wrap = False
-    unet.down_blocks._fsdp_wrap = False
-    for block in unet.up_blocks:
-        block._fsdp_wrap = True
-    for block in unet.down_blocks:
-        block._fsdp_wrap = True
+        # Zero initialization trick for more stable training
+        for name, layer in unet.named_modules():
+            # Final conv in ResNet blocks
+            if name.endswith('conv2'):
+                layer = zero_module(layer)
+            # proj_out in attention blocks
+            if name.endswith('to_out.0'):
+                layer = zero_module(layer)
+        # Last conv block out projection
+        unet.conv_out = zero_module(unet.conv_out)
 
     if encode_latents_in_fp16:
         vae = AutoencoderKL.from_pretrained(vae_model_name, torch_dtype=torch.float16)
