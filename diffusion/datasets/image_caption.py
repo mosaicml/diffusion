@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from transformers import AutoTokenizer
 
-from diffusion.datasets.laion.transforms import LargestCenterSquare
+from diffusion.datasets.laion.transforms import LargestCenterSquare, RandomCropSquare
 
 # Disable PIL max image size limit
 Image.MAX_IMAGE_PIXELS = None
@@ -113,6 +113,7 @@ def build_streaming_image_caption_dataloader(
     transform: Optional[List[Callable]] = None,
     image_key: str = 'image',
     caption_key: str = 'caption',
+    rand_crop: bool = False,
     streaming_kwargs: Optional[Dict] = None,
     dataloader_kwargs: Optional[Dict] = None,
 ):
@@ -131,6 +132,7 @@ def build_streaming_image_caption_dataloader(
         transform (Optional[Callable]): The transforms to apply to the image. Default: ``None``.
         image_key (str): Key associated with the image in the streaming dataset. Default: ``'image'``.
         caption_key (str): Key associated with the caption in the streaming dataset. Default: ``'caption'``.
+        rand_crop (bool): If True, randomly crop images. Otherwise, center crop. ``False``.
         streaming_kwargs (dict, optional): Additional arguments to pass to the ``StreamingDataset``. Default: ``None``.
         dataloader_kwargs (dict, optional): Additional arguments to pass to the ``DataLoader``. Default: ``None``.
     """
@@ -157,9 +159,10 @@ def build_streaming_image_caption_dataloader(
         streams.append(Stream(remote=r, local=l))
 
     # Setup the transforms to apply
+    crop_transform = LargestCenterSquare(resize_size) if rand_crop else RandomCropSquare(resize_size)
     if transform is None:
         transform = [
-            LargestCenterSquare(resize_size),
+            crop_transform,
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),  # # Normalize from 0 to 1 to -1 to 1
         ]
