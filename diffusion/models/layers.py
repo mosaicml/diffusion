@@ -18,7 +18,10 @@ def zero_module(module):
 
 
 class ClampedAttnProcessor2_0:
-    """Processor for implementing scaled dot-product attention (enabled by default if you're using PyTorch 2.0)."""
+    """Processor for implementing scaled dot-product attention (enabled by default if you're using PyTorch 2.0).
+
+    Modified from https://github.com/huggingface/diffusers/blob/v0.21.0-release/src/diffusers/models/attention_processor.py.
+    """
 
     def __init__(self, clip_val=6.0):
         if not hasattr(F, 'scaled_dot_product_attention'):
@@ -112,6 +115,8 @@ class ClampedAttnProcessor2_0:
 
 class ClampedXFormersAttnProcessor:
     """Processor for implementing memory efficient attention using xFormers.
+
+    Modified from https://github.com/huggingface/diffusers/blob/v0.21.0-release/src/diffusers/models/attention_processor.py.
 
     Args:
         attention_op (`Callable`, *optional*, defaults to `None`):

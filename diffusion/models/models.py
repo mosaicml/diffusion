@@ -179,7 +179,8 @@ def stable_diffusion_xl(
         precomputed_latents (bool): Whether to use precomputed latents. Defaults to False.
         encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
         fsdp (bool): Whether to use FSDP. Defaults to True.
-        clip_qkv (float, optional): If not None, clip the qkv values to this value. Defaults to 6.0.
+        clip_qkv (float, optional): If not None, clip the qkv values to this value. Defaults to 6.0. Improves stability
+            of training.
     """
     if train_metrics is None:
         train_metrics = [MeanSquaredError()]
