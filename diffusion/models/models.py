@@ -7,11 +7,11 @@ from typing import List, Optional
 
 import torch
 from composer.devices import DeviceGPU
-from diffusers import AutoencoderKL, DDIMScheduler, DDPMScheduler, UNet2DConditionModel
+from diffusers import AutoencoderKL, DDIMScheduler, DDPMScheduler, EulerDiscreteScheduler, UNet2DConditionModel
 from torchmetrics import MeanSquaredError
 from torchmetrics.image.fid import FrechetInceptionDistance
 from torchmetrics.multimodal.clip_score import CLIPScore
-from transformers import CLIPTextModel, CLIPTokenizer, PretrainedConfig
+from transformers import CLIPTextModel, CLIPTextModelWithProjection, CLIPTokenizer, PretrainedConfig
 
 from diffusion.models.layers import ClippedAttnProcessor2_0, ClippedXFormersAttnProcessor, zero_module
 from diffusion.models.pixel_diffusion import PixelDiffusion
@@ -134,8 +134,88 @@ def stable_diffusion_2(
     return model
 
 
+class SDXLTextEncoder:
+    """Wrapper around HuggingFace text encoders for SDXL.
+
+    Creates two text encoders (a CLIPTextModel and CLIPTextModelWithProjection) that behave like one.
+
+    Args:
+        model_name (str): Name of the model's text encoders to load. Defaults to 'stabilityai/stable-diffusion-xl-base-1.0'.
+        encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
+    """
+    def __init__(self, model_name='stabilityai/stable-diffusion-xl-base-1.0', encode_latents_in_fp16=True):
+        if encode_latents_in_fp16:
+            self.text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder', torch_dtype=torch.float16)
+            self.text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(model_name, 
+                                                                              subfolder='text_encoder_2', 
+                                                                              torch_dtype=torch.float16)
+        else:
+            self.text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder')
+            self.text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(model_name, subfolder='text_encoder_2')
+        self.device = self.text_encoder.device
+
+        self._fsdp_wrap = False
+        self.text_encoder._fsdp_wrap = False
+        self.text_encoder_2._fsdp_wrap = False
+
+    def requires_grad_(self, requires_grad):
+        self.text_encoder.requires_grad_(requires_grad)
+        self.text_encoder_2.requires_grad_(requires_grad)
+
+    def half(self):
+        self.text_encoder.half()
+        self.text_encoder_2.half()
+
+    def __call__(self, tokenized_output, tokenized_output_2): # TODO need to pass second tokenized outputs and handle pooled output
+        # first text encoder
+        conditioning = self.text_encoder(tokenized_output, output_hidden_states=True).hidden_states[-2]
+        # second text encoder
+        text_encoder_2_out = self.text_encoder_2(tokenized_output_2, output_hidden_states=True)
+        pooled_conditioning = text_encoder_2_out[0]  # (batch_size, 1280)
+        conditioning_2 = text_encoder_2_out.hidden_states[-2]  # (batch_size, 77, 1280)
+
+        # # zero out the appropriate things
+        # if batch[self.text_key].sum() == 0:
+        #     conditioning = torch.zeros_like(conditioning)
+        # if batch[self.text_key_2].sum() == 0:
+        #     conditioning_2 = torch.zeros_like(conditioning_2)
+        #     pooled_conditioning = torch.zeros_like(pooled_conditioning)
+
+        conditioning = torch.concat([conditioning, conditioning_2], dim=-1)
+        return conditioning, pooled_conditioning
+
+
+class SDXLTokenizer:
+    """Wrapper around HuggingFace tokenizers for SDXL.
+
+    Tokenizes prompt with two tokenizers and returns the outputs as a list.
+
+    Args:
+        model_name (str): Name of the model's text encoders to load. Defaults to 'stabilityai/stable-diffusion-xl-base-1.0'.
+    """
+    def __init__(self, model_name='stabilityai/stable-diffusion-xl-base-1.0'):
+        self.tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer')
+        self.tokenizer_2 = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer_2')
+
+    def __call__(self, prompt, padding, truncation, return_tensors, input_ids=False):
+        tokenized_output = self.tokenizer(prompt,
+                                          padding=padding,
+                                          max_length=self.tokenizer.model_max_length,
+                                          truncation=truncation,
+                                          return_tensors=return_tensors)
+        tokenized_output_2 = self.tokenizer_2(prompt,
+                                              padding=padding,
+                                              max_length=self.tokenizer_2.model_max_length,
+                                              truncation=truncation,
+                                              return_tensors=return_tensors)
+        if input_ids:
+            tokenized_output = tokenized_output.input_ids
+            tokenized_output_2 = tokenized_output_2.input_ids
+        return [tokenized_output, tokenized_output_2]
+
+
 def stable_diffusion_xl(
-    model_name: str = 'stabilityai/stable-diffusion-2-base',
+    model_name: str = 'stabilityai/stable-diffusion-xl-base-1.0',
     unet_model_name: str = 'stabilityai/stable-diffusion-xl-base-1.0',
     vae_model_name: str = 'madebyollin/sdxl-vae-fp16-fix',
     pretrained: bool = True,
@@ -156,8 +236,8 @@ def stable_diffusion_xl(
     prompts. Currently uses UNet and VAE config from SDXL, but text encoder/tokenizer from SD2.
 
     Args:
-        model_name (str): Name of the model to load. Determines the text encoder, tokenizer,
-            and noise scheduler. Defaults to 'stabilityai/stable-diffusion-2-base'.
+        model_name (str): Name of the model to load. Determines the text encoders, tokenizers,
+            and noise scheduler. Defaults to 'stabilityai/stable-diffusion-xl-base-1.0'.
         unet_model_name (str): Name of the UNet model to load. Defaults to
             'stabilityai/stable-diffusion-xl-base-1.0'.
         vae_model_name (str): Name of the VAE model to load. Defaults to
@@ -198,9 +278,6 @@ def stable_diffusion_xl(
         raise NotImplementedError('Full SDXL pipeline not implemented yet.')
     else:
         config = PretrainedConfig.get_config_dict(unet_model_name, subfolder='unet')
-        # Currently not doing micro-conditioning, so set config appropriately
-        config[0]['addition_embed_type'] = None
-        config[0]['cross_attention_dim'] = 1024
         unet = UNet2DConditionModel(**config[0])
 
         # Zero initialization trick for more stable training
@@ -215,22 +292,21 @@ def stable_diffusion_xl(
         unet.conv_out = zero_module(unet.conv_out)
 
     if encode_latents_in_fp16:
-        vae = AutoencoderKL.from_pretrained(vae_model_name, torch_dtype=torch.float16)
-        text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder', torch_dtype=torch.float16)
+        try:
+            vae = AutoencoderKL.from_pretrained(vae_model_name, subfolder='vae', torch_dtype=torch.float16)
+        except:  # for handling SDXL vae fp16 fixed checkpoint
+            vae = AutoencoderKL.from_pretrained(vae_model_name, torch_dtype=torch.float16)
     else:
-        vae = AutoencoderKL.from_pretrained(vae_model_name)
-        text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder')
+        try:
+            vae = AutoencoderKL.from_pretrained(vae_model_name, subfolder='vae')
+        except: #  for handling SDXL vae fp16 fixed checkpoint
+            vae = AutoencoderKL.from_pretrained(vae_model_name)
 
-    tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer')
+    tokenizer = SDXLTokenizer(model_name)
+    text_encoder = SDXLTextEncoder(model_name, encode_latents_in_fp16)
+
     noise_scheduler = DDPMScheduler.from_pretrained(model_name, subfolder='scheduler')
-    inference_noise_scheduler = DDIMScheduler(num_train_timesteps=noise_scheduler.config.num_train_timesteps,
-                                              beta_start=noise_scheduler.config.beta_start,
-                                              beta_end=noise_scheduler.config.beta_end,
-                                              beta_schedule=noise_scheduler.config.beta_schedule,
-                                              trained_betas=noise_scheduler.config.trained_betas,
-                                              clip_sample=noise_scheduler.config.clip_sample,
-                                              set_alpha_to_one=noise_scheduler.config.set_alpha_to_one,
-                                              prediction_type=prediction_type)
+    inference_noise_scheduler = EulerDiscreteScheduler.from_pretrained(model_name, subfolder='scheduler')
 
     model = StableDiffusion(
         unet=unet,
@@ -248,6 +324,7 @@ def stable_diffusion_xl(
         precomputed_latents=precomputed_latents,
         encode_latents_in_fp16=encode_latents_in_fp16,
         fsdp=fsdp,
+        sdxl=True,
     )
     if torch.cuda.is_available():
         model = DeviceGPU().module_to_device(model)

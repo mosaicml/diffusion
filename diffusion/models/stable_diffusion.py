@@ -62,6 +62,7 @@ class StableDiffusion(ComposerModel):
             Default: `False`.
         encode_latents_in_fp16 (bool): whether to encode latents in fp16.
             Default: `False`.
+        sdxl (bool): Whether or not we're training SDXL. Default: `False`.
     """
 
     def __init__(self,
@@ -84,7 +85,8 @@ class StableDiffusion(ComposerModel):
                  text_latents_key: str = 'caption_latents',
                  precomputed_latents: bool = False,
                  encode_latents_in_fp16: bool = False,
-                 fsdp: bool = False):
+                 fsdp: bool = False,
+                 sdxl: bool = False):
         super().__init__()
         self.unet = unet
         self.vae = vae
@@ -97,6 +99,11 @@ class StableDiffusion(ComposerModel):
         self.image_key = image_key
         self.image_latents_key = image_latents_key
         self.precomputed_latents = precomputed_latents
+        self.sdxl = sdxl
+        if self.sdxl:
+            self.latent_scale = 0.13025
+        else:
+            self.latent_scale = 0.18215
 
         # setup metrics
         if train_metrics is None:
@@ -157,9 +164,16 @@ class StableDiffusion(ComposerModel):
         latents, conditioning = None, None
         # Use latents if specified and available. When specified, they might not exist during eval
         if self.precomputed_latents and self.image_latents_key in batch and self.text_latents_key in batch:
+            if self.sdxl:
+                raise NotImplementedError('SDXL not yet supported with precomputed latents')
             latents, conditioning = batch[self.image_latents_key], batch[self.text_latents_key]
         else:
             inputs, conditioning = batch[self.image_key], batch[self.text_key]
+            if self.sdxl:
+                # TODO check this
+                conditioning, conditioning_2 = conditioning[0], conditioning[1]
+            else:
+                conditioning_2 = None
             conditioning = conditioning.view(-1, conditioning.shape[-1])
             if self.encode_latents_in_fp16:
                 # Disable autocast context as models are in fp16
@@ -167,13 +181,23 @@ class StableDiffusion(ComposerModel):
                     # Encode the images to the latent space.
                     # Encode prompt into conditioning vector
                     latents = self.vae.encode(inputs.half())['latent_dist'].sample().data
-                    conditioning = self.text_encoder(conditioning)[0]  # Should be (batch_size, 77, 768)
-
+                    # if self.sdxl:
+                    #     conditioning_2 = batch[self.text_key_2].view(-1, conditioning_2.shape[-1])
+                    #     conditioning, pooled_conditioning = self.text_encoder(conditioning, conditioning_2)
+                    # else:
+                    #     conditioning = self.text_encoder(conditioning)[0]  # Should be (batch_size, 77, 768)
+                    #     pooled_conditioning = None
             else:
                 latents = self.vae.encode(inputs)['latent_dist'].sample().data
+
+            if self.sdxl:
+                conditioning_2 = conditioning_2.view(-1, conditioning_2.shape[-1])                
+                conditioning, pooled_conditioning = self.text_encoder(conditioning, conditioning_2)
+            else:
                 conditioning = self.text_encoder(conditioning)[0]
+                pooled_conditioning = None
             # Magical scaling number (See https://github.com/huggingface/diffusers/issues/437#issuecomment-1241827515)
-            latents *= 0.18215
+            latents *= self.latent_scale
 
         # Sample the diffusion timesteps
         timesteps = torch.randint(0, len(self.noise_scheduler), (latents.shape[0],), device=latents.device)
@@ -190,8 +214,19 @@ class StableDiffusion(ComposerModel):
         else:
             raise ValueError(
                 f'prediction type must be one of sample, epsilon, or v_prediction. Got {self.prediction_type}')
+        
+        added_cond_kwargs = {}
+        # if using SDXL, prepare added time ids & embeddings
+        if self.sdxl:
+            # TODO double check cond_crops_coords_top_left calc in transforms.py
+            add_time_ids = torch.cat(
+                [batch['cond_original_size'], batch['cond_crops_coords_top_left'], batch['cond_target_size']], dim=1)
+            add_text_embeds = pooled_conditioning
+            added_cond_kwargs = {'text_embeds': add_text_embeds, 'time_ids': add_time_ids}
+
         # Forward through the model
-        return self.unet(noised_latents, timesteps, conditioning)['sample'], targets, timesteps
+        return self.unet(noised_latents, timesteps, conditioning,
+                         added_cond_kwargs=added_cond_kwargs)['sample'], targets, timesteps
 
     def loss(self, outputs, batch):
         """Loss between unet output and added noise, typically mse."""
@@ -207,6 +242,18 @@ class StableDiffusion(ComposerModel):
         # Sample images from the prompts in the batch
         prompts = batch[self.text_key]
         height, width = batch[self.image_key].shape[-2], batch[self.image_key].shape[-1]
+
+        # If SDXL, add eval-time micro-conditioning to batch
+        if self.sdxl:
+            device = self.unet.device
+            bsz = batch[self.image_key].shape[0]
+            # Set to resolution we are trying to generate
+            batch['cond_original_size'] = torch.tensor([[width, height]]).repeat(bsz, 1).to(device)
+            # No cropping
+            batch['cond_crops_coords_top_left'] = torch.tensor([[0., 0.]]).repeat(bsz, 1).to(device)
+            # Set to resolution we are trying to generate
+            batch['cond_target_size'] = torch.tensor([[width, height]]).repeat(bsz, 1).to(device)
+            
         generated_images = {}
         for guidance_scale in self.val_guidance_scales:
             gen_images = self.generate(tokenized_prompts=prompts,
@@ -261,7 +308,11 @@ class StableDiffusion(ComposerModel):
         # CLIP metrics should be updated with the generated images at the desired guidance scale
         elif metric.__class__.__name__ == 'CLIPScore':
             # Convert the captions to a list of strings
-            captions = [self.tokenizer.decode(caption, skip_special_tokens=True) for caption in batch[self.text_key]]
+            if self.sdxl:
+                # Decode captions with first tokenizer
+                captions = [self.tokenizer.tokenizer.decode(caption, skip_special_tokens=True) for caption in batch[self.text_key]]
+            else:
+                captions = [self.tokenizer.decode(caption, skip_special_tokens=True) for caption in batch[self.text_key]]
             generated_images = (outputs[3][metric.guidance_scale] * 255).to(torch.uint8)
             metric.update(generated_images, captions)
         else:
@@ -295,8 +346,9 @@ class StableDiffusion(ComposerModel):
                 image generation away from. Ignored when not using guidance
                 (i.e., ignored if guidance_scale is less than 1).
                 Must be the same length as list of prompts. Default: `None`.
-            tokenized_prompts (torch.LongTensor): Optionally pass pre-tokenized prompts instead
-                of string prompts. Default: `None`.
+            tokenized_prompts (torch.LongTensor) or List[torch.LongTensor]: Optionally pass 
+                pre-tokenized prompts instead of string prompts. If SDXL, this will be a list
+                of two pre-tokenized prompts. Default: `None`.
             tokenized_negative_prompts (torch.LongTensor): Optionally pass pre-tokenized negative
                 prompts instead of string prompts. Default: `None`.
             prompt_embeds (torch.FloatTensor): Optionally pass pre-tokenized prompts instead
@@ -387,7 +439,7 @@ class StableDiffusion(ComposerModel):
 
         # We now use the vae to decode the generated latents back into the image.
         # scale and decode the image latents with vae
-        latents = 1 / 0.18215 * latents
+        latents = 1 / self.latent_scale * latents
         image = self.vae.decode(latents).sample
         image = (image / 2 + 0.5).clamp(0, 1)
         return image.detach()  # (batch*num_images_per_prompt, channel, h, w)
@@ -396,21 +448,40 @@ class StableDiffusion(ComposerModel):
         """Tokenizes and embeds prompts if needed, then duplicates embeddings to support multiple generations per prompt."""
         device = self.text_encoder.device
         if prompt_embeds is None:
-            if tokenized_prompts is None:
-                tokenized_prompts = self.tokenizer(prompt,
-                                                   padding='max_length',
-                                                   max_length=self.tokenizer.model_max_length,
-                                                   truncation=True,
-                                                   return_tensors='pt').input_ids
-            text_embeddings = self.text_encoder(tokenized_prompts.to(device))[0]  # type: ignore
+            if self.sdxl:
+                if tokenized_prompts is None:
+                    tokenized_prompts = self.tokenizer(prompt,
+                                                    padding='max_length',
+                                                    truncation=True,
+                                                    return_tensors='pt',
+                                                    input_ids=True)
+                # TODO implement zero-ing out empty prompts!
+                text_embeddings, pooled_text_embeddings = self.text_encoder(
+                    tokenized_prompts[0].to(device), 
+                    tokenized_prompts[1].to(device))  # type: ignore
+            else:
+                if tokenized_prompts is None:
+                    tokenized_prompts = self.tokenizer(prompt,
+                                                       padding='max_length',
+                                                       max_length=self.tokenizer.model_max_length,
+                                                       truncation=True,
+                                                       return_tensors='pt').input_ids
+                text_embeddings = self.text_encoder(tokenized_prompts.to(device))[0]  # type: ignore
+                pooled_text_embeddings = None
         else:
+            if self.sdxl:
+                raise NotImplementedError('SDXL not yet supported with precomputed embeddings')
             text_embeddings = prompt_embeds
 
         # duplicate text embeddings for each generation per prompt
         bs_embed, seq_len, _ = text_embeddings.shape
         text_embeddings = text_embeddings.repeat(1, num_images_per_prompt, 1)  # type: ignore
         text_embeddings = text_embeddings.view(bs_embed * num_images_per_prompt, seq_len, -1)
-        return text_embeddings
+
+        if self.sdxl and pooled_text_embeddings is not None:
+            pooled_text_embeddings = pooled_text_embeddings.repeat(1, num_images_per_prompt)
+            pooled_text_embeddings = pooled_text_embeddings.view(bs_embed * num_images_per_prompt, -1)
+        return text_embeddings, pooled_text_embeddings
 
 
 def _check_prompt_lenths(prompt, negative_prompt):

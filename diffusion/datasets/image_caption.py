@@ -14,7 +14,8 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from transformers import AutoTokenizer
 
-from diffusion.datasets.laion.transforms import LargestCenterSquare, RandomCropSquare
+from diffusion.datasets.laion.transforms import LargestCenterSquare, RandomCropSquare, RandomCropSquareReturnTransform
+from diffusion.models.models import SDXLTokenizer
 
 # Disable PIL max image size limit
 Image.MAX_IMAGE_PIXELS = None
@@ -36,6 +37,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
         image_size (Optional[int]): The size to resize the image to. Default: ``None``.
         image_key (str): Key associated with the image in the streaming dataset. Default: ``'image'``.
         caption_key (str): Key associated with the caption in the streaming dataset. Default: ``'caption'``.
+        sdxl (bool): Whether or not we're training SDXL. Default: `False`.
         **streaming_kwargs: Additional arguments to pass in the construction of the StreamingDataloader
     """
 
@@ -51,6 +53,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
         image_size: Optional[int] = None,
         image_key: str = 'image',
         caption_key: str = 'caption',
+        sdxl: bool = False,
         **streaming_kwargs,
     ) -> None:
 
@@ -65,7 +68,12 @@ class StreamingImageCaptionDataset(StreamingDataset):
             raise ValueError(f'Invalid caption selection: {caption_selection}. Must be one of [random, first]')
 
         self.transform = transform
-        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, subfolder='tokenizer')
+        if self.sdxl:
+            self.tokenizer = SDXLTokenizer(tokenizer_name_or_path)
+            self.sdxl_crop = RandomCropSquareReturnTransform(image_size)
+        else:
+            self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, subfolder='tokenizer')
+            self.sdxl_crop = None
         self.caption_drop_prob = caption_drop_prob
         self.caption_selection = caption_selection
         self.image_size = image_size
@@ -81,8 +89,21 @@ class StreamingImageCaptionDataset(StreamingDataset):
             img = Image.open(BytesIO(sample[self.image_key]))
         if img.mode != 'RGB':
             img = img.convert('RGB')
+
+        out = {}
+        # Image transforms
+        if self.sdxl:
+            # sdxl crop to return params
+            img, crop_top, crop_left, image_height, image_width = self.sdxl_crop(img)
+            out['cond_crops_coords_top_left'] = torch.tensor([crop_top, crop_left])
+            out['cond_original_size'] = torch.tensor([image_width, image_height])
+            out['cond_target_size'] = torch.tensor([self.image_size, self.image_size])
+        else:
+            crop_top, crop_left, image_height, image_width = None, None, None, None
         if self.transform is not None:
             img = self.transform(img)
+
+        # TODO implement dropped caption masking!
 
         # Caption
         if torch.rand(1) < self.caption_drop_prob:
@@ -93,13 +114,24 @@ class StreamingImageCaptionDataset(StreamingDataset):
                 caption = caption[0]
             if isinstance(caption, List) and self.caption_selection == 'random':
                 caption = random.sample(caption, k=1)[0]
-        tokenized_caption = self.tokenizer(caption,
-                                           padding='max_length',
-                                           max_length=self.tokenizer.model_max_length,
-                                           truncation=True,
-                                           return_tensors='pt')['input_ids'][0]
 
-        return {'image': img, 'captions': tokenized_caption}
+        if self.sdxl:
+            tokenized_captions = self.tokenizer(caption,
+                                                padding='max_length',
+                                                truncation=True,
+                                                return_tensors='pt',
+                                                input_ids=True)
+            tokenized_captions = [cap[0] for cap in tokenized_captions]
+            tokenized_caption = torch.stack(tokenized_captions)
+        else:
+            tokenized_caption = self.tokenizer(caption,
+                                            padding='max_length',
+                                            max_length=self.tokenizer.model_max_length,
+                                            truncation=True,
+                                            return_tensors='pt')['input_ids'][0]
+        out['image'] = img
+        out['captions'] = tokenized_caption
+        return out
 
 
 def build_streaming_image_caption_dataloader(
@@ -158,14 +190,27 @@ def build_streaming_image_caption_dataloader(
     for r, l in zip(remote, local):
         streams.append(Stream(remote=r, local=l))
 
+    # Infer SDXL from tokenizer path
+    if tokenizer_name_or_path == 'stabilityai/stable-diffusion-xl-base-1.0':
+        sdxl = True
+    else:
+        sdxl = False
+
     # Setup the transforms to apply
     crop_transform = LargestCenterSquare(resize_size) if rand_crop else RandomCropSquare(resize_size)
     if transform is None:
-        transform = [
-            crop_transform,
-            transforms.ToTensor(),
-            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),  # # Normalize from 0 to 1 to -1 to 1
-        ]
+        if sdxl:
+            # Crop will return parameters so do separately
+            transform = [
+                transforms.ToTensor(),
+                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+            ]
+        else:
+            transform = [
+                crop_transform,
+                transforms.ToTensor(),
+                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),  # # Normalize from 0 to 1 to -1 to 1
+            ]
     transform = transforms.Compose(transform)
     assert isinstance(transform, Callable)
 
@@ -179,6 +224,7 @@ def build_streaming_image_caption_dataloader(
         image_key=image_key,
         caption_key=caption_key,
         batch_size=batch_size,
+        sdxl=sdxl,
         **streaming_kwargs,
     )
 

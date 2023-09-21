@@ -27,8 +27,8 @@ class LogDiffusionImages(Callback):
             the text prompt, usually at the expense of lower image quality.
             Default: ``0.0``.
         text_key (str, optional): Key in the batch to use for text prompts. Default: ``'captions'``.
-        tokenized_prompts (torch.LongTensor, optional): Batch of pre-tokenized prompts
-            to use for evaluation. Default: ``None``.
+        tokenized_prompts (torch.LongTensor or List[torch.LongTensor], optional): Batch of pre-tokenized prompts
+            to use for evaluation. If SDXL, this will be a list of two pre-tokenized prompts Default: ``None``.
         seed (int, optional): Random seed to use for generation. Set a seed for reproducible generation.
             Default: ``1138``.
         use_table (bool): Whether to make a table of the images or not. Default: ``False``.
@@ -62,14 +62,26 @@ class LogDiffusionImages(Callback):
             else:
                 model = state.model
 
-            if self.tokenized_prompts is None:
-                tokenized_prompts = [
-                    model.tokenizer(p, padding='max_length', truncation=True,
-                                    return_tensors='pt')['input_ids']  # type: ignore
-                    for p in self.prompts
-                ]
-                self.tokenized_prompts = torch.cat(tokenized_prompts)
-            self.tokenized_prompts = self.tokenized_prompts.to(state.batch[self.text_key].device)
+            if model.sdxl:
+                if self.tokenized_prompts is None:
+                    tokenized_prompts = [
+                        model.tokenizer(p, padding='max_length', truncation=True,
+                                        return_tensors='pt', input_ids=True)  # type: ignore
+                        for p in self.prompts
+                    ]
+                    self.tokenized_prompts = [torch.cat(tokenized_prompts[0]), 
+                                              torch.cat(tokenized_prompts[1])]
+                self.tokenized_prompts[0] = self.tokenized_prompts[0].to(state.batch[self.text_key].device)
+                self.tokenized_prompts[1] = self.tokenized_prompts[1].to(state.batch[self.text_key].device)
+            else:
+                if self.tokenized_prompts is None:
+                    tokenized_prompts = [
+                        model.tokenizer(p, padding='max_length', truncation=True,
+                                        return_tensors='pt')['input_ids']  # type: ignore
+                        for p in self.prompts
+                    ]
+                    self.tokenized_prompts = torch.cat(tokenized_prompts)
+                self.tokenized_prompts = self.tokenized_prompts.to(state.batch[self.text_key].device)
 
             # Generate images
             with get_precision_context(state.precision):
