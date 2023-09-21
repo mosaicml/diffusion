@@ -363,10 +363,6 @@ class AutoEncoder(nn.Module):
 
         channels = 2 * self.latent_channels if self.double_latent_channels else self.latent_channels
         self.quant_conv = nn.Conv2d(channels, channels, kernel_size=1, stride=1, padding=0)
-        # Zero init the quant conv
-        self.quant_conv.weight.data.zero_()
-        if self.quant_conv.bias is not None:
-            self.quant_conv.bias.data.zero_()
 
         self.decoder = Decoder(latent_channels=self.latent_channels,
                                output_channels=self.output_channels,
@@ -543,8 +539,8 @@ class ComposerAutoEncoder(ComposerModel):
     def loss(self, outputs, batch):
         losses = {}
         # Basic L1 reconstruction loss
-        ae_loss = F.l1_loss(outputs['x_recon'], batch[self.input_key], reduction='none').sum(dim=(-1, -2, -3)).mean()
-        losses['ae_loss'] = ae_loss
+        ae_loss = F.l1_loss(outputs['x_recon'], batch[self.input_key], reduction='none')
+        losses['ae_loss'] = ae_loss.sum(dim=(-1, -2, -3)).mean()
 
         # Make the KL divergence loss (effectively regularize the latents)
         mean = outputs['mean']
@@ -555,12 +551,13 @@ class ComposerAutoEncoder(ComposerModel):
         # LPIPs loss. Images for LPIPS must be in [-1, 1]
         recon_img = outputs['x_recon'].clamp(-1, 1)
         target_img = batch[self.input_key].clamp(-1, 1)
-        lpips_loss = self.lpips(recon_img, target_img).mean()
-        losses['lpips_loss'] = lpips_loss
+        lpips_loss = self.lpips(recon_img, target_img)
+        losses['lpips_loss'] = lpips_loss.mean()
 
         # Make the nll loss
         rec_loss = ae_loss + self.lpips_weight * lpips_loss
         nll_loss = rec_loss / torch.exp(self.log_var) + self.log_var
+        nll_loss = nll_loss.sum(dim=(-1, -2, -3)).mean()
         losses['nll_loss'] = nll_loss
         losses['output_variance'] = torch.exp(self.log_var)
 
