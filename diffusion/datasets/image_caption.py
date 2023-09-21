@@ -68,6 +68,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
             raise ValueError(f'Invalid caption selection: {caption_selection}. Must be one of [random, first]')
 
         self.transform = transform
+        self.sdxl = sdxl
         if self.sdxl:
             self.tokenizer = SDXLTokenizer(tokenizer_name_or_path)
             self.sdxl_crop = RandomCropSquareReturnTransform(image_size)
@@ -92,7 +93,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
 
         out = {}
         # Image transforms
-        if self.sdxl:
+        if self.sdxl and self.sdxl_crop:
             # sdxl crop to return params
             img, crop_top, crop_left, image_height, image_width = self.sdxl_crop(img)
             out['cond_crops_coords_top_left'] = torch.tensor([crop_top, crop_left])
@@ -124,11 +125,12 @@ class StreamingImageCaptionDataset(StreamingDataset):
             tokenized_captions = [cap[0] for cap in tokenized_captions]
             tokenized_caption = torch.stack(tokenized_captions)
         else:
-            tokenized_caption = self.tokenizer(caption,
-                                            padding='max_length',
-                                            max_length=self.tokenizer.model_max_length,
-                                            truncation=True,
-                                            return_tensors='pt')['input_ids'][0]
+            tokenized_caption = self.tokenizer(
+                caption,
+                padding='max_length',
+                max_length=self.tokenizer.model_max_length,  # type: ignore
+                truncation=True,
+                return_tensors='pt')['input_ids'][0]
         out['image'] = img
         out['captions'] = tokenized_caption
         return out

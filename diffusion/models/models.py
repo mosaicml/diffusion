@@ -143,11 +143,14 @@ class SDXLTextEncoder:
         model_name (str): Name of the model's text encoders to load. Defaults to 'stabilityai/stable-diffusion-xl-base-1.0'.
         encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
     """
+
     def __init__(self, model_name='stabilityai/stable-diffusion-xl-base-1.0', encode_latents_in_fp16=True):
         if encode_latents_in_fp16:
-            self.text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder', torch_dtype=torch.float16)
-            self.text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(model_name, 
-                                                                              subfolder='text_encoder_2', 
+            self.text_encoder = CLIPTextModel.from_pretrained(model_name,
+                                                              subfolder='text_encoder',
+                                                              torch_dtype=torch.float16)
+            self.text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(model_name,
+                                                                              subfolder='text_encoder_2',
                                                                               torch_dtype=torch.float16)
         else:
             self.text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder')
@@ -166,7 +169,8 @@ class SDXLTextEncoder:
         self.text_encoder.half()
         self.text_encoder_2.half()
 
-    def __call__(self, tokenized_output, tokenized_output_2): # TODO need to pass second tokenized outputs and handle pooled output
+    def __call__(self, tokenized_output,
+                 tokenized_output_2):  # TODO need to pass second tokenized outputs and handle pooled output
         # first text encoder
         conditioning = self.text_encoder(tokenized_output, output_hidden_states=True).hidden_states[-2]
         # second text encoder
@@ -193,6 +197,7 @@ class SDXLTokenizer:
     Args:
         model_name (str): Name of the model's text encoders to load. Defaults to 'stabilityai/stable-diffusion-xl-base-1.0'.
     """
+
     def __init__(self, model_name='stabilityai/stable-diffusion-xl-base-1.0'):
         self.tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer')
         self.tokenizer_2 = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer_2')
@@ -299,7 +304,7 @@ def stable_diffusion_xl(
     else:
         try:
             vae = AutoencoderKL.from_pretrained(vae_model_name, subfolder='vae')
-        except: #  for handling SDXL vae fp16 fixed checkpoint
+        except:  #  for handling SDXL vae fp16 fixed checkpoint
             vae = AutoencoderKL.from_pretrained(vae_model_name)
 
     tokenizer = SDXLTokenizer(model_name)
