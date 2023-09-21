@@ -194,6 +194,7 @@ def build_streaming_image_caption_dataloader(
 
     # Infer SDXL from tokenizer path
     if tokenizer_name_or_path == 'stabilityai/stable-diffusion-xl-base-1.0':
+        print('Detected SDXL tokenizer, using SDXL crop transform and tokenizers.')
         sdxl = True
     else:
         sdxl = False
