@@ -30,7 +30,6 @@ class DiscriminatorSchedule(Algorithm):
         else:
             raise ValueError('Model does not have a discriminator weight')
         assert isinstance(model, ComposerModel) and callable(model.set_discriminator_weight)
-        #assert hasattr(model, 'set_discriminator_weight')
 
         # Grab the relevant scheduler params from the model and optimizer on init
         if event == Event.INIT:

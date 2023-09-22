@@ -441,8 +441,6 @@ class NlayerDiscriminator(nn.Module):
         self.blocks.extend([conv, norm, nonlinearity])
         # Output layer
         output_conv = nn.Conv2d(final_out_filters, 1, kernel_size=4, stride=1, padding=1, bias=False)
-        # Init output conv to zeros
-        nn.init.zeros_(output_conv.weight)
         self.blocks.append(output_conv)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -575,13 +573,17 @@ class ComposerAutoEncoder(ComposerModel):
         losses = {}
         # Basic L1 reconstruction loss
         ae_loss = F.l1_loss(outputs['x_recon'], batch[self.input_key], reduction='none')
-        losses['ae_loss'] = ae_loss.sum(dim=(-1, -2, -3)).mean()
+        # Count the number of output elements to normalize the loss
+        num_output_elements = ae_loss.numel() // ae_loss.shape[0]
+        losses['ae_loss'] = ae_loss.mean()
 
         # Make the KL divergence loss (effectively regularize the latents)
         mean = outputs['mean']
         log_var = outputs['log_var']
-        kl_div_loss = -0.5 * torch.mean(1 + log_var - mean.pow(2) - log_var.exp(), dim=(-1, -2, -3)).mean()
-        losses['kl_div_loss'] = kl_div_loss
+        kl_div_loss = -0.5 * (1 + log_var - mean.pow(2) - log_var.exp())
+        # Count the number of latent elements to normalize the loss
+        num_latent_elements = mean.numel() // kl_div_loss.shape[0]
+        losses['kl_div_loss'] = kl_div_loss.mean()
 
         # LPIPs loss. Images for LPIPS must be in [-1, 1]
         recon_img = outputs['x_recon'].clamp(-1, 1)
@@ -594,7 +596,7 @@ class ComposerAutoEncoder(ComposerModel):
         # Note: the +2 here comes from the nll of the laplace distribution.
         # It's only here to make you feel better by keeping the loss positive for longer.
         nll_loss = rec_loss / torch.exp(self.log_var) + self.log_var + 2
-        nll_loss = nll_loss.mean(dim=(-1, -2, -3)).mean()
+        nll_loss = nll_loss.mean()
 
         # ---------------------------------------------------------------------
         nll_grads = torch.autograd.grad(nll_loss, self.get_last_layer_weight(), retain_graph=True)[0]
@@ -621,11 +623,12 @@ class ComposerAutoEncoder(ComposerModel):
         losses['disc_real_loss'] = real_loss
         losses['disc_fake_loss'] = fake_loss
         losses['disc_loss'] = 0.5 * (real_loss + fake_loss)
-
         losses['disc_weight'] = disc_weight
-        # Combine the losses
-        total_loss = nll_loss + self.kl_divergence_weight * kl_div_loss
-        total_loss += 0.5 * (real_loss + fake_loss)
+
+        # Combine the losses. Downweight the kl_div_loss to account for differing dimensionalities.
+        dimensionality_weight = num_latent_elements / num_output_elements
+        total_loss = losses['nll_loss'] + self.kl_divergence_weight * dimensionality_weight * losses['kl_div_loss']
+        total_loss += losses['disc_loss']
         losses['total'] = total_loss
         return losses
 
