@@ -11,7 +11,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from composer.models import ComposerModel
 from torch.autograd import Function
-from torchmetrics import MeanSquaredError, Metric
+from torchmetrics import MeanMetric, MeanSquaredError, Metric
 
 
 class ResNetBlock(nn.Module):
@@ -30,12 +30,14 @@ class ResNetBlock(nn.Module):
         output_channels: Optional[int] = None,
         use_conv_shortcut: bool = False,
         dropout_probability: float = 0.0,
+        zero_init_last: bool = False,
     ):
         super().__init__()
         self.input_channels = input_channels
         self.output_channels = output_channels if output_channels is not None else input_channels
         self.use_conv_shortcut = use_conv_shortcut
         self.dropout_probability = dropout_probability
+        self.zero_init_last = zero_init_last
 
         self.norm1 = nn.GroupNorm(num_groups=32, num_channels=self.input_channels, eps=1e-6, affine=True)
         self.conv1 = nn.Conv2d(self.input_channels, self.output_channels, kernel_size=3, stride=1, padding=1)
@@ -61,9 +63,10 @@ class ResNetBlock(nn.Module):
             self.conv_shortcut = nn.Identity()
 
         # Init the final conv layer parameters to zero.
-        nn.init.zeros_(self.conv2.weight)
-        if self.conv2.bias is not None:
-            nn.init.zeros_(self.conv2.bias)
+        if self.zero_init_last:
+            nn.init.zeros_(self.conv2.weight)
+            if self.conv2.bias is not None:
+                nn.init.zeros_(self.conv2.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward through the residual block."""
@@ -375,6 +378,10 @@ class AutoEncoder(nn.Module):
 
         self.post_quant_conv = nn.Conv2d(self.latent_channels, self.latent_channels, kernel_size=1, stride=1, padding=0)
 
+    def get_last_layer_weight(self) -> torch.Tensor:
+        """Get the weight of the last layer of the decoder."""
+        return self.decoder.conv_out.weight
+
     def encode(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
         """Encode an input tensor into a latent tensor."""
         h = self.encoder(x)
@@ -457,6 +464,23 @@ class GradientReversalLayer(Function):
         return (-grad_output)
 
 
+class GradientScalingLayer(nn.Module):
+    """Layer that scales the gradient."""
+
+    def __init__(self):
+        super().__init__()
+        self.scale = 1.0
+
+    def set_scale(self, scale: float):
+        self.scale = scale
+
+    def forward(self, x):
+        return x
+
+    def backward_hook(self, module, grad_input, grad_output):
+        return (self.scale * grad_input[0],)
+
+
 class ComposerAutoEncoder(ComposerModel):
     """Composer wrapper for the AutoEncoder."""
 
@@ -506,8 +530,10 @@ class ComposerAutoEncoder(ComposerModel):
         self.kl_divergence_weight = kl_divergence_weight
         self.lpips_weight = lpips_weight
 
-        self.train_metrics = [MeanSquaredError()]
-        self.val_metrics = [MeanSquaredError()]
+        train_metrics = [MeanSquaredError()]
+        self.train_metrics = {metric.__class__.__name__: metric for metric in train_metrics}
+        val_metrics = [MeanSquaredError(), MeanMetric()]
+        self.val_metrics = {metric.__class__.__name__: metric for metric in val_metrics}
 
         # Set up log variance
         if self.learn_log_var:
@@ -531,6 +557,15 @@ class ComposerAutoEncoder(ComposerModel):
                                                  num_filters=self.discriminator_num_filters,
                                                  num_layers=self.discriminator_num_layers)
         self.reverse_gradients = GradientReversalLayer()
+        self.scale_gradients = GradientScalingLayer()
+        self.scale_gradients.register_backward_hook(self.scale_gradients.backward_hook)
+
+    def get_last_layer_weight(self) -> torch.Tensor:
+        """Get the weight of the last layer of the decoder."""
+        return self.model.get_last_layer_weight()
+
+    def set_discriminator_weight(self, weight: float):
+        self.discriminator_weight = weight
 
     def forward(self, batch):
         outputs = self.model(batch[self.input_key])
@@ -545,7 +580,7 @@ class ComposerAutoEncoder(ComposerModel):
         # Make the KL divergence loss (effectively regularize the latents)
         mean = outputs['mean']
         log_var = outputs['log_var']
-        kl_div_loss = -0.5 * torch.sum(1 + log_var - mean.pow(2) - log_var.exp(), dim=(-1, -2, -3)).mean()
+        kl_div_loss = -0.5 * torch.mean(1 + log_var - mean.pow(2) - log_var.exp(), dim=(-1, -2, -3)).mean()
         losses['kl_div_loss'] = kl_div_loss
 
         # LPIPs loss. Images for LPIPS must be in [-1, 1]
@@ -556,23 +591,41 @@ class ComposerAutoEncoder(ComposerModel):
 
         # Make the nll loss
         rec_loss = ae_loss + self.lpips_weight * lpips_loss
-        nll_loss = rec_loss / torch.exp(self.log_var) + self.log_var
-        nll_loss = nll_loss.sum(dim=(-1, -2, -3)).mean()
+        # Note: the +2 here comes from the nll of the laplace distribution.
+        # It's only here to make you feel better by keeping the loss positive for longer.
+        nll_loss = rec_loss / torch.exp(self.log_var) + self.log_var + 2
+        nll_loss = nll_loss.mean(dim=(-1, -2, -3)).mean()
+
+        # ---------------------------------------------------------------------
+        nll_grads = torch.autograd.grad(nll_loss, self.get_last_layer_weight(), retain_graph=True)[0]
+        nll_grads_norm = torch.norm(nll_grads)
+        # ---------------------------------------------------------------------
         losses['nll_loss'] = nll_loss
         losses['output_variance'] = torch.exp(self.log_var)
 
         # Discriminator loss
         real = self.discriminator(batch[self.input_key])
-        fake = self.discriminator(self.reverse_gradients.apply(recon_img))
+        fake = self.discriminator(self.reverse_gradients.apply(self.scale_gradients(recon_img)))
         real_loss = F.binary_cross_entropy_with_logits(real, torch.ones_like(real))
         fake_loss = F.binary_cross_entropy_with_logits(fake, torch.zeros_like(fake))
+
+        # ---------------------------------------------------------------------
+        disc_grads = torch.autograd.grad(fake_loss, self.get_last_layer_weight(), retain_graph=True)[0]
+        disc_grads_norm = torch.norm(disc_grads)
+        disc_weight = nll_grads_norm / (disc_grads_norm + 1e-4)
+        disc_weight = torch.clamp(disc_weight, 0.0, 1e4).detach()
+        disc_weight *= self.discriminator_weight
+        self.scale_gradients.set_scale(disc_weight.item())
+        # ---------------------------------------------------------------------
+
         losses['disc_real_loss'] = real_loss
         losses['disc_fake_loss'] = fake_loss
         losses['disc_loss'] = 0.5 * (real_loss + fake_loss)
 
+        losses['disc_weight'] = disc_weight
         # Combine the losses
         total_loss = nll_loss + self.kl_divergence_weight * kl_div_loss
-        total_loss += 0.5 * self.discriminator_weight * (real_loss + fake_loss)
+        total_loss += 0.5 * (real_loss + fake_loss)
         losses['total'] = total_loss
         return losses
 
@@ -603,4 +656,7 @@ class ComposerAutoEncoder(ComposerModel):
         return metrics_dict
 
     def update_metric(self, batch, outputs, metric):
-        metric.update(outputs['x_recon'], batch[self.input_key])
+        if isinstance(metric, MeanMetric):
+            metric.update(torch.square(outputs['latents']))
+        else:
+            metric.update(outputs['x_recon'], batch[self.input_key])
