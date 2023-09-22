@@ -340,6 +340,9 @@ class StableDiffusion(ComposerModel):
         num_images_per_prompt: Optional[int] = 1,
         seed: Optional[int] = None,
         progress_bar: Optional[bool] = True,
+        zero_out_negative_prompt: bool = True,
+        crop_params: Optional[list] = None,
+        size_params: Optional[list] = None,
     ):
         """Generates image from noise.
 
@@ -378,9 +381,15 @@ class StableDiffusion(ComposerModel):
                 Default: `3.0`.
             num_images_per_prompt (int): The number of images to generate per prompt.
                  Default: `1`.
-            progress_bar (bool): Wether to use the tqdm progress bar during generation.
+            progress_bar (bool): Whether to use the tqdm progress bar during generation.
                 Default: `True`.
             seed (int): Random seed to use for generation. Set a seed for reproducible generation.
+                Default: `None`.
+            zero_out_negative_prompt (bool): Whether or not to zero out negative prompt if it is
+                an empty string. Default: `True`.
+            crop_params (list, optional): Crop parameters to use when generating images with SDXL.
+                Default: `None`.
+            size_params (list, optional): Size parameters to use when generating images with SDXL.
                 Default: `None`.
         """
         _check_prompt_given(prompt, tokenized_prompts, prompt_embeds)
@@ -402,16 +411,28 @@ class StableDiffusion(ComposerModel):
 
         do_classifier_free_guidance = guidance_scale > 1.0  # type: ignore
 
-        text_embeddings = self._prepare_text_embeddings(prompt, tokenized_prompts, prompt_embeds, num_images_per_prompt)
+        text_embeddings, pooled_text_embeddings = self._prepare_text_embeddings(prompt, tokenized_prompts,
+                                                                                prompt_embeds, num_images_per_prompt)
         batch_size = len(text_embeddings)  # len prompts * num_images_per_prompt
         # classifier free guidance + negative prompts
         # negative prompt is given in place of the unconditional input in classifier free guidance
+        pooled_embeddings = None
         if do_classifier_free_guidance:
-            negative_prompt = negative_prompt or ([''] * (batch_size // num_images_per_prompt))  # type: ignore
-            unconditional_embeddings = self._prepare_text_embeddings(negative_prompt, tokenized_negative_prompts,
-                                                                     negative_prompt_embeds, num_images_per_prompt)
+            if negative_prompt_embeds is None and zero_out_negative_prompt:
+                unconditional_embeddings = torch.zeros_like(text_embeddings)
+                if pooled_text_embeddings is not None:
+                    pooled_unconditional_embeddings = torch.zeros_like(pooled_text_embeddings)
+                else:
+                    pooled_unconditional_embeddings = None
+            else:
+                negative_prompt = negative_prompt or ([''] * (batch_size // num_images_per_prompt))  # type: ignore
+                unconditional_embeddings, pooled_unconditional_embeddings = self._prepare_text_embeddings(
+                    negative_prompt, tokenized_negative_prompts, negative_prompt_embeds, num_images_per_prompt)
+
             # concat uncond + prompt
             text_embeddings = torch.cat([unconditional_embeddings, text_embeddings])
+            if self.sdxl:
+                pooled_embeddings = torch.cat([pooled_unconditional_embeddings, pooled_text_embeddings])  # type: ignore
 
         # prepare for diffusion generation process
         latents = torch.randn(
@@ -424,6 +445,23 @@ class StableDiffusion(ComposerModel):
         # scale the initial noise by the standard deviation required by the scheduler
         latents = latents * self.inference_scheduler.init_noise_sigma
 
+        added_cond_kwargs = {}
+        # if using SDXL, prepare added time ids & embeddings
+        if self.sdxl and pooled_embeddings is not None:
+            if not crop_params:
+                crop_params = [0., 0.]
+            if not size_params:
+                size_params = [width, height]
+            cond_original_size = torch.tensor([[width, height]]).repeat(pooled_embeddings.shape[0],
+                                                                        1).to(device).float()
+            cond_crops_coords_top_left = torch.tensor([crop_params]).repeat(pooled_embeddings.shape[0],
+                                                                            1).to(device).float()
+            cond_target_size = torch.tensor([size_params]).repeat(pooled_embeddings.shape[0], 1).to(device).float()
+            add_time_ids = torch.cat([cond_original_size, cond_crops_coords_top_left, cond_target_size], dim=1).float()
+            add_text_embeds = pooled_embeddings
+
+            added_cond_kwargs = {'text_embeds': add_text_embeds, 'time_ids': add_time_ids}
+
         # backward diffusion process
         for t in tqdm(self.inference_scheduler.timesteps, disable=not progress_bar):
             if do_classifier_free_guidance:
@@ -433,7 +471,10 @@ class StableDiffusion(ComposerModel):
 
             latent_model_input = self.inference_scheduler.scale_model_input(latent_model_input, t)
             # Model prediction
-            pred = self.unet(latent_model_input, t, encoder_hidden_states=text_embeddings).sample
+            pred = self.unet(latent_model_input,
+                             t,
+                             encoder_hidden_states=text_embeddings,
+                             added_cond_kwargs=added_cond_kwargs).sample
 
             if do_classifier_free_guidance:
                 # perform guidance. Note this is only techincally correct for prediction_type 'epsilon'
