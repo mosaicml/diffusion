@@ -169,8 +169,12 @@ class SDXLTextEncoder:
         self.text_encoder.half()
         self.text_encoder_2.half()
 
-    def __call__(self, tokenized_output,
-                 tokenized_output_2):  # TODO need to pass second tokenized outputs and handle pooled output
+    def to_device(self, composer_device):
+        self.text_encoder = composer_device.module_to_device(self.text_encoder)
+        self.text_encoder_2 = composer_device.module_to_device(self.text_encoder_2)
+        self.device = self.text_encoder.device
+
+    def __call__(self, tokenized_output, tokenized_output_2):
         # first text encoder
         conditioning = self.text_encoder(tokenized_output, output_hidden_states=True).hidden_states[-2]
         # second text encoder
@@ -336,6 +340,9 @@ def stable_diffusion_xl(
         if is_xformers_installed:
             model.unet.enable_xformers_memory_efficient_attention()
             model.vae.enable_xformers_memory_efficient_attention()
+
+        # Manually set text encoders to device
+        text_encoder.to_device(DeviceGPU())
 
     if clip_qkv is not None:
         if is_xformers_installed:
