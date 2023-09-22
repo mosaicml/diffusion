@@ -601,6 +601,7 @@ class ComposerAutoEncoder(ComposerModel):
         # ---------------------------------------------------------------------
         nll_grads = torch.autograd.grad(nll_loss, self.get_last_layer_weight(), retain_graph=True)[0]
         nll_grads_norm = torch.norm(nll_grads)
+        losses['nll_grads_norm'] = nll_grads_norm
         # ---------------------------------------------------------------------
         losses['nll_loss'] = nll_loss
         losses['output_variance'] = torch.exp(self.log_var)
@@ -612,8 +613,11 @@ class ComposerAutoEncoder(ComposerModel):
         fake_loss = F.binary_cross_entropy_with_logits(fake, torch.zeros_like(fake))
 
         # ---------------------------------------------------------------------
+        # Need to set the grad scale from the discriminator back to 1.0 to get the right norm
+        self.scale_gradients.set_scale(1.0)
         disc_grads = torch.autograd.grad(fake_loss, self.get_last_layer_weight(), retain_graph=True)[0]
         disc_grads_norm = torch.norm(disc_grads)
+        losses['disc_grads_norm'] = disc_grads_norm
         disc_weight = nll_grads_norm / (disc_grads_norm + 1e-4)
         disc_weight = torch.clamp(disc_weight, 0.0, 1e4).detach()
         disc_weight *= self.discriminator_weight
