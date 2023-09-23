@@ -10,8 +10,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from composer.models import ComposerModel
+from diffusers import AutoencoderKL
 from torch.autograd import Function
 from torchmetrics import MeanMetric, MeanSquaredError, Metric
+from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
+from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
 
 class ResNetBlock(nn.Module):
@@ -528,9 +531,14 @@ class ComposerAutoEncoder(ComposerModel):
         self.kl_divergence_weight = kl_divergence_weight
         self.lpips_weight = lpips_weight
 
+        # Set up train metrics
         train_metrics = [MeanSquaredError()]
         self.train_metrics = {metric.__class__.__name__: metric for metric in train_metrics}
-        val_metrics = [MeanSquaredError(), MeanMetric()]
+        # Set up val metrics
+        psnr_metric = PeakSignalNoiseRatio(data_range=2.0)
+        ssim_metric = StructuralSimilarityIndexMeasure(data_range=2.0)
+        lpips_metric = LearnedPerceptualImagePatchSimilarity(net_type='vgg')
+        val_metrics = [MeanSquaredError(), MeanMetric(), lpips_metric, psnr_metric, ssim_metric]
         self.val_metrics = {metric.__class__.__name__: metric for metric in val_metrics}
 
         # Set up log variance
@@ -663,7 +671,79 @@ class ComposerAutoEncoder(ComposerModel):
         return metrics_dict
 
     def update_metric(self, batch, outputs, metric):
+        clamped_imgs = outputs['x_recon'].clamp(-1, 1)
         if isinstance(metric, MeanMetric):
             metric.update(torch.square(outputs['latents']))
+        elif isinstance(metric, LearnedPerceptualImagePatchSimilarity):
+            metric.update(clamped_imgs, batch[self.input_key])
+        elif isinstance(metric, PeakSignalNoiseRatio):
+            metric.update(clamped_imgs, batch[self.input_key])
+        elif isinstance(metric, StructuralSimilarityIndexMeasure):
+            metric.update(clamped_imgs, batch[self.input_key])
+        else:
+            metric.update(outputs['x_recon'], batch[self.input_key])
+
+
+class ComposerHFAutoEncoder(ComposerModel):
+    """Composer wrapper for the Huggingface Autoencoder to enable benchmarking."""
+
+    def __init__(self, model_name: str = 'stabilityai/stable-diffusion-2-base', input_key: str = 'image'):
+        super().__init__()
+        self.model = AutoencoderKL.from_pretrained(model_name, subfolder='vae')
+        self.input_key = input_key
+
+        # Set up train metrics
+        train_metrics = [MeanSquaredError()]
+        self.train_metrics = {metric.__class__.__name__: metric for metric in train_metrics}
+        # Set up val metrics
+        psnr_metric = PeakSignalNoiseRatio(data_range=2.0)
+        ssim_metric = StructuralSimilarityIndexMeasure(data_range=2.0)
+        lpips_metric = LearnedPerceptualImagePatchSimilarity(net_type='vgg')
+        val_metrics = [MeanSquaredError(), MeanMetric(), lpips_metric, psnr_metric, ssim_metric]
+        self.val_metrics = {metric.__class__.__name__: metric for metric in val_metrics}
+
+    def forward(self, batch):
+        latents = self.model.encode(batch[self.input_key])['latent_dist'].sample()
+        recon = self.model.decode(latents).sample
+        return {'x_recon': recon, 'latents': latents}
+
+    def loss(self, outputs, batch):
+        return F.l1_loss(outputs['x_recon'], batch[self.input_key])
+
+    def eval_forward(self, batch, outputs=None):
+        # Skip this if outputs have already been computed, e.g. during training
+        if outputs is not None:
+            return outputs
+        outputs = self.forward(batch)
+        return outputs
+
+    def get_metrics(self, is_train: bool = False):
+        if is_train:
+            metrics = self.train_metrics
+        else:
+            metrics = self.val_metrics
+
+        if isinstance(metrics, Metric):
+            metrics_dict = {metrics.__class__.__name__: metrics}
+        elif isinstance(metrics, list):
+            metrics_dict = {metrics.__class__.__name__: metric for metric in metrics}
+        else:
+            metrics_dict = {}
+            for name, metric in metrics.items():
+                assert isinstance(metric, Metric)
+                metrics_dict[name] = metric
+
+        return metrics_dict
+
+    def update_metric(self, batch, outputs, metric):
+        clamped_imgs = outputs['x_recon'].clamp(-1, 1)
+        if isinstance(metric, MeanMetric):
+            metric.update(torch.square(outputs['latents']))
+        elif isinstance(metric, LearnedPerceptualImagePatchSimilarity):
+            metric.update(clamped_imgs, batch[self.input_key])
+        elif isinstance(metric, PeakSignalNoiseRatio):
+            metric.update(clamped_imgs, batch[self.input_key])
+        elif isinstance(metric, StructuralSimilarityIndexMeasure):
+            metric.update(clamped_imgs, batch[self.input_key])
         else:
             metric.update(outputs['x_recon'], batch[self.input_key])
