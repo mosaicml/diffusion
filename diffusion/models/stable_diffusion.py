@@ -193,7 +193,7 @@ class StableDiffusion(ComposerModel):
             if self.sdxl:
                 assert conditioning_2 is not None
                 conditioning_2 = conditioning_2.view(-1, conditioning_2.shape[-1])
-                conditioning, pooled_conditioning = self.text_encoder(conditioning, conditioning_2)
+                conditioning, pooled_conditioning = self.text_encoder([conditioning, conditioning_2])
             else:
                 conditioning = self.text_encoder(conditioning)[0]
 
@@ -219,7 +219,6 @@ class StableDiffusion(ComposerModel):
         added_cond_kwargs = {}
         # if using SDXL, prepare added time ids & embeddings
         if self.sdxl:
-            # TODO double check cond_crops_coords_top_left calc in transforms.py
             add_time_ids = torch.cat(
                 [batch['cond_original_size'], batch['cond_crops_coords_top_left'], batch['cond_target_size']], dim=1)
             add_text_embeds = pooled_conditioning
@@ -312,7 +311,7 @@ class StableDiffusion(ComposerModel):
             if self.sdxl:
                 # Decode captions with first tokenizer
                 captions = [
-                    self.tokenizer.tokenizer.decode(caption, skip_special_tokens=True)
+                    self.tokenizer.tokenizer.decode(caption[0], skip_special_tokens=True)
                     for caption in batch[self.text_key]
                 ]
             else:
@@ -505,7 +504,7 @@ class StableDiffusion(ComposerModel):
                                                        input_ids=True)
                 # TODO implement zero-ing out empty prompts!
                 text_embeddings, pooled_text_embeddings = self.text_encoder(
-                    tokenized_prompts[0].to(device), tokenized_prompts[1].to(device))  # type: ignore
+                    [tokenized_prompts[0].to(device), tokenized_prompts[1].to(device)])  # type: ignore
             else:
                 if tokenized_prompts is None:
                     tokenized_prompts = self.tokenizer(prompt,

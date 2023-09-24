@@ -134,95 +134,6 @@ def stable_diffusion_2(
     return model
 
 
-class SDXLTextEncoder:
-    """Wrapper around HuggingFace text encoders for SDXL.
-
-    Creates two text encoders (a CLIPTextModel and CLIPTextModelWithProjection) that behave like one.
-
-    Args:
-        model_name (str): Name of the model's text encoders to load. Defaults to 'stabilityai/stable-diffusion-xl-base-1.0'.
-        encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
-    """
-
-    def __init__(self, model_name='stabilityai/stable-diffusion-xl-base-1.0', encode_latents_in_fp16=True):
-        if encode_latents_in_fp16:
-            self.text_encoder = CLIPTextModel.from_pretrained(model_name,
-                                                              subfolder='text_encoder',
-                                                              torch_dtype=torch.float16)
-            self.text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(model_name,
-                                                                              subfolder='text_encoder_2',
-                                                                              torch_dtype=torch.float16)
-        else:
-            self.text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder')
-            self.text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(model_name, subfolder='text_encoder_2')
-        self.device = self.text_encoder.device
-
-        self._fsdp_wrap = False
-        self.text_encoder._fsdp_wrap = False
-        self.text_encoder_2._fsdp_wrap = False
-
-    def requires_grad_(self, requires_grad):
-        self.text_encoder.requires_grad_(requires_grad)
-        self.text_encoder_2.requires_grad_(requires_grad)
-
-    def half(self):
-        self.text_encoder.half()
-        self.text_encoder_2.half()
-
-    def to_device(self, composer_device):
-        self.text_encoder = composer_device.module_to_device(self.text_encoder)
-        self.text_encoder_2 = composer_device.module_to_device(self.text_encoder_2)
-        self.device = self.text_encoder.device
-
-    def __call__(self, tokenized_output, tokenized_output_2):
-        # first text encoder
-        conditioning = self.text_encoder(tokenized_output, output_hidden_states=True).hidden_states[-2]
-        # second text encoder
-        text_encoder_2_out = self.text_encoder_2(tokenized_output_2, output_hidden_states=True)
-        pooled_conditioning = text_encoder_2_out[0]  # (batch_size, 1280)
-        conditioning_2 = text_encoder_2_out.hidden_states[-2]  # (batch_size, 77, 1280)
-
-        # # zero out the appropriate things
-        # if batch[self.text_key].sum() == 0:
-        #     conditioning = torch.zeros_like(conditioning)
-        # if batch[self.text_key_2].sum() == 0:
-        #     conditioning_2 = torch.zeros_like(conditioning_2)
-        #     pooled_conditioning = torch.zeros_like(pooled_conditioning)
-
-        conditioning = torch.concat([conditioning, conditioning_2], dim=-1)
-        return conditioning, pooled_conditioning
-
-
-class SDXLTokenizer:
-    """Wrapper around HuggingFace tokenizers for SDXL.
-
-    Tokenizes prompt with two tokenizers and returns the outputs as a list.
-
-    Args:
-        model_name (str): Name of the model's text encoders to load. Defaults to 'stabilityai/stable-diffusion-xl-base-1.0'.
-    """
-
-    def __init__(self, model_name='stabilityai/stable-diffusion-xl-base-1.0'):
-        self.tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer')
-        self.tokenizer_2 = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer_2')
-
-    def __call__(self, prompt, padding, truncation, return_tensors, input_ids=False):
-        tokenized_output = self.tokenizer(prompt,
-                                          padding=padding,
-                                          max_length=self.tokenizer.model_max_length,
-                                          truncation=truncation,
-                                          return_tensors=return_tensors)
-        tokenized_output_2 = self.tokenizer_2(prompt,
-                                              padding=padding,
-                                              max_length=self.tokenizer_2.model_max_length,
-                                              truncation=truncation,
-                                              return_tensors=return_tensors)
-        if input_ids:
-            tokenized_output = tokenized_output.input_ids
-            tokenized_output_2 = tokenized_output_2.input_ids
-        return [tokenized_output, tokenized_output_2]
-
-
 def stable_diffusion_xl(
     model_name: str = 'stabilityai/stable-diffusion-xl-base-1.0',
     unet_model_name: str = 'stabilityai/stable-diffusion-xl-base-1.0',
@@ -340,9 +251,6 @@ def stable_diffusion_xl(
         if is_xformers_installed:
             model.unet.enable_xformers_memory_efficient_attention()
             model.vae.enable_xformers_memory_efficient_attention()
-
-        # Manually set text encoders to device
-        text_encoder.to_device(DeviceGPU())
 
     if clip_qkv is not None:
         if is_xformers_installed:
@@ -468,3 +376,74 @@ def continuous_pixel_diffusion(clip_model_name: str = 'openai/clip-vit-large-pat
         if is_xformers_installed:
             model.model.enable_xformers_memory_efficient_attention()
     return model
+
+
+class SDXLTextEncoder(torch.nn.Module):
+    """Wrapper around HuggingFace text encoders for SDXL.
+
+    Creates two text encoders (a CLIPTextModel and CLIPTextModelWithProjection) that behave like one.
+
+    Args:
+        model_name (str): Name of the model's text encoders to load. Defaults to 'stabilityai/stable-diffusion-xl-base-1.0'.
+        encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
+    """
+
+    def __init__(self, model_name='stabilityai/stable-diffusion-xl-base-1.0', encode_latents_in_fp16=True):
+        super().__init__()
+        torch_dtype = torch.float16 if encode_latents_in_fp16 else None
+        self.text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder', torch_dtype=torch_dtype)
+        self.text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(model_name,
+                                                                          subfolder='text_encoder_2',
+                                                                          torch_dtype=torch_dtype)
+        
+    @property
+    def device(self):
+        return self.text_encoder.device
+    
+    def forward(self, tokenized_text):
+        # first text encoder
+        conditioning = self.text_encoder(tokenized_text[0], output_hidden_states=True).hidden_states[-2]
+        # second text encoder
+        text_encoder_2_out = self.text_encoder_2(tokenized_text[1], output_hidden_states=True)
+        pooled_conditioning = text_encoder_2_out[0]  # (batch_size, 1280)
+        conditioning_2 = text_encoder_2_out.hidden_states[-2]  # (batch_size, 77, 1280)
+
+        # # zero out the appropriate things
+        # if batch[self.text_key].sum() == 0:
+        #     conditioning = torch.zeros_like(conditioning)
+        # if batch[self.text_key_2].sum() == 0:
+        #     conditioning_2 = torch.zeros_like(conditioning_2)
+        #     pooled_conditioning = torch.zeros_like(pooled_conditioning)
+
+        conditioning = torch.concat([conditioning, conditioning_2], dim=-1)
+        return conditioning, pooled_conditioning
+
+
+class SDXLTokenizer:
+    """Wrapper around HuggingFace tokenizers for SDXL.
+
+    Tokenizes prompt with two tokenizers and returns the outputs as a list.
+
+    Args:
+        model_name (str): Name of the model's text encoders to load. Defaults to 'stabilityai/stable-diffusion-xl-base-1.0'.
+    """
+
+    def __init__(self, model_name='stabilityai/stable-diffusion-xl-base-1.0'):
+        self.tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer')
+        self.tokenizer_2 = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer_2')
+
+    def __call__(self, prompt, padding, truncation, return_tensors, input_ids=False):
+        tokenized_output = self.tokenizer(prompt,
+                                          padding=padding,
+                                          max_length=self.tokenizer.model_max_length,
+                                          truncation=truncation,
+                                          return_tensors=return_tensors)
+        tokenized_output_2 = self.tokenizer_2(prompt,
+                                              padding=padding,
+                                              max_length=self.tokenizer_2.model_max_length,
+                                              truncation=truncation,
+                                              return_tensors=return_tensors)
+        if input_ids:
+            tokenized_output = tokenized_output.input_ids
+            tokenized_output_2 = tokenized_output_2.input_ids
+        return [tokenized_output, tokenized_output_2]
