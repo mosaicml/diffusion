@@ -395,7 +395,7 @@ class SDXLTextEncoder(torch.nn.Module):
         self.text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(model_name,
                                                                           subfolder='text_encoder_2',
                                                                           torch_dtype=torch_dtype)
-        
+
     @property
     def device(self):
         return self.text_encoder.device

@@ -123,7 +123,8 @@ class StreamingImageCaptionDataset(StreamingDataset):
                                                 return_tensors='pt',
                                                 input_ids=True)
             tokenized_captions = [cap[0] for cap in tokenized_captions]
-            tokenized_caption = torch.stack(tokenized_captions)
+            tokenized_caption = torch.stack(tokenized_captions) 
+            print('stacked shape:', tokenized_caption.shape)
         else:
             tokenized_caption = self.tokenizer(
                 caption,
