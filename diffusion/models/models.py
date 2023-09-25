@@ -6,6 +6,7 @@
 from typing import List, Optional
 
 import torch
+import logging
 from composer.devices import DeviceGPU
 from diffusers import AutoencoderKL, DDIMScheduler, DDPMScheduler, EulerDiscreteScheduler, UNet2DConditionModel
 from torchmetrics import MeanSquaredError
@@ -24,6 +25,8 @@ try:
     is_xformers_installed = True
 except:
     is_xformers_installed = False
+
+log = logging.getLogger(__name__)
 
 
 def stable_diffusion_2(
@@ -129,6 +132,7 @@ def stable_diffusion_2(
             attn_processor = ClippedXFormersAttnProcessor(clip_val=clip_qkv)
         else:
             attn_processor = ClippedAttnProcessor2_0(clip_val=clip_qkv)
+        log.info('Using %s with clip_val %.1f'%(attn_processor.__class__, clip_qkv))
         model.unet.set_attn_processor(attn_processor)
 
     return model
@@ -195,12 +199,12 @@ def stable_diffusion_xl(
             metric.requires_grad_(False)
 
     if pretrained:
-        raise NotImplementedError('Full SDXL pipeline not implemented yet.')
+        unet = UNet2DConditionModel.from_pretrained(model_name, subfolder='unet')
     else:
         config = PretrainedConfig.get_config_dict(unet_model_name, subfolder='unet')
         unet = UNet2DConditionModel(**config[0])
 
-        # Zero initialization trick for more stable training
+        # Zero initialization trick
         for name, layer in unet.named_modules():
             # Final conv in ResNet blocks
             if name.endswith('conv2'):
@@ -211,16 +215,11 @@ def stable_diffusion_xl(
         # Last conv block out projection
         unet.conv_out = zero_module(unet.conv_out)
 
-    if encode_latents_in_fp16:
-        try:
-            vae = AutoencoderKL.from_pretrained(vae_model_name, subfolder='vae', torch_dtype=torch.float16)
-        except:  # for handling SDXL vae fp16 fixed checkpoint
-            vae = AutoencoderKL.from_pretrained(vae_model_name, torch_dtype=torch.float16)
-    else:
-        try:
-            vae = AutoencoderKL.from_pretrained(vae_model_name, subfolder='vae')
-        except:  #  for handling SDXL vae fp16 fixed checkpoint
-            vae = AutoencoderKL.from_pretrained(vae_model_name)
+    torch_dtype = torch.float16 if encode_latents_in_fp16 else None
+    try:
+        vae = AutoencoderKL.from_pretrained(vae_model_name, subfolder='vae', torch_dtype=torch_dtype)
+    except:  # for handling SDXL vae fp16 fixed checkpoint
+        vae = AutoencoderKL.from_pretrained(vae_model_name, torch_dtype=torch_dtype)
 
     tokenizer = SDXLTokenizer(model_name)
     text_encoder = SDXLTextEncoder(model_name, encode_latents_in_fp16)
@@ -257,6 +256,7 @@ def stable_diffusion_xl(
             attn_processor = ClippedXFormersAttnProcessor(clip_val=clip_qkv)
         else:
             attn_processor = ClippedAttnProcessor2_0(clip_val=clip_qkv)
+        log.info('Using %s with clip_val %.1f'%(attn_processor.__class__, clip_qkv))
         model.unet.set_attn_processor(attn_processor)
 
     return model
@@ -407,13 +407,6 @@ class SDXLTextEncoder(torch.nn.Module):
         text_encoder_2_out = self.text_encoder_2(tokenized_text[1], output_hidden_states=True)
         pooled_conditioning = text_encoder_2_out[0]  # (batch_size, 1280)
         conditioning_2 = text_encoder_2_out.hidden_states[-2]  # (batch_size, 77, 1280)
-
-        # # zero out the appropriate things
-        # if batch[self.text_key].sum() == 0:
-        #     conditioning = torch.zeros_like(conditioning)
-        # if batch[self.text_key_2].sum() == 0:
-        #     conditioning_2 = torch.zeros_like(conditioning_2)
-        #     pooled_conditioning = torch.zeros_like(pooled_conditioning)
 
         conditioning = torch.concat([conditioning, conditioning_2], dim=-1)
         return conditioning, pooled_conditioning

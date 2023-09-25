@@ -33,6 +33,8 @@ class StreamingImageCaptionDataset(StreamingDataset):
         remote (str, optional): Remote directory (S3 or local filesystem) where dataset is stored. Default: ``None``.
         local (str, optional): Local filesystem directory where dataset is cached during operation. Default: ``None``.
         tokenizer_name_or_path (str): The name or path of the tokenizer to use. Default: ``'stabilityai/stable-diffusion-2-base'``.
+        caption_drop_prob (float): The probability of dropping a caption. Default: ``0.0``.
+        microcond_drop_prob (float): The probability of dropping microconditioning. Only relevant for SDXL. Default: ``0.0``.
         caption_selection (str): If there are multiple captions, specifies how to select a single caption.
             'first' selects the first caption in the list and 'random' selects a random caption in the list.
             If there is only one caption, this argument is ignored. Default: ``'first'``.
@@ -51,6 +53,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
         local: Optional[str] = None,
         tokenizer_name_or_path: str = 'stabilityai/stable-diffusion-2-base',
         caption_drop_prob: float = 0.0,
+        microcond_drop_prob: float = 0.0,
         caption_selection: str = 'first',
         transform: Optional[Callable] = None,
         image_size: Optional[int] = None,
@@ -79,6 +82,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
             self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, subfolder='tokenizer')
             self.sdxl_crop = None
         self.caption_drop_prob = caption_drop_prob
+        self.microcond_drop_prob = microcond_drop_prob
         self.caption_selection = caption_selection
         self.image_size = image_size
         self.image_key = image_key
@@ -97,17 +101,23 @@ class StreamingImageCaptionDataset(StreamingDataset):
         out = {}
         # Image transforms
         if self.sdxl and self.sdxl_crop:
-            # sdxl crop to return params
             img, crop_top, crop_left, image_height, image_width = self.sdxl_crop(img)
             out['cond_crops_coords_top_left'] = torch.tensor([crop_top, crop_left])
             out['cond_original_size'] = torch.tensor([image_width, image_height])
             out['cond_target_size'] = torch.tensor([self.image_size, self.image_size])
+
+            # Microconditioning dropout as in Stability repo
+            # https://github.com/Stability-AI/generative-models/blob/477d8b9a7730d9b2e92b326a770c0420d00308c9/sgm/modules/encoders/modules.py#L151-L160
+            if torch.rand(1) < self.microcond_drop_prob:
+                out['cond_crops_coords_top_left'] = out['cond_crops_coords_top_left'] * 0.0
+            if torch.rand(1) < self.microcond_drop_prob:
+                out['cond_original_size'] = out['cond_original_size'] * 0.0
+            if torch.rand(1) < self.microcond_drop_prob:
+                out['cond_target_size'] = out['cond_target_size'] * 0.0
         else:
             crop_top, crop_left, image_height, image_width = None, None, None, None
         if self.transform is not None:
             img = self.transform(img)
-
-        # TODO implement dropped caption masking!
 
         # Caption
         if torch.rand(1) < self.caption_drop_prob:
@@ -145,6 +155,7 @@ def build_streaming_image_caption_dataloader(
     batch_size: int,
     tokenizer_name_or_path: str = 'stabilityai/stable-diffusion-2-base',
     caption_drop_prob: float = 0.0,
+    microcond_drop_prob: float = 0.0,
     resize_size: int = 256,
     caption_selection: str = 'first',
     transform: Optional[List[Callable]] = None,
@@ -153,6 +164,7 @@ def build_streaming_image_caption_dataloader(
     rand_crop: bool = False,
     streaming_kwargs: Optional[Dict] = None,
     dataloader_kwargs: Optional[Dict] = None,
+    
 ):
     """Builds a streaming LAION dataloader.
 
@@ -162,6 +174,7 @@ def build_streaming_image_caption_dataloader(
         batch_size (int): The batch size to use for both the ``StreamingDataset`` and ``DataLoader``.
         tokenizer_name_or_path (str): The name or path of the tokenizer to use. Default: ``'stabilityai/stable-diffusion-2-base'``.
         caption_drop_prob (float): The probability of dropping a caption. Default: ``0.0``.
+        microcond_drop_prob (float): The probability of dropping microconditioning. Only relevant for SDXL. Default: ``0.0``.
         resize_size (int): The size to resize the image to. Default: ``256``.
         caption_selection (str): If there are multiple captions, specifies how to select a single caption.
             'first' selects the first caption in the list and 'random' selects a random caption in the list.
@@ -224,6 +237,7 @@ def build_streaming_image_caption_dataloader(
         streams=streams,
         tokenizer_name_or_path=tokenizer_name_or_path,
         caption_drop_prob=caption_drop_prob,
+        microcond_drop_prob=microcond_drop_prob,
         caption_selection=caption_selection,
         transform=transform,
         image_size=resize_size,
@@ -233,6 +247,7 @@ def build_streaming_image_caption_dataloader(
         sdxl=sdxl,
         **streaming_kwargs,
     )
+
 
     dataloader = DataLoader(
         dataset=dataset,

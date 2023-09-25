@@ -161,7 +161,7 @@ class StableDiffusion(ComposerModel):
             self.unet._fsdp_wrap = True
 
     def forward(self, batch):
-        latents, conditioning, pooled_conditioning = None, None, None
+        latents, conditioning, conditioning_2, pooled_conditioning = None, None, None, None
         # Use latents if specified and available. When specified, they might not exist during eval
         if self.precomputed_latents and self.image_latents_key in batch and self.text_latents_key in batch:
             if self.sdxl:
@@ -170,9 +170,10 @@ class StableDiffusion(ComposerModel):
         else:
             inputs, conditioning = batch[self.image_key], batch[self.text_key]
             if self.sdxl:
-                conditioning, conditioning_2 = conditioning[:,0,:], conditioning[:,1,:] # [B, 2, 77]
-            else:
-                conditioning_2 = None
+                # If SDXL, separate the conditioning ([B, 2, 77]) from each tokenizer
+                conditioning, conditioning_2 = conditioning[:,0,:], conditioning[:,1,:]
+                conditioning_2 = conditioning_2.view(-1, conditioning_2.shape[-1])
+
             conditioning = conditioning.view(-1, conditioning.shape[-1])
             if self.encode_latents_in_fp16:
                 # Disable autocast context as models are in fp16
@@ -180,21 +181,17 @@ class StableDiffusion(ComposerModel):
                     # Encode the images to the latent space.
                     # Encode prompt into conditioning vector
                     latents = self.vae.encode(inputs.half())['latent_dist'].sample().data
-                    # if self.sdxl:
-                    #     conditioning_2 = batch[self.text_key_2].view(-1, conditioning_2.shape[-1])
-                    #     conditioning, pooled_conditioning = self.text_encoder(conditioning, conditioning_2)
-                    # else:
-                    #     conditioning = self.text_encoder(conditioning)[0]  # Should be (batch_size, 77, 768)
-                    #     pooled_conditioning = None
+                    if self.sdxl:
+                        conditioning, pooled_conditioning = self.text_encoder([conditioning, conditioning_2])
+                    else:
+                        conditioning = self.text_encoder(conditioning)[0]  # Should be (batch_size, 77, 768)
+
             else:
                 latents = self.vae.encode(inputs)['latent_dist'].sample().data
-
-            if self.sdxl:
-                assert conditioning_2 is not None
-                conditioning_2 = conditioning_2.view(-1, conditioning_2.shape[-1])
-                conditioning, pooled_conditioning = self.text_encoder([conditioning, conditioning_2])
-            else:
-                conditioning = self.text_encoder(conditioning)[0]
+                if self.sdxl:
+                    conditioning, pooled_conditioning = self.text_encoder([conditioning, conditioning_2])
+                else:
+                    conditioning = self.text_encoder(conditioning)[0]
 
             # Magical scaling number (See https://github.com/huggingface/diffusers/issues/437#issuecomment-1241827515)
             latents *= self.latent_scale
@@ -501,7 +498,6 @@ class StableDiffusion(ComposerModel):
                                                        truncation=True,
                                                        return_tensors='pt',
                                                        input_ids=True)
-                # TODO implement zero-ing out empty prompts!
                 text_embeddings, pooled_text_embeddings = self.text_encoder(
                     [tokenized_prompts[0].to(device), tokenized_prompts[1].to(device)])  # type: ignore
             else:
