@@ -232,9 +232,6 @@ def build_streaming_image_caption_dataloader(
     transform = transforms.Compose(transform)
     assert isinstance(transform, Callable)
 
-    import streaming
-    streaming.base.util.clean_stale_shared_memory()
-
     dataset = StreamingImageCaptionDataset(
         streams=streams,
         tokenizer_name_or_path=tokenizer_name_or_path,
