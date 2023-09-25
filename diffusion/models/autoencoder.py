@@ -533,8 +533,22 @@ class AutoEncoderLoss(nn.Module):
     def set_discriminator_weight(self, weight: float):
         self.discriminator_weight = weight
 
-    def calc_discriminator_adaptive_weight(self, nll_loss):
-        pass
+    def calc_discriminator_adaptive_weight(self, nll_loss, fake_loss, last_layer):
+        # Get the grad norm from the nll loss
+        nll_grads = torch.autograd.grad(nll_loss, last_layer, retain_graph=True)[0]
+        nll_grads_norm = torch.norm(nll_grads)
+        # Get the grad norm for the discriminator loss
+        # Need to set the grad scale from the discriminator back to 1.0 to get the right norm
+        self.scale_gradients.set_scale(1.0)
+        disc_grads = torch.autograd.grad(fake_loss, last_layer, retain_graph=True)[0]
+        disc_grads_norm = torch.norm(disc_grads)
+        # Calculate the updated discriminator weight based on the grad norms
+        disc_weight = nll_grads_norm / (disc_grads_norm + 1e-4)
+        disc_weight = torch.clamp(disc_weight, 0.0, 1e4).detach()
+        disc_weight *= self.discriminator_weight
+        # Set the discriminator weight
+        self.scale_gradients.set_scale(disc_weight.item())
+        return disc_weight, nll_grads_norm, disc_grads_norm
 
     def forward(self, outputs: dict[str, torch.Tensor], batch: dict[str, torch.Tensor],
                 last_layer: torch.Tensor) -> dict[str, torch.Tensor]:
@@ -544,14 +558,6 @@ class AutoEncoderLoss(nn.Module):
         # Count the number of output elements to normalize the loss
         num_output_elements = ae_loss.numel() // ae_loss.shape[0]
         losses['ae_loss'] = ae_loss.mean()
-
-        # Make the KL divergence loss (effectively regularize the latents)
-        mean = outputs['mean']
-        log_var = outputs['log_var']
-        kl_div_loss = -0.5 * (1 + log_var - mean.pow(2) - log_var.exp())
-        # Count the number of latent elements to normalize the loss
-        num_latent_elements = mean.numel() // kl_div_loss.shape[0]
-        losses['kl_div_loss'] = kl_div_loss.mean()
 
         # LPIPs loss. Images for LPIPS must be in [-1, 1]
         recon_img = outputs['x_recon'].clamp(-1, 1)
@@ -565,12 +571,6 @@ class AutoEncoderLoss(nn.Module):
         # It's only here to make you feel better by keeping the loss positive for longer.
         nll_loss = rec_loss / torch.exp(self.log_var) + self.log_var + 2
         nll_loss = nll_loss.mean()
-
-        # ---------------------------------------------------------------------
-        nll_grads = torch.autograd.grad(nll_loss, last_layer, retain_graph=True)[0]
-        nll_grads_norm = torch.norm(nll_grads)
-        losses['nll_grads_norm'] = nll_grads_norm
-        # ---------------------------------------------------------------------
         losses['nll_loss'] = nll_loss
         losses['output_variance'] = torch.exp(self.log_var)
 
@@ -579,23 +579,24 @@ class AutoEncoderLoss(nn.Module):
         fake = self.discriminator(self.reverse_gradients.apply(self.scale_gradients(recon_img)))
         real_loss = F.binary_cross_entropy_with_logits(real, torch.ones_like(real))
         fake_loss = F.binary_cross_entropy_with_logits(fake, torch.zeros_like(fake))
-
-        # ---------------------------------------------------------------------
-        # Need to set the grad scale from the discriminator back to 1.0 to get the right norm
-        self.scale_gradients.set_scale(1.0)
-        disc_grads = torch.autograd.grad(fake_loss, last_layer, retain_graph=True)[0]
-        disc_grads_norm = torch.norm(disc_grads)
-        losses['disc_grads_norm'] = disc_grads_norm
-        disc_weight = nll_grads_norm / (disc_grads_norm + 1e-4)
-        disc_weight = torch.clamp(disc_weight, 0.0, 1e4).detach()
-        disc_weight *= self.discriminator_weight
-        self.scale_gradients.set_scale(disc_weight.item())
-        # ---------------------------------------------------------------------
-
         losses['disc_real_loss'] = real_loss
         losses['disc_fake_loss'] = fake_loss
         losses['disc_loss'] = 0.5 * (real_loss + fake_loss)
+
+        # Update the adaptive discriminator weight
+        disc_weight, nll_grads_norm, disc_grads_norm = self.calc_discriminator_adaptive_weight(
+            nll_loss, fake_loss, last_layer)
         losses['disc_weight'] = disc_weight
+        losses['nll_grads_norm'] = nll_grads_norm
+        losses['disc_grads_norm'] = disc_grads_norm
+
+        # Make the KL divergence loss (effectively regularize the latents)
+        mean = outputs['mean']
+        log_var = outputs['log_var']
+        kl_div_loss = -0.5 * (1 + log_var - mean.pow(2) - log_var.exp())
+        # Count the number of latent elements to normalize the loss
+        num_latent_elements = mean.numel() // kl_div_loss.shape[0]
+        losses['kl_div_loss'] = kl_div_loss.mean()
 
         # Combine the losses. Downweight the kl_div_loss to account for differing dimensionalities.
         dimensionality_weight = num_latent_elements / num_output_elements
@@ -726,12 +727,40 @@ class ComposerAutoEncoder(ComposerModel):
 
 
 class ComposerHFAutoEncoder(ComposerModel):
-    """Composer wrapper for the Huggingface Autoencoder to enable benchmarking."""
+    """Composer wrapper for the Huggingface Autoencoder."""
 
-    def __init__(self, model_name: str = 'stabilityai/stable-diffusion-2-base', input_key: str = 'image'):
+    def __init__(self,
+                 model_name: str = 'stabilityai/stable-diffusion-2-base',
+                 output_channels: int = 3,
+                 input_key: str = 'image',
+                 learn_log_var: bool = True,
+                 kl_divergence_weight: float = 1.0,
+                 lpips_weight: float = 0.25,
+                 discriminator_weight: float = 0.5,
+                 discriminator_num_filters: int = 64,
+                 discriminator_num_layers: int = 3):
         super().__init__()
-        self.model = AutoencoderKL.from_pretrained(model_name, subfolder='vae')
+        self.model_name = model_name
+        self.output_channels = output_channels
         self.input_key = input_key
+
+        self.model = AutoencoderKL.from_pretrained(self.model_name, subfolder='vae')
+
+        self.learn_log_var = learn_log_var
+        self.kl_divergence_weight = kl_divergence_weight
+        self.lpips_weight = lpips_weight
+        self.discriminator_weight = discriminator_weight
+        self.discriminator_num_filters = discriminator_num_filters
+        self.discriminator_num_layers = discriminator_num_layers
+
+        self.autoencoder_loss = AutoEncoderLoss(input_key=self.input_key,
+                                                output_channels=self.output_channels,
+                                                learn_log_var=self.learn_log_var,
+                                                kl_divergence_weight=self.kl_divergence_weight,
+                                                lpips_weight=self.lpips_weight,
+                                                discriminator_weight=discriminator_weight,
+                                                discriminator_num_filters=discriminator_num_filters,
+                                                discriminator_num_layers=discriminator_num_layers)
 
         # Set up train metrics
         train_metrics = [MeanSquaredError()]
@@ -743,13 +772,20 @@ class ComposerHFAutoEncoder(ComposerModel):
         val_metrics = [MeanSquaredError(), MeanMetric(), lpips_metric, psnr_metric, ssim_metric]
         self.val_metrics = {metric.__class__.__name__: metric for metric in val_metrics}
 
+    def get_last_layer_weight(self) -> torch.Tensor:
+        """Get the weight of the last layer of the decoder."""
+        return self.model.decoder.conv_out.weight
+
     def forward(self, batch):
-        latents = self.model.encode(batch[self.input_key])['latent_dist'].sample()
+        latent_dist = self.model.encode(batch[self.input_key])['latent_dist']
+        latents = latent_dist.sample()
+        mean, log_var = latent_dist.mean, latent_dist.logvar
         recon = self.model.decode(latents).sample
-        return {'x_recon': recon, 'latents': latents}
+        return {'x_recon': recon, 'latents': latents, 'mean': mean, 'log_var': log_var}
 
     def loss(self, outputs, batch):
-        return F.l1_loss(outputs['x_recon'], batch[self.input_key])
+        last_layer = self.get_last_layer_weight()
+        return self.autoencoder_loss(outputs, batch, last_layer)
 
     def eval_forward(self, batch, outputs=None):
         # Skip this if outputs have already been computed, e.g. during training
