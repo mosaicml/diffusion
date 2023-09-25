@@ -3,8 +3,8 @@
 
 """Streaming Image-Caption dataset."""
 
-import random
 import logging
+import random
 from io import BytesIO
 from typing import Callable, Dict, List, Optional, Sequence, Union
 
@@ -164,7 +164,6 @@ def build_streaming_image_caption_dataloader(
     rand_crop: bool = False,
     streaming_kwargs: Optional[Dict] = None,
     dataloader_kwargs: Optional[Dict] = None,
-    
 ):
     """Builds a streaming LAION dataloader.
 
@@ -247,7 +246,6 @@ def build_streaming_image_caption_dataloader(
         sdxl=sdxl,
         **streaming_kwargs,
     )
-
 
     dataloader = DataLoader(
         dataset=dataset,

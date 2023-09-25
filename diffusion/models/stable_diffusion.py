@@ -171,7 +171,7 @@ class StableDiffusion(ComposerModel):
             inputs, conditioning = batch[self.image_key], batch[self.text_key]
             if self.sdxl:
                 # If SDXL, separate the conditioning ([B, 2, 77]) from each tokenizer
-                conditioning, conditioning_2 = conditioning[:,0,:], conditioning[:,1,:]
+                conditioning, conditioning_2 = conditioning[:, 0, :], conditioning[:, 1, :]
                 conditioning_2 = conditioning_2.view(-1, conditioning_2.shape[-1])
 
             conditioning = conditioning.view(-1, conditioning.shape[-1])

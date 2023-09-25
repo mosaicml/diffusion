@@ -3,10 +3,10 @@
 
 """Constructors for diffusion models."""
 
+import logging
 from typing import List, Optional
 
 import torch
-import logging
 from composer.devices import DeviceGPU
 from diffusers import AutoencoderKL, DDIMScheduler, DDPMScheduler, EulerDiscreteScheduler, UNet2DConditionModel
 from torchmetrics import MeanSquaredError
@@ -132,7 +132,7 @@ def stable_diffusion_2(
             attn_processor = ClippedXFormersAttnProcessor(clip_val=clip_qkv)
         else:
             attn_processor = ClippedAttnProcessor2_0(clip_val=clip_qkv)
-        log.info('Using %s with clip_val %.1f'%(attn_processor.__class__, clip_qkv))
+        log.info('Using %s with clip_val %.1f' % (attn_processor.__class__, clip_qkv))
         model.unet.set_attn_processor(attn_processor)
 
     return model
@@ -256,7 +256,7 @@ def stable_diffusion_xl(
             attn_processor = ClippedXFormersAttnProcessor(clip_val=clip_qkv)
         else:
             attn_processor = ClippedAttnProcessor2_0(clip_val=clip_qkv)
-        log.info('Using %s with clip_val %.1f'%(attn_processor.__class__, clip_qkv))
+        log.info('Using %s with clip_val %.1f' % (attn_processor.__class__, clip_qkv))
         model.unet.set_attn_processor(attn_processor)
 
     return model
@@ -399,7 +399,7 @@ class SDXLTextEncoder(torch.nn.Module):
     @property
     def device(self):
         return self.text_encoder.device
-    
+
     def forward(self, tokenized_text):
         # first text encoder
         conditioning = self.text_encoder(tokenized_text[0], output_hidden_states=True).hidden_states[-2]
