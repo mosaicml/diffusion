@@ -31,19 +31,22 @@ def train_autoencoder(config: DictConfig) -> None:
     reproducibility.seed_all(config['seed'])
 
     model: ComposerModel = hydra.utils.instantiate(config.model)
+    # Verify the model has the right submodules for the autoencoder
+    assert isinstance(model.model, nn.Module)
+    assert isinstance(model.autoencoder_loss, nn.Module)
 
     # Configure optimizer settings for the autoencoder
     autoencoder_param_dict = {k: v for k, v in config.autoencoder_optimizer.items()}
-    assert isinstance(model.model, nn.Module)
     if model.learn_log_var:
-        autoencoder_param_dict['params'] = chain(model.model.parameters(), [model.log_var])
+        autoencoder_param_dict['params'] = chain(model.model.parameters(), [model.autoencoder_loss.log_var])
     else:
         autoencoder_param_dict['params'] = model.model.parameters()
 
     # Configure optimizer settings for the discriminator
-    assert isinstance(model.discriminator, nn.Module)
+    assert hasattr(model.autoencoder_loss, 'discriminator')
+    assert isinstance(model.autoencoder_loss.discriminator, nn.Module)
     discriminator_param_dict = {k: v for k, v in config.discriminator_optimizer.items()}
-    discriminator_param_dict['params'] = model.discriminator.parameters()
+    discriminator_param_dict['params'] = model.autoencoder_loss.discriminator.parameters()
 
     params = [autoencoder_param_dict, discriminator_param_dict]
 
