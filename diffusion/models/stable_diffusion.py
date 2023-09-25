@@ -170,8 +170,6 @@ class StableDiffusion(ComposerModel):
         else:
             inputs, conditioning = batch[self.image_key], batch[self.text_key]
             if self.sdxl:
-                # TODO check this
-                print('batch of tokens shape:', conditioning.shape)
                 conditioning, conditioning_2 = conditioning[:,0,:], conditioning[:,1,:] # [B, 2, 77]
             else:
                 conditioning_2 = None

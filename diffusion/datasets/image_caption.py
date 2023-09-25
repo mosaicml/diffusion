@@ -4,6 +4,7 @@
 """Streaming Image-Caption dataset."""
 
 import random
+import logging
 from io import BytesIO
 from typing import Callable, Dict, List, Optional, Sequence, Union
 
@@ -16,6 +17,8 @@ from transformers import AutoTokenizer
 
 from diffusion.datasets.laion.transforms import LargestCenterSquare, RandomCropSquare, RandomCropSquareReturnTransform
 from diffusion.models.models import SDXLTokenizer
+
+log = logging.getLogger(__name__)
 
 # Disable PIL max image size limit
 Image.MAX_IMAGE_PIXELS = None
@@ -123,8 +126,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
                                                 return_tensors='pt',
                                                 input_ids=True)
             tokenized_captions = [cap[0] for cap in tokenized_captions]
-            tokenized_caption = torch.stack(tokenized_captions) 
-            print('stacked shape:', tokenized_caption.shape)
+            tokenized_caption = torch.stack(tokenized_captions)
         else:
             tokenized_caption = self.tokenizer(
                 caption,
@@ -195,7 +197,7 @@ def build_streaming_image_caption_dataloader(
 
     # Infer SDXL from tokenizer path
     if tokenizer_name_or_path == 'stabilityai/stable-diffusion-xl-base-1.0':
-        print('Detected SDXL tokenizer, using SDXL crop transform and tokenizers.')
+        log.info('Detected SDXL tokenizer, using SDXL crop transform and tokenizers.')
         sdxl = True
     else:
         sdxl = False
