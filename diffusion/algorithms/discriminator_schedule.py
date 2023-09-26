@@ -10,7 +10,11 @@ __all__ = ['DiscriminatorSchedule']
 
 
 class DiscriminatorSchedule(Algorithm):
-    """Scheduling algorithm for the autoencoder discriminator."""
+    """Scheduling algorithm for the autoencoder discriminator.
+
+    Args:
+        start_iteration (int): The iteration to start training the discriminator. Default: `0`.
+    """
 
     def __init__(self, start_iteration: int = 0) -> None:
         self.start_iteration = start_iteration
