@@ -15,6 +15,7 @@ from torch.autograd import Function
 from torchmetrics import MeanMetric, MeanSquaredError, Metric
 from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
+from transformers import PretrainedConfig
 
 
 class ResNetBlock(nn.Module):
@@ -182,7 +183,19 @@ class Upsample(nn.Module):
 
 
 class Encoder(nn.Module):
-    """Encoder module for an autoencoder."""
+    """Encoder module for an autoencoder.
+
+    Args:
+        input_channels (int): Number of input channels. Default: `3`.
+        hidden_channels (int): Number of hidden channels. Default: `128`.
+        latent_channels (int): Number of latent channels. Default: `4`.
+        double_latent_channels (bool): Whether to double the latent channels. Default: `True`.
+        channel_multipliers (Tuple[int, ...]): Multipliers for the number of channels in each block. Default: `(1, 2, 4, 8)`.
+        num_residual_blocks (int): Number of residual blocks in each block. Default: `4`.
+        use_conv_shortcut (bool): Whether to use a conv for the shortcut. Default: `False`.
+        dropout (float): Dropout probability. Default: `0.0`.
+        resample_with_conv (bool): Whether to use a conv for downsampling. Default: `True`.
+    """
 
     def __init__(self,
                  input_channels: int = 3,
@@ -261,7 +274,18 @@ class Encoder(nn.Module):
 
 
 class Decoder(nn.Module):
-    """Decoder module for an autoencoder."""
+    """Decoder module for an autoencoder.
+
+    Args:
+        latent_channels (int): Number of latent channels. Default: `4`.
+        output_channels (int): Number of output channels. Default: `3`.
+        hidden_channels (int): Number of hidden channels. Default: `128`.
+        channel_multipliers (Tuple[int, ...]): Multipliers for the number of channels in each block. Default: `(1, 2, 4, 8)`.
+        num_residual_blocks (int): Number of residual blocks in each block. Default: `4`.
+        use_conv_shortcut (bool): Whether to use a conv for the shortcut. Default: `False`.
+        dropout (float): Dropout probability. Default: `0.0`.
+        resample_with_conv (bool): Whether to use a conv for upsampling. Default: `True`.
+    """
 
     def __init__(self,
                  latent_channels: int = 4,
@@ -333,7 +357,20 @@ class Decoder(nn.Module):
 
 
 class AutoEncoder(nn.Module):
-    """Autoencoder module for training a latent diffusion model."""
+    """Autoencoder module for training a latent diffusion model.
+
+    Args:
+        input_channels (int): Number of input channels. Default: `3`.
+        output_channels (int): Number of output channels. Default: `3`.
+        hidden_channels (int): Number of hidden channels. Default: `128`.
+        latent_channels (int): Number of latent channels. Default: `4`.
+        double_latent_channels (bool): Whether to double the latent channels. Default: `True`.
+        channel_multipliers (Tuple[int, ...]): Multipliers for the number of channels in each block. Default: `(1, 2, 4, 8)`.
+        num_residual_blocks (int): Number of residual blocks in each block. Default: `4`.
+        use_conv_shortcut (bool): Whether to use a conv for the shortcut. Default: `False`.
+        dropout (float): Dropout probability. Default: `0.0`.
+        resample_with_conv (bool): Whether to use a conv for down/up sampling. Default: `True`.
+    """
 
     def __init__(self,
                  input_channels: int = 3,
@@ -484,7 +521,18 @@ class GradientScalingLayer(nn.Module):
 
 
 class AutoEncoderLoss(nn.Module):
-    """Loss function for training an autoencoder. Includes LPIPs and a discriminator."""
+    """Loss function for training an autoencoder. Includes LPIPs and a discriminator.
+
+    Args:
+        input_key (str): Key for the input to the model. Default: `image`.
+        output_channels (int): Number of output channels. Default: `3`.
+        learn_log_var (bool): Whether to learn the output log variance. Default: `True`.
+        kl_divergence_weight (float): Weight for the KL divergence loss. Default: `1.0`.
+        lpips_weight (float): Weight for the LPIPs loss. Default: `0.25`.
+        discriminator_weight (float): Weight for the discriminator loss. Default: `0.5`.
+        discriminator_num_filters (int): Number of filters in the first layer of the discriminator. Default: `64`.
+        discriminator_num_layers (int): Number of layers in the discriminator. Default: `3`.
+    """
 
     def __init__(self,
                  input_key: str = 'image',
@@ -607,7 +655,27 @@ class AutoEncoderLoss(nn.Module):
 
 
 class ComposerAutoEncoder(ComposerModel):
-    """Composer wrapper for the AutoEncoder."""
+    """Composer wrapper for the AutoEncoder.
+
+    Args:
+        input_channels (int): Number of input channels. Default: `3`.
+        output_channels (int): Number of output channels. Default: `3`.
+        hidden_channels (int): Number of hidden channels. Default: `128`.
+        latent_channels (int): Number of latent channels. Default: `4`.
+        double_latent_channels (bool): Whether to double the latent channels. Default: `True`.
+        channel_multipliers (Tuple[int, ...]): Multipliers for the number of channels in each block. Default: `(1, 2, 4, 4)`.
+        num_residual_blocks (int): Number of residual blocks in each block. Default: `2`.
+        use_conv_shortcut (bool): Whether to use a conv for the shortcut. Default: `False`.
+        dropout (float): Dropout probability. Default: `0.0`.
+        resample_with_conv (bool): Whether to use a conv for down/up sampling. Default: `True`.
+        input_key (str): Key for the input to the model. Default: `image`.
+        learn_log_var (bool): Whether to learn the output log variance. Default: `True`.
+        kl_divergence_weight (float): Weight for the KL divergence loss. Default: `1.0`.
+        lpips_weight (float): Weight for the LPIPs loss. Default: `0.25`.
+        discriminator_weight (float): Weight for the discriminator loss. Default: `0.5`.
+        discriminator_num_filters (int): Number of filters in the first layer of the discriminator. Default: `64`.
+        discriminator_num_layers (int): Number of layers in the discriminator. Default: `3`.
+    """
 
     def __init__(self,
                  input_channels: int = 3,
@@ -727,10 +795,24 @@ class ComposerAutoEncoder(ComposerModel):
 
 
 class ComposerHFAutoEncoder(ComposerModel):
-    """Composer wrapper for the Huggingface Autoencoder."""
+    """Composer wrapper for the Huggingface Autoencoder.
+
+    Args:
+        model_name (str): Name of the Huggingface model. Default: `stabilityai/stable-diffusion-2-base`.
+        pretrained (bool): Whether to use a pretrained model. Default: `True`.
+        output_channels (int): Number of output channels. Default: `3`.
+        input_key (str): Key for the input to the model. Default: `image`.
+        learn_log_var (bool): Whether to learn the output log variance. Default: `True`.
+        kl_divergence_weight (float): Weight for the KL divergence loss. Default: `1.0`.
+        lpips_weight (float): Weight for the LPIPs loss. Default: `0.25`.
+        discriminator_weight (float): Weight for the discriminator loss. Default: `0.5`.
+        discriminator_num_filters (int): Number of filters in the first layer of the discriminator. Default: `64`.
+        discriminator_num_layers (int): Number of layers in the discriminator. Default: `3`.
+    """
 
     def __init__(self,
                  model_name: str = 'stabilityai/stable-diffusion-2-base',
+                 pretrained: bool = True,
                  output_channels: int = 3,
                  input_key: str = 'image',
                  learn_log_var: bool = True,
@@ -744,7 +826,11 @@ class ComposerHFAutoEncoder(ComposerModel):
         self.output_channels = output_channels
         self.input_key = input_key
 
-        self.model = AutoencoderKL.from_pretrained(self.model_name, subfolder='vae')
+        if pretrained:
+            self.model = AutoencoderKL.from_pretrained(self.model_name, subfolder='vae')
+        else:
+            self.config = PretrainedConfig.get_config_dict(model_name, subfolder='vae')
+            self.model = AutoencoderKL(**self.config[0])
 
         self.learn_log_var = learn_log_var
         self.kl_divergence_weight = kl_divergence_weight
