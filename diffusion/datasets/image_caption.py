@@ -181,7 +181,7 @@ def build_streaming_image_caption_dataloader(
         transform (Optional[Callable]): The transforms to apply to the image. Default: ``None``.
         image_key (str): Key associated with the image in the streaming dataset. Default: ``'image'``.
         caption_key (str): Key associated with the caption in the streaming dataset. Default: ``'caption'``.
-        rand_crop (bool): If True, randomly crop images. Otherwise, center crop. ``False``.
+        rand_crop (bool): If True, randomly crop images. Otherwise, center crop. Default: ``False``.
         streaming_kwargs (dict, optional): Additional arguments to pass to the ``StreamingDataset``. Default: ``None``.
         dataloader_kwargs (dict, optional): Additional arguments to pass to the ``DataLoader``. Default: ``None``.
     """
