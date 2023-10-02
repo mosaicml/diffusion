@@ -226,6 +226,7 @@ def stable_diffusion_xl(
 
     noise_scheduler = DDPMScheduler.from_pretrained(model_name, subfolder='scheduler')
     inference_noise_scheduler = EulerDiscreteScheduler.from_pretrained(model_name, subfolder='scheduler')
+    inference_noise_scheduler.prediction_type = prediction_type
 
     model = StableDiffusion(
         unet=unet,
