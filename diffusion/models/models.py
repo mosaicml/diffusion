@@ -427,17 +427,19 @@ class SDXLTokenizer:
         self.tokenizer_2 = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer_2')
 
     def __call__(self, prompt, padding, truncation, return_tensors, max_length=None):
-        tokenized_output = self.tokenizer(prompt,
-                                          padding=padding,
-                                          max_length=self.tokenizer.model_max_length if max_length is None else max_length,
-                                          truncation=truncation,
-                                          return_tensors=return_tensors)
-        tokenized_output_2 = self.tokenizer_2(prompt,
-                                              padding=padding,
-                                              max_length=self.tokenizer_2.model_max_length  if max_length is None else max_length,
-                                              truncation=truncation,
-                                              return_tensors=return_tensors)
-        
+        tokenized_output = self.tokenizer(
+            prompt,
+            padding=padding,
+            max_length=self.tokenizer.model_max_length if max_length is None else max_length,
+            truncation=truncation,
+            return_tensors=return_tensors)
+        tokenized_output_2 = self.tokenizer_2(
+            prompt,
+            padding=padding,
+            max_length=self.tokenizer_2.model_max_length if max_length is None else max_length,
+            truncation=truncation,
+            return_tensors=return_tensors)
+
         # Add second tokenizer output to first tokenizer
         for key in tokenized_output.keys():
             tokenized_output[key] = [tokenized_output[key], tokenized_output_2[key]]

@@ -4,8 +4,8 @@
 """Transforms for the training and eval dataset."""
 
 import torchvision.transforms as transforms
-from torchvision.transforms.functional import crop
 from torchvision.transforms import RandomCrop
+from torchvision.transforms.functional import crop
 
 
 class LargestCenterSquare:
