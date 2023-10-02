@@ -24,8 +24,11 @@ def zero_module(module):
 class ClippedAttnProcessor2_0:
     """Processor for implementing scaled dot-product attention (enabled by default if you're using PyTorch 2.0).
 
-    Modified from https://github.com/huggingface/diffusers/blob/v0.21.0-release/src/diffusers/models/attention_processor.py to
+    Modified from https://github.com/huggingface/diffusers/blob/v0.21.0-release/src/diffusers/models/attention_processor.py#L977 to
     allow clipping QKV values.
+
+    Args:
+        clip_val (float, defaults to 6.0): Amount to clip query, key, and value by.
     """
 
     def __init__(self, clip_val=6.0):
@@ -120,7 +123,7 @@ class ClippedAttnProcessor2_0:
 class ClippedXFormersAttnProcessor:
     """Processor for implementing memory efficient attention using xFormers.
 
-    Modified from https://github.com/huggingface/diffusers/blob/v0.21.0-release/src/diffusers/models/attention_processor.py to
+    Modified from https://github.com/huggingface/diffusers/blob/v0.21.0-release/src/diffusers/models/attention_processor.py#L888 to
     allow clipping QKV values.
 
     Args:
@@ -129,6 +132,7 @@ class ClippedXFormersAttnProcessor:
             [operator](https://facebookresearch.github.io/xformers/components/ops.html#xformers.ops.AttentionOpBase) to
             use as the attention operator. It is recommended to set to `None`, and allow xFormers to choose the best
             operator.
+        clip_val (float, defaults to 6.0): Amount to clip query, key, and value by.
     """
 
     def __init__(self, clip_val=6.0, attention_op=None):
