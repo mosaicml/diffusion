@@ -68,16 +68,18 @@ class LogDiffusionImages(Callback):
                                     return_tensors='pt')['input_ids']  # type: ignore
                     for p in self.prompts
                 ]
-
+                if model.sdxl:
+                    self.tokenized_prompts = [
+                        torch.cat([tp[0] for tp in self.tokenized_prompts]),
+                        torch.cat([tp[1] for tp in self.tokenized_prompts])
+                    ]
+                else:
+                    self.tokenized_prompts = torch.cat(self.tokenized_prompts)  # type: ignore
             if model.sdxl:
-                tokenized_prompts_1 = torch.cat([tp[0] for tp in self.tokenized_prompts
-                                                ]).to(state.batch[self.text_key].device)
-                tokenized_prompts_2 = torch.cat([tp[1] for tp in self.tokenized_prompts
-                                                ]).to(state.batch[self.text_key].device)
-                self.tokenized_prompts = [tokenized_prompts_1, tokenized_prompts_2]
+                self.tokenized_prompts[0] = self.tokenized_prompts[0].to(state.batch[self.text_key].device)
+                self.tokenized_prompts[1] = self.tokenized_prompts[1].to(state.batch[self.text_key].device)
             else:
-                self.tokenized_prompts = torch.cat(self.tokenized_prompts)  # type: ignore
-                self.tokenized_prompts = self.tokenized_prompts.to(state.batch[self.text_key].device)
+                self.tokenized_prompts = self.tokenized_prompts.to(state.batch[self.text_key].device)  # type: ignore
 
             # Generate images
             with get_precision_context(state.precision):
