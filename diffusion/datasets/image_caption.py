@@ -129,21 +129,18 @@ class StreamingImageCaptionDataset(StreamingDataset):
             if isinstance(caption, List) and self.caption_selection == 'random':
                 caption = random.sample(caption, k=1)[0]
 
+        max_length = None if self.sdxl else self.tokenizer.model_max_length
+        tokenized_caption = self.tokenizer(
+            caption,
+            padding='max_length',
+            max_length=max_length, 
+            truncation=True,
+            return_tensors='pt')['input_ids']
         if self.sdxl:
-            tokenized_captions = self.tokenizer(caption,
-                                                padding='max_length',
-                                                truncation=True,
-                                                return_tensors='pt',
-                                                input_ids=True)
-            tokenized_captions = [cap[0] for cap in tokenized_captions]
-            tokenized_caption = torch.stack(tokenized_captions)
+            tokenized_caption = [tokenized_cap.squeeze() for tokenized_cap in tokenized_caption]
+            tokenized_caption = torch.stack(tokenized_caption)
         else:
-            tokenized_caption = self.tokenizer(
-                caption,
-                padding='max_length',
-                max_length=self.tokenizer.model_max_length,  # type: ignore
-                truncation=True,
-                return_tensors='pt')['input_ids'][0]
+            tokenized_caption = tokenized_caption.squeeze()
         out['image'] = img
         out['captions'] = tokenized_caption
         return out

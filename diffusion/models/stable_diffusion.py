@@ -491,22 +491,17 @@ class StableDiffusion(ComposerModel):
         device = self.text_encoder.device
         pooled_text_embeddings = None
         if prompt_embeds is None:
+            max_length = None if self.sdxl else self.tokenizer.model_max_length
+            if tokenized_prompts is None:
+                tokenized_prompts = self.tokenizer(prompt,
+                                                   padding='max_length',
+                                                   max_length=max_length,
+                                                   truncation=True,
+                                                   return_tensors='pt').input_ids
             if self.sdxl:
-                if tokenized_prompts is None:
-                    tokenized_prompts = self.tokenizer(prompt,
-                                                       padding='max_length',
-                                                       truncation=True,
-                                                       return_tensors='pt',
-                                                       input_ids=True)
                 text_embeddings, pooled_text_embeddings = self.text_encoder(
                     [tokenized_prompts[0].to(device), tokenized_prompts[1].to(device)])  # type: ignore
             else:
-                if tokenized_prompts is None:
-                    tokenized_prompts = self.tokenizer(prompt,
-                                                       padding='max_length',
-                                                       max_length=self.tokenizer.model_max_length,
-                                                       truncation=True,
-                                                       return_tensors='pt').input_ids
                 text_embeddings = self.text_encoder(tokenized_prompts.to(device))[0]  # type: ignore
         else:
             if self.sdxl:

@@ -415,7 +415,7 @@ class SDXLTextEncoder(torch.nn.Module):
 class SDXLTokenizer:
     """Wrapper around HuggingFace tokenizers for SDXL.
 
-    Tokenizes prompt with two tokenizers and returns the outputs as a list.
+    Tokenizes prompt with two tokenizers and returns the joined output.
 
     Args:
         model_name (str): Name of the model's text encoders to load. Defaults to 'stabilityai/stable-diffusion-xl-base-1.0'.
@@ -425,18 +425,19 @@ class SDXLTokenizer:
         self.tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer')
         self.tokenizer_2 = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer_2')
 
-    def __call__(self, prompt, padding, truncation, return_tensors, input_ids=False):
+    def __call__(self, prompt, padding, truncation, return_tensors, max_length=None):
         tokenized_output = self.tokenizer(prompt,
                                           padding=padding,
-                                          max_length=self.tokenizer.model_max_length,
+                                          max_length=self.tokenizer.model_max_length if max_length is None else max_length,
                                           truncation=truncation,
                                           return_tensors=return_tensors)
         tokenized_output_2 = self.tokenizer_2(prompt,
                                               padding=padding,
-                                              max_length=self.tokenizer_2.model_max_length,
+                                              max_length=self.tokenizer_2.model_max_length  if max_length is None else max_length,
                                               truncation=truncation,
                                               return_tensors=return_tensors)
-        if input_ids:
-            tokenized_output = tokenized_output.input_ids
-            tokenized_output_2 = tokenized_output_2.input_ids
-        return [tokenized_output, tokenized_output_2]
+        
+        # Add second tokenizer output to first tokenizer
+        for key in tokenized_output.keys():
+            tokenized_output[key] = [tokenized_output[key], tokenized_output_2[key]]
+        return tokenized_output
