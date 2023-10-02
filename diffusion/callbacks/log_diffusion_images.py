@@ -69,9 +69,9 @@ class LogDiffusionImages(Callback):
                                         input_ids=True)  # type: ignore
                         for p in self.prompts
                     ]
-                    self.tokenized_prompts = [torch.cat(tokenized_prompts[0]), torch.cat(tokenized_prompts[1])]
-                self.tokenized_prompts[0] = self.tokenized_prompts[0].to(state.batch[self.text_key].device)
-                self.tokenized_prompts[1] = self.tokenized_prompts[1].to(state.batch[self.text_key].device)
+                tokenized_prompts_1 = torch.cat([tp[0] for tp in tokenized_prompts]).to(state.batch[self.text_key].device)
+                tokenized_prompts_2 = torch.cat([tp[1] for tp in tokenized_prompts]).to(state.batch[self.text_key].device)
+                self.tokenized_prompts = [tokenized_prompts_1, tokenized_prompts_2]
             else:
                 if self.tokenized_prompts is None:
                     tokenized_prompts = [

@@ -199,7 +199,7 @@ def stable_diffusion_xl(
             metric.requires_grad_(False)
 
     if pretrained:
-        unet = UNet2DConditionModel.from_pretrained(model_name, subfolder='unet')
+        unet = UNet2DConditionModel.from_pretrained(unet_model_name, subfolder='unet')
     else:
         config = PretrainedConfig.get_config_dict(unet_model_name, subfolder='unet')
         unet = UNet2DConditionModel(**config[0])
