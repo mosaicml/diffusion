@@ -280,24 +280,48 @@ def stable_diffusion_xl(
     return model
 
 
-def autoencoder(input_channels: int = 3,
-                output_channels: int = 3,
-                hidden_channels: int = 128,
-                latent_channels: int = 4,
-                double_latent_channels: bool = True,
-                channel_multipliers: Tuple[int, ...] = (1, 2, 4, 4),
-                num_residual_blocks: int = 2,
-                use_conv_shortcut=False,
-                dropout_probability: float = 0.0,
-                resample_with_conv: bool = True,
-                input_key: str = 'image',
-                learn_log_var: bool = True,
-                kl_divergence_weight: float = 1.0,
-                lpips_weight: float = 0.25,
-                discriminator_weight: float = 0.5,
-                discriminator_num_filters: int = 64,
-                discriminator_num_layers: int = 3):
-    """Autoencoder training setup."""
+def build_autoencoder(input_channels: int = 3,
+                      output_channels: int = 3,
+                      hidden_channels: int = 128,
+                      latent_channels: int = 4,
+                      double_latent_channels: bool = True,
+                      channel_multipliers: Tuple[int, ...] = (1, 2, 4, 4),
+                      num_residual_blocks: int = 2,
+                      use_conv_shortcut=False,
+                      dropout_probability: float = 0.0,
+                      resample_with_conv: bool = True,
+                      zero_init_last: bool = False,
+                      input_key: str = 'image',
+                      learn_log_var: bool = True,
+                      log_var_init: float = 0.0,
+                      kl_divergence_weight: float = 1.0,
+                      lpips_weight: float = 0.25,
+                      discriminator_weight: float = 0.5,
+                      discriminator_num_filters: int = 64,
+                      discriminator_num_layers: int = 3):
+    """Autoencoder training setup. By default, this config matches the network architecure used in SD2 and SDXL.
+
+    Args:
+        input_channels (int): Number of input channels. Default: `3`.
+        output_channels (int): Number of output channels. Default: `3`.
+        hidden_channels (int): Number of hidden channels. Default: `128`.
+        latent_channels (int): Number of latent channels. Default: `4`.
+        double_latent_channels (bool): Whether to double the number of latent channels in the decoder. Default: `True`.
+        channel_multipliers (tuple): Tuple of channel multipliers for each layer in the encoder and decoder. Default: `(1, 2, 4, 4)`.
+        num_residual_blocks (int): Number of residual blocks in the encoder and decoder. Default: `2`.
+        use_conv_shortcut (bool): Whether to use a convolutional shortcut in the residual blocks. Default: `False`.
+        dropout_probability (float): Dropout probability. Default: `0.0`.
+        resample_with_conv (bool): Whether to use a convolutional resampling layer. Default: `True`.
+        zero_init_last (bool): Whether to zero initialize the last layer in resblocks+discriminator. Default: `False`.
+        input_key (str): Key to use for the input. Default: `image`.
+        learn_log_var (bool): Whether to learn the output log variance in the VAE. Default: `True`.
+        log_var_init (float): Initial value for the output log variance. Default: `0.0`.
+        kl_divergence_weight (float): Weight for the KL divergence loss. Default: `1.0`.
+        lpips_weight (float): Weight for the LPIPS loss. Default: `0.25`.
+        discriminator_weight (float): Weight for the discriminator loss. Default: `0.5`.
+        discriminator_num_filters (int): Number of filters in the discriminator. Default: `64`.
+        discriminator_num_layers (int): Number of layers in the discriminator. Default: `3`.
+    """
     model = ComposerAutoEncoder(input_channels=input_channels,
                                 output_channels=output_channels,
                                 hidden_channels=hidden_channels,
@@ -308,14 +332,20 @@ def autoencoder(input_channels: int = 3,
                                 use_conv_shortcut=use_conv_shortcut,
                                 dropout_probability=dropout_probability,
                                 resample_with_conv=resample_with_conv,
+                                zero_init_last=zero_init_last,
                                 input_key=input_key,
                                 learn_log_var=learn_log_var,
+                                log_var_init=log_var_init,
                                 kl_divergence_weight=kl_divergence_weight,
                                 lpips_weight=lpips_weight,
                                 discriminator_weight=discriminator_weight,
                                 discriminator_num_filters=discriminator_num_filters,
                                 discriminator_num_layers=discriminator_num_layers)
     return model
+
+
+def diffusers_autoencoder():
+    """Placeholder for diffusers autoencoder function."""
 
 
 def discrete_pixel_diffusion(clip_model_name: str = 'openai/clip-vit-large-patch14', prediction_type='epsilon'):

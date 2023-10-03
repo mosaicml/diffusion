@@ -18,14 +18,22 @@ from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 from transformers import PretrainedConfig
 
 
+def zero_module(module: nn.Module) -> nn.Module:
+    """Zero out the parameters of a module and return it."""
+    for p in module.parameters():
+        nn.init.zeros_(p)
+    return module
+
+
 class ResNetBlock(nn.Module):
     """Basic ResNet block.
 
     Args:
         input_channels (int): Number of input channels.
         output_channels (int): Number of output channels.
-        use_conv_shortcut (bool): Whether to use a conv on the shortcut. Defaults to False.
+        use_conv_shortcut (bool): Whether to use a conv on the shortcut. Default: `False`.
         dropout (float): Dropout probability. Defaults to 0.0.
+        zero_init_last (bool): Whether to initialize the last conv layer to zero. Default: `False`.
     """
 
     def __init__(
@@ -68,9 +76,7 @@ class ResNetBlock(nn.Module):
 
         # Init the final conv layer parameters to zero.
         if self.zero_init_last:
-            nn.init.zeros_(self.conv2.weight)
-            if self.conv2.bias is not None:
-                nn.init.zeros_(self.conv2.bias)
+            self.conv2 = zero_module(self.conv2)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward through the residual block."""
@@ -195,6 +201,7 @@ class Encoder(nn.Module):
         use_conv_shortcut (bool): Whether to use a conv for the shortcut. Default: `False`.
         dropout (float): Dropout probability. Default: `0.0`.
         resample_with_conv (bool): Whether to use a conv for downsampling. Default: `True`.
+        zero_init_last (bool): Whether to initialize the last conv layer to zero. Default: `False`.
     """
 
     def __init__(self,
@@ -206,7 +213,8 @@ class Encoder(nn.Module):
                  num_residual_blocks: int = 4,
                  use_conv_shortcut=False,
                  dropout_probability: float = 0.0,
-                 resample_with_conv: bool = True):
+                 resample_with_conv: bool = True,
+                 zero_init_last: bool = False):
         super().__init__()
         self.input_channels = input_channels
         self.latent_channels = latent_channels
@@ -218,6 +226,7 @@ class Encoder(nn.Module):
         self.use_conv_shortcut = use_conv_shortcut
         self.dropout_probability = dropout_probability
         self.resample_with_conv = resample_with_conv
+        self.zero_init_last = zero_init_last
 
         # Inital conv layer to get to the hidden dimensionality
         self.conv_in = nn.Conv2d(input_channels, hidden_channels, kernel_size=3, padding=1)
@@ -233,7 +242,8 @@ class Encoder(nn.Module):
                 block = ResNetBlock(input_channels=block_input_channels,
                                     output_channels=block_output_channels,
                                     use_conv_shortcut=use_conv_shortcut,
-                                    dropout_probability=dropout_probability)
+                                    dropout_probability=dropout_probability,
+                                    zero_init_last=zero_init_last)
                 self.blocks.append(block)
                 block_input_channels = block_output_channels
             # Add the downsampling block at the end, but not the very end.
@@ -245,7 +255,8 @@ class Encoder(nn.Module):
         middle_block_1 = ResNetBlock(input_channels=block_output_channels,
                                      output_channels=block_output_channels,
                                      use_conv_shortcut=use_conv_shortcut,
-                                     dropout_probability=dropout_probability)
+                                     dropout_probability=dropout_probability,
+                                     zero_init_last=zero_init_last)
         self.blocks.append(middle_block_1)
 
         attention = AttentionLayer(input_channels=block_output_channels)
@@ -254,7 +265,8 @@ class Encoder(nn.Module):
         middle_block_2 = ResNetBlock(input_channels=block_output_channels,
                                      output_channels=block_output_channels,
                                      use_conv_shortcut=use_conv_shortcut,
-                                     dropout_probability=dropout_probability)
+                                     dropout_probability=dropout_probability,
+                                     zero_init_last=zero_init_last)
         self.blocks.append(middle_block_2)
 
         # Make the final layers for the output
@@ -285,6 +297,7 @@ class Decoder(nn.Module):
         use_conv_shortcut (bool): Whether to use a conv for the shortcut. Default: `False`.
         dropout (float): Dropout probability. Default: `0.0`.
         resample_with_conv (bool): Whether to use a conv for upsampling. Default: `True`.
+        zero_init_last (bool): Whether to initialize the last conv layer to zero. Default: `False`.
     """
 
     def __init__(self,
@@ -295,7 +308,8 @@ class Decoder(nn.Module):
                  num_residual_blocks: int = 4,
                  use_conv_shortcut=False,
                  dropout_probability: float = 0.0,
-                 resample_with_conv: bool = True):
+                 resample_with_conv: bool = True,
+                 zero_init_last: bool = False):
         super().__init__()
         self.latent_channels = latent_channels
         self.output_channels = output_channels
@@ -305,6 +319,7 @@ class Decoder(nn.Module):
         self.use_conv_shortcut = use_conv_shortcut
         self.dropout_probability = dropout_probability
         self.resample_with_conv = resample_with_conv
+        self.zero_init_last = zero_init_last
 
         # Input conv layer to get to the hidden dimensionality
         channels = self.hidden_channels * self.channel_multipliers[-1]
@@ -314,7 +329,8 @@ class Decoder(nn.Module):
         middle_block_1 = ResNetBlock(input_channels=channels,
                                      output_channels=channels,
                                      use_conv_shortcut=use_conv_shortcut,
-                                     dropout_probability=dropout_probability)
+                                     dropout_probability=dropout_probability,
+                                     zero_init_last=zero_init_last)
         self.blocks.append(middle_block_1)
 
         attention = AttentionLayer(input_channels=channels)
@@ -323,7 +339,8 @@ class Decoder(nn.Module):
         middle_block_2 = ResNetBlock(input_channels=channels,
                                      output_channels=channels,
                                      use_conv_shortcut=use_conv_shortcut,
-                                     dropout_probability=dropout_probability)
+                                     dropout_probability=dropout_probability,
+                                     zero_init_last=zero_init_last)
         self.blocks.append(middle_block_2)
 
         # construct the residual blocks
@@ -334,7 +351,8 @@ class Decoder(nn.Module):
                 block = ResNetBlock(input_channels=channels,
                                     output_channels=block_channels,
                                     use_conv_shortcut=use_conv_shortcut,
-                                    dropout_probability=dropout_probability)
+                                    dropout_probability=dropout_probability,
+                                    zero_init_last=zero_init_last)
                 self.blocks.append(block)
                 channels = block_channels
             # Add the upsampling block at the end, but not the very end.
@@ -370,6 +388,7 @@ class AutoEncoder(nn.Module):
         use_conv_shortcut (bool): Whether to use a conv for the shortcut. Default: `False`.
         dropout (float): Dropout probability. Default: `0.0`.
         resample_with_conv (bool): Whether to use a conv for down/up sampling. Default: `True`.
+        zero_init_last (bool): Whether to initialize the last conv layer to zero. Default: `False`.
     """
 
     def __init__(self,
@@ -382,7 +401,8 @@ class AutoEncoder(nn.Module):
                  num_residual_blocks: int = 4,
                  use_conv_shortcut=False,
                  dropout_probability: float = 0.0,
-                 resample_with_conv: bool = True):
+                 resample_with_conv: bool = True,
+                 zero_init_last: bool = False):
         super().__init__()
         self.input_channels = input_channels
         self.output_channels = output_channels
@@ -394,6 +414,7 @@ class AutoEncoder(nn.Module):
         self.use_conv_shortcut = use_conv_shortcut
         self.dropout_probability = dropout_probability
         self.resample_with_conv = resample_with_conv
+        self.zero_init_last = zero_init_last
 
         self.encoder = Encoder(input_channels=self.input_channels,
                                hidden_channels=self.hidden_channels,
@@ -403,7 +424,8 @@ class AutoEncoder(nn.Module):
                                num_residual_blocks=self.num_residual_blocks,
                                use_conv_shortcut=self.use_conv_shortcut,
                                dropout_probability=self.dropout_probability,
-                               resample_with_conv=self.resample_with_conv)
+                               resample_with_conv=self.resample_with_conv,
+                               zero_init_last=self.zero_init_last)
 
         channels = 2 * self.latent_channels if self.double_latent_channels else self.latent_channels
         self.quant_conv = nn.Conv2d(channels, channels, kernel_size=1, stride=1, padding=0)
@@ -415,7 +437,8 @@ class AutoEncoder(nn.Module):
                                num_residual_blocks=self.num_residual_blocks,
                                use_conv_shortcut=self.use_conv_shortcut,
                                dropout_probability=self.dropout_probability,
-                               resample_with_conv=self.resample_with_conv)
+                               resample_with_conv=self.resample_with_conv,
+                               zero_init_last=self.zero_init_last)
 
         self.post_quant_conv = nn.Conv2d(self.latent_channels, self.latent_channels, kernel_size=1, stride=1, padding=0)
 
@@ -453,12 +476,12 @@ class NlayerDiscriminator(nn.Module):
     Based on code from https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/master/models/networks.py
 
     Args:
-        input_channels (int): Number of input channels.
-        num_filters (int): Number of filters in the first layer.
-        num_layers (int): Number of layers in the discriminator.
+        input_channels (int): Number of input channels. Default: `3`.
+        num_filters (int): Number of filters in the first layer. Default: `64`.
+        num_layers (int): Number of layers in the discriminator. Default: `3`.
     """
 
-    def __init__(self, input_channels: int = 3, num_filters: int = 3, num_layers: int = 3):
+    def __init__(self, input_channels: int = 3, num_filters: int = 64, num_layers: int = 3):
         super().__init__()
         self.input_channels = input_channels
         self.num_filters = num_filters
@@ -527,6 +550,7 @@ class AutoEncoderLoss(nn.Module):
         input_key (str): Key for the input to the model. Default: `image`.
         output_channels (int): Number of output channels. Default: `3`.
         learn_log_var (bool): Whether to learn the output log variance. Default: `True`.
+        log_var_init (float): Initial value for the log variance. Default: `0.0`.
         kl_divergence_weight (float): Weight for the KL divergence loss. Default: `1.0`.
         lpips_weight (float): Weight for the LPIPs loss. Default: `0.25`.
         discriminator_weight (float): Weight for the discriminator loss. Default: `0.5`.
@@ -538,6 +562,7 @@ class AutoEncoderLoss(nn.Module):
                  input_key: str = 'image',
                  output_channels: int = 3,
                  learn_log_var: bool = True,
+                 log_var_init: float = 0.0,
                  kl_divergence_weight: float = 1.0,
                  lpips_weight: float = 0.25,
                  discriminator_weight: float = 0.5,
@@ -547,6 +572,7 @@ class AutoEncoderLoss(nn.Module):
         self.input_key = input_key
         self.output_channels = output_channels
         self.learn_log_var = learn_log_var
+        self.log_var_init = log_var_init
         self.kl_divergence_weight = kl_divergence_weight
         self.lpips_weight = lpips_weight
         self.discriminator_weight = discriminator_weight
@@ -558,6 +584,7 @@ class AutoEncoderLoss(nn.Module):
             self.log_var = nn.Parameter(torch.zeros(size=()))
         else:
             self.log_var = torch.zeros(size=())
+        self.log_var.data.fill_(self.log_var_init)
 
         # Set up LPIPs loss
         self.lpips = lpips.LPIPS(net='vgg').eval()
@@ -576,21 +603,21 @@ class AutoEncoderLoss(nn.Module):
                                                  num_layers=self.discriminator_num_layers)
         self.reverse_gradients = GradientReversalLayer()
         self.scale_gradients = GradientScalingLayer()
-        self.scale_gradients.register_backward_hook(self.scale_gradients.backward_hook)
+        self.scale_gradients.register_full_backward_hook(self.scale_gradients.backward_hook)
 
     def set_discriminator_weight(self, weight: float):
         self.discriminator_weight = weight
 
     def calc_discriminator_adaptive_weight(self, nll_loss, fake_loss, last_layer):
+        # Need to ensure the grad scale from the discriminator back to 1.0 to get the right norm
+        self.scale_gradients.set_scale(1.0)
         # Get the grad norm from the nll loss
         nll_grads = torch.autograd.grad(nll_loss, last_layer, retain_graph=True)[0]
-        nll_grads_norm = torch.norm(nll_grads)
         # Get the grad norm for the discriminator loss
-        # Need to set the grad scale from the discriminator back to 1.0 to get the right norm
-        self.scale_gradients.set_scale(1.0)
         disc_grads = torch.autograd.grad(fake_loss, last_layer, retain_graph=True)[0]
-        disc_grads_norm = torch.norm(disc_grads)
         # Calculate the updated discriminator weight based on the grad norms
+        nll_grads_norm = torch.norm(nll_grads)
+        disc_grads_norm = torch.norm(disc_grads)
         disc_weight = nll_grads_norm / (disc_grads_norm + 1e-4)
         disc_weight = torch.clamp(disc_weight, 0.0, 1e4).detach()
         disc_weight *= self.discriminator_weight
@@ -668,8 +695,10 @@ class ComposerAutoEncoder(ComposerModel):
         use_conv_shortcut (bool): Whether to use a conv for the shortcut. Default: `False`.
         dropout (float): Dropout probability. Default: `0.0`.
         resample_with_conv (bool): Whether to use a conv for down/up sampling. Default: `True`.
+        zero_init_last (bool): Whether to initialize the last conv layer to zero. Default: `False`.
         input_key (str): Key for the input to the model. Default: `image`.
         learn_log_var (bool): Whether to learn the output log variance. Default: `True`.
+        log_var_init (float): Initial value for the log variance. Default: `0.0`.
         kl_divergence_weight (float): Weight for the KL divergence loss. Default: `1.0`.
         lpips_weight (float): Weight for the LPIPs loss. Default: `0.25`.
         discriminator_weight (float): Weight for the discriminator loss. Default: `0.5`.
@@ -688,8 +717,10 @@ class ComposerAutoEncoder(ComposerModel):
                  use_conv_shortcut=False,
                  dropout_probability: float = 0.0,
                  resample_with_conv: bool = True,
+                 zero_init_last: bool = False,
                  input_key: str = 'image',
                  learn_log_var: bool = True,
+                 log_var_init: float = 0.0,
                  kl_divergence_weight: float = 1.0,
                  lpips_weight: float = 0.25,
                  discriminator_weight: float = 0.5,
@@ -706,6 +737,7 @@ class ComposerAutoEncoder(ComposerModel):
         self.use_conv_shortcut = use_conv_shortcut
         self.dropout_probability = dropout_probability
         self.resample_with_conv = resample_with_conv
+        self.zero_init_last = zero_init_last
         self.input_key = input_key
 
         self.model = AutoEncoder(input_channels=self.input_channels,
@@ -717,15 +749,18 @@ class ComposerAutoEncoder(ComposerModel):
                                  num_residual_blocks=self.num_residual_blocks,
                                  use_conv_shortcut=self.use_conv_shortcut,
                                  dropout_probability=self.dropout_probability,
-                                 resample_with_conv=self.resample_with_conv)
+                                 resample_with_conv=self.resample_with_conv,
+                                 zero_init_last=self.zero_init_last)
 
         self.learn_log_var = learn_log_var
+        self.log_var_init = log_var_init
         self.kl_divergence_weight = kl_divergence_weight
         self.lpips_weight = lpips_weight
 
         self.autoencoder_loss = AutoEncoderLoss(input_key=self.input_key,
                                                 output_channels=self.output_channels,
                                                 learn_log_var=self.learn_log_var,
+                                                log_var_init=self.log_var_init,
                                                 kl_divergence_weight=self.kl_divergence_weight,
                                                 lpips_weight=self.lpips_weight,
                                                 discriminator_weight=discriminator_weight,
@@ -755,8 +790,6 @@ class ComposerAutoEncoder(ComposerModel):
         return self.autoencoder_loss(outputs, batch, last_layer)
 
     def eval_forward(self, batch, outputs=None):
-        """For stable diffusion, eval forward computes unet outputs as well as some samples."""
-        # Skip this if outputs have already been computed, e.g. during training
         if outputs is not None:
             return outputs
         outputs = self.forward(batch)
@@ -808,6 +841,7 @@ class ComposerHFAutoEncoder(ComposerModel):
         discriminator_weight (float): Weight for the discriminator loss. Default: `0.5`.
         discriminator_num_filters (int): Number of filters in the first layer of the discriminator. Default: `64`.
         discriminator_num_layers (int): Number of layers in the discriminator. Default: `3`.
+        zero_init_last (bool): Whether to initialize the last conv layer to zero. Default: `False`.
     """
 
     def __init__(self,
@@ -820,16 +854,17 @@ class ComposerHFAutoEncoder(ComposerModel):
                  lpips_weight: float = 0.25,
                  discriminator_weight: float = 0.5,
                  discriminator_num_filters: int = 64,
-                 discriminator_num_layers: int = 3):
+                 discriminator_num_layers: int = 3,
+                 zero_init_last: bool = False):
         super().__init__()
         self.model_name = model_name
         self.output_channels = output_channels
         self.input_key = input_key
 
         if pretrained:
-            self.model = AutoencoderKL.from_pretrained(self.model_name, subfolder='vae')
+            self.model = AutoencoderKL.from_pretrained(self.model_name)
         else:
-            self.config = PretrainedConfig.get_config_dict(model_name, subfolder='vae')
+            self.config = PretrainedConfig.get_config_dict(model_name)
             self.model = AutoencoderKL(**self.config[0])
 
         self.learn_log_var = learn_log_var
@@ -838,6 +873,7 @@ class ComposerHFAutoEncoder(ComposerModel):
         self.discriminator_weight = discriminator_weight
         self.discriminator_num_filters = discriminator_num_filters
         self.discriminator_num_layers = discriminator_num_layers
+        self.zero_init_last = zero_init_last
 
         self.autoencoder_loss = AutoEncoderLoss(input_key=self.input_key,
                                                 output_channels=self.output_channels,

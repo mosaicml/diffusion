@@ -18,7 +18,8 @@ def test_resnet_block(input_channels, output_channels, use_conv_shortcut, dropou
     block = ResNetBlock(input_channels=input_channels,
                         output_channels=output_channels,
                         use_conv_shortcut=use_conv_shortcut,
-                        dropout_probability=dropout_probability)
+                        dropout_probability=dropout_probability,
+                        zero_init_last=True)
     x = torch.randn(1, input_channels, 5, 5)
     y = block(x)
     assert y.shape == (1, output_channels, 5, 5)
