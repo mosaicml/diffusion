@@ -413,7 +413,7 @@ class StableDiffusion(ComposerModel):
         # negative prompt is given in place of the unconditional input in classifier free guidance
         pooled_embeddings = None
         if do_classifier_free_guidance:
-            if not negative_prompt and not tokenized_negative_prompts and zero_out_negative_prompt:
+            if not negative_prompt and not tokenized_negative_prompts and not negative_prompt_embeds and zero_out_negative_prompt:
                 # Negative prompt is empty and we want to zero it out
                 unconditional_embeddings = torch.zeros_like(text_embeddings)
                 pooled_unconditional_embeddings = torch.zeros_like(pooled_text_embeddings) if self.sdxl else None
