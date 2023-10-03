@@ -493,7 +493,8 @@ class StableDiffusion(ComposerModel):
                                                    max_length=max_length,
                                                    truncation=True,
                                                    return_tensors='pt').input_ids
-                tokenized_prompts = torch.stack([tokenized_prompts[0], tokenized_prompts[1]], dim=1)
+                if self.sdxl:
+                    tokenized_prompts = torch.stack([tokenized_prompts[0], tokenized_prompts[1]], dim=1)
             if self.sdxl:
                 text_embeddings, pooled_text_embeddings = self.text_encoder(
                     [tokenized_prompts[:, 0, :].to(device), tokenized_prompts[:, 1, :].to(device)])  # type: ignore
