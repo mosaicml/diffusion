@@ -64,16 +64,25 @@ class RandomCropAspectRatioTransorm:
         self.width_buckets = torch.tensor([2048, 1984, 1920, 1856, 1792, 1728, 1664, 1600, 1536, 1472, 1408, 1344,
                                            1344, 1280, 1216, 1152, 1152, 1088, 1088, 1024, 1024, 960, 960, 896, 896,
                                            832, 832, 768, 768, 704, 704, 640, 640, 576, 576, 576, 512, 512, 512, 512])
+        # torch.round is a temporarily needed due to an artifact in our first batch of bucketing
         self.aspect_ratio_buckets = torch.round(self.height_buckets / self.width_buckets, decimals=2)
 
     def __call__(self, img):
         orig_w, orig_h = img.size
-        aspect_ratio = orig_h / orig_w
-        bucket_ind = torch.abs(self.aspect_ratio_buckets - aspect_ratio).argmin()
-        target_width, target_height = self.width_buckets[bucket_ind], self.height_buckets[bucket_ind]
+        orig_aspect_ratio = orig_h / orig_w
+        bucket_ind = torch.abs(self.aspect_ratio_buckets - orig_aspect_ratio).argmin()
+        target_width, target_height = self.width_buckets[bucket_ind].item(), self.height_buckets[bucket_ind].item()
+        target_aspect_ratio = target_height / target_width
 
-        # Get the size to resize the shortest side
-        resize_size = min(target_width, target_height)
+        # Determine resize size
+        if orig_aspect_ratio > target_aspect_ratio:
+            w_scale = target_width / orig_w
+            resize_size = (round(w_scale * orig_h), target_width)
+        elif orig_aspect_ratio < target_aspect_ratio:
+            h_scale = target_height / orig_h
+            resize_size = (target_height, round(h_scale * orig_w))
+        else:
+            resize_size = (target_height, target_width)
         img = transforms.functional.resize(img, resize_size, antialias=True)
 
         # Crop based on aspect ratio
