@@ -332,7 +332,7 @@ class StableDiffusion(ComposerModel):
         width: Optional[int] = None,
         num_inference_steps: Optional[int] = 50,
         guidance_scale: Optional[float] = 3.0,
-        num_images_per_prompt: Optional[int] = 1,
+        num_images_per_prompt: int = 1,
         seed: Optional[int] = None,
         progress_bar: Optional[bool] = True,
         zero_out_negative_prompt: bool = True,
@@ -413,14 +413,13 @@ class StableDiffusion(ComposerModel):
         # negative prompt is given in place of the unconditional input in classifier free guidance
         pooled_embeddings = None
         if do_classifier_free_guidance:
-            if negative_prompt_embeds is None and zero_out_negative_prompt:
+            if not negative_prompt and not tokenized_negative_prompts and zero_out_negative_prompt:
+                # Negative prompt is empty and we want to zero it out
                 unconditional_embeddings = torch.zeros_like(text_embeddings)
-                if pooled_text_embeddings is not None:
-                    pooled_unconditional_embeddings = torch.zeros_like(pooled_text_embeddings)
-                else:
-                    pooled_unconditional_embeddings = None
+                pooled_unconditional_embeddings = torch.zeros_like(pooled_text_embeddings) if self.sdxl else None
             else:
-                negative_prompt = negative_prompt or ([''] * (batch_size // num_images_per_prompt))  # type: ignore
+                if not negative_prompt:
+                    negative_prompt = [''] * (batch_size // num_images_per_prompt)  # type: ignore
                 unconditional_embeddings, pooled_unconditional_embeddings = self._prepare_text_embeddings(
                     negative_prompt, tokenized_negative_prompts, negative_prompt_embeds, num_images_per_prompt)
 
