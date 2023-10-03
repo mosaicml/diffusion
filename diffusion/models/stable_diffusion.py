@@ -350,9 +350,9 @@ class StableDiffusion(ComposerModel):
                 image generation away from. Ignored when not using guidance
                 (i.e., ignored if guidance_scale is less than 1).
                 Must be the same length as list of prompts. Default: `None`.
-            tokenized_prompts (torch.LongTensor or List[torch.LongTensor]): Optionally pass
-                pre-tokenized prompts instead of string prompts. If SDXL, this will be a list
-                of two pre-tokenized prompts. Default: `None`.
+            tokenized_prompts (torch.LongTensor): Optionally pass pre-tokenized prompts instead
+                of string prompts. If SDXL, this will be a tensor of size [B, 2, max_length],
+                otherwise will be of shape [B, max_length]. Default: `None`.
             tokenized_negative_prompts (torch.LongTensor): Optionally pass pre-tokenized negative
                 prompts instead of string prompts. Default: `None`.
             prompt_embeds (torch.FloatTensor): Optionally pass pre-tokenized prompts instead
@@ -496,7 +496,7 @@ class StableDiffusion(ComposerModel):
                                                    return_tensors='pt').input_ids
             if self.sdxl:
                 text_embeddings, pooled_text_embeddings = self.text_encoder(
-                    [tokenized_prompts[0].to(device), tokenized_prompts[1].to(device)])  # type: ignore
+                    [tokenized_prompts[:, 0, :].to(device), tokenized_prompts[:, 1, :].to(device)])  # type: ignore
             else:
                 text_embeddings = self.text_encoder(tokenized_prompts.to(device))[0]  # type: ignore
         else:
