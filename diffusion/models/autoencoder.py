@@ -15,7 +15,6 @@ from torch.autograd import Function
 from torchmetrics import MeanMetric, MeanSquaredError, Metric
 from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
-from transformers import PretrainedConfig
 
 
 def zero_module(module: nn.Module) -> nn.Module:
@@ -827,62 +826,20 @@ class ComposerAutoEncoder(ComposerModel):
             metric.update(outputs['x_recon'], batch[self.input_key])
 
 
-class ComposerHFAutoEncoder(ComposerModel):
-    """Composer wrapper for the Huggingface Autoencoder.
+class ComposerDiffusersAutoEncoder(ComposerModel):
+    """Composer wrapper for the Huggingface Diffusers Autoencoder.
 
     Args:
-        model_name (str): Name of the Huggingface model. Default: `stabilityai/stable-diffusion-2-base`.
-        pretrained (bool): Whether to use a pretrained model. Default: `True`.
-        output_channels (int): Number of output channels. Default: `3`.
+        model (diffusers.AutoencoderKL): Diffusers autoencoder to train.
+        loss_fn (AutoEncoderLoss): Auto encoder loss module.
         input_key (str): Key for the input to the model. Default: `image`.
-        learn_log_var (bool): Whether to learn the output log variance. Default: `True`.
-        kl_divergence_weight (float): Weight for the KL divergence loss. Default: `1.0`.
-        lpips_weight (float): Weight for the LPIPs loss. Default: `0.25`.
-        discriminator_weight (float): Weight for the discriminator loss. Default: `0.5`.
-        discriminator_num_filters (int): Number of filters in the first layer of the discriminator. Default: `64`.
-        discriminator_num_layers (int): Number of layers in the discriminator. Default: `3`.
-        zero_init_last (bool): Whether to initialize the last conv layer to zero. Default: `False`.
     """
 
-    def __init__(self,
-                 model_name: str = 'stabilityai/stable-diffusion-2-base',
-                 pretrained: bool = True,
-                 output_channels: int = 3,
-                 input_key: str = 'image',
-                 learn_log_var: bool = True,
-                 kl_divergence_weight: float = 1.0,
-                 lpips_weight: float = 0.25,
-                 discriminator_weight: float = 0.5,
-                 discriminator_num_filters: int = 64,
-                 discriminator_num_layers: int = 3,
-                 zero_init_last: bool = False):
+    def __init__(self, model: AutoencoderKL, loss_fn: AutoEncoderLoss, input_key: str = 'image'):
         super().__init__()
-        self.model_name = model_name
-        self.output_channels = output_channels
+        self.model = model
+        self.loss_fn = loss_fn
         self.input_key = input_key
-
-        if pretrained:
-            self.model = AutoencoderKL.from_pretrained(self.model_name)
-        else:
-            self.config = PretrainedConfig.get_config_dict(model_name)
-            self.model = AutoencoderKL(**self.config[0])
-
-        self.learn_log_var = learn_log_var
-        self.kl_divergence_weight = kl_divergence_weight
-        self.lpips_weight = lpips_weight
-        self.discriminator_weight = discriminator_weight
-        self.discriminator_num_filters = discriminator_num_filters
-        self.discriminator_num_layers = discriminator_num_layers
-        self.zero_init_last = zero_init_last
-
-        self.autoencoder_loss = AutoEncoderLoss(input_key=self.input_key,
-                                                output_channels=self.output_channels,
-                                                learn_log_var=self.learn_log_var,
-                                                kl_divergence_weight=self.kl_divergence_weight,
-                                                lpips_weight=self.lpips_weight,
-                                                discriminator_weight=discriminator_weight,
-                                                discriminator_num_filters=discriminator_num_filters,
-                                                discriminator_num_layers=discriminator_num_layers)
 
         # Set up train metrics
         train_metrics = [MeanSquaredError()]
@@ -907,7 +864,7 @@ class ComposerHFAutoEncoder(ComposerModel):
 
     def loss(self, outputs, batch):
         last_layer = self.get_last_layer_weight()
-        return self.autoencoder_loss(outputs, batch, last_layer)
+        return self.loss_fn(outputs, batch, last_layer)
 
     def eval_forward(self, batch, outputs=None):
         # Skip this if outputs have already been computed, e.g. during training

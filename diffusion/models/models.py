@@ -15,7 +15,7 @@ from torchmetrics.multimodal.clip_score import CLIPScore
 from transformers import CLIPTextModel, CLIPTextModelWithProjection, CLIPTokenizer, PretrainedConfig
 
 from diffusion.models.layers import ClippedAttnProcessor2_0, ClippedXFormersAttnProcessor, zero_module
-from diffusion.models.autoencoder import ComposerAutoEncoder
+from diffusion.models.autoencoder import AutoEncoderLoss, ComposerAutoEncoder, ComposerDiffusersAutoEncoder
 from diffusion.models.pixel_diffusion import PixelDiffusion
 from diffusion.models.stable_diffusion import StableDiffusion
 from diffusion.schedulers.schedulers import ContinuousTimeScheduler
@@ -344,8 +344,63 @@ def build_autoencoder(input_channels: int = 3,
     return model
 
 
-def diffusers_autoencoder():
-    """Placeholder for diffusers autoencoder function."""
+def build_diffusers_autoencoder(model_name: str = 'stabilityai/stable-diffusion-2-base',
+                                pretrained: bool = True,
+                                vae_subfolder: bool = True,
+                                output_channels: int = 3,
+                                input_key: str = 'image',
+                                learn_log_var: bool = True,
+                                log_var_init: float = 0.0,
+                                kl_divergence_weight: float = 1.0,
+                                lpips_weight: float = 0.25,
+                                discriminator_weight: float = 0.5,
+                                discriminator_num_filters: int = 64,
+                                discriminator_num_layers: int = 3,
+                                zero_init_last: bool = False):
+    """Diffusers autoencoder training setup.
+
+    Args:
+        model_name (str): Name of the Huggingface model. Default: `stabilityai/stable-diffusion-2-base`.
+        pretrained (bool): Whether to use a pretrained model. Default: `True`.
+        vae_subfolder: (bool): Whether to find the model config in a vae subfolder. Default: `True`.
+        output_channels (int): Number of output channels. Default: `3`.
+        input_key (str): Key for the input to the model. Default: `image`.
+        learn_log_var (bool): Whether to learn the output log variance. Default: `True`.
+        log_var_init (float): Initial value for the output log variance. Default: `0.0`.
+        kl_divergence_weight (float): Weight for the KL divergence loss. Default: `1.0`.
+        lpips_weight (float): Weight for the LPIPs loss. Default: `0.25`.
+        discriminator_weight (float): Weight for the discriminator loss. Default: `0.5`.
+        discriminator_num_filters (int): Number of filters in the first layer of the discriminator. Default: `64`.
+        discriminator_num_layers (int): Number of layers in the discriminator. Default: `3`.
+        zero_init_last (bool): Whether to initialize the last conv layer to zero. Default: `False`.
+    """
+    # Get the model architecture and optionally the pretrained weights.
+    if pretrained:
+        if vae_subfolder:
+            model = AutoencoderKL.from_pretrained(model_name, subfolder='vae')
+        else:
+            model = AutoencoderKL.from_pretrained(model_name)
+    else:
+        if vae_subfolder:
+            config = PretrainedConfig.get_config_dict(model_name, subfolder='vae')
+        else:
+            config = PretrainedConfig.get_config_dict(model_name)
+        model = AutoencoderKL(**config[0])
+
+    # Configure the loss function
+    autoencoder_loss = AutoEncoderLoss(input_key=input_key,
+                                       output_channels=output_channels,
+                                       learn_log_var=learn_log_var,
+                                       log_var_init=log_var_init,
+                                       kl_divergence_weight=kl_divergence_weight,
+                                       lpips_weight=lpips_weight,
+                                       discriminator_weight=discriminator_weight,
+                                       discriminator_num_filters=discriminator_num_filters,
+                                       discriminator_num_layers=discriminator_num_layers)
+
+    # Make the composer model
+    composer_model = ComposerDiffusersAutoEncoder(model=model, loss_fn=autoencoder_loss, input_key=input_key)
+    return composer_model
 
 
 def discrete_pixel_diffusion(clip_model_name: str = 'openai/clip-vit-large-patch14', prediction_type='epsilon'):
