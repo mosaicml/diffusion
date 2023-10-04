@@ -3,16 +3,18 @@
 
 """Constructors for diffusion models."""
 
+import logging
 from typing import List, Optional
 
 import torch
 from composer.devices import DeviceGPU
-from diffusers import AutoencoderKL, DDIMScheduler, DDPMScheduler, UNet2DConditionModel
+from diffusers import AutoencoderKL, DDIMScheduler, DDPMScheduler, EulerDiscreteScheduler, UNet2DConditionModel
 from torchmetrics import MeanSquaredError
 from torchmetrics.image.fid import FrechetInceptionDistance
 from torchmetrics.multimodal.clip_score import CLIPScore
-from transformers import CLIPTextModel, CLIPTokenizer, PretrainedConfig
+from transformers import CLIPTextModel, CLIPTextModelWithProjection, CLIPTokenizer, PretrainedConfig
 
+from diffusion.models.layers import ClippedAttnProcessor2_0, ClippedXFormersAttnProcessor, zero_module
 from diffusion.models.pixel_diffusion import PixelDiffusion
 from diffusion.models.stable_diffusion import StableDiffusion
 from diffusion.schedulers.schedulers import ContinuousTimeScheduler
@@ -23,6 +25,8 @@ try:
     is_xformers_installed = True
 except:
     is_xformers_installed = False
+
+log = logging.getLogger(__name__)
 
 
 def stable_diffusion_2(
@@ -37,6 +41,7 @@ def stable_diffusion_2(
     precomputed_latents: bool = False,
     encode_latents_in_fp16: bool = True,
     fsdp: bool = True,
+    clip_qkv: Optional[float] = None,
 ):
     """Stable diffusion v2 training setup.
 
@@ -60,6 +65,7 @@ def stable_diffusion_2(
         precomputed_latents (bool): Whether to use precomputed latents. Defaults to False.
         encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
         fsdp (bool): Whether to use FSDP. Defaults to True.
+        clip_qkv (float, optional): If not None, clip the qkv values to this value. Defaults to None.
     """
     if train_metrics is None:
         train_metrics = [MeanSquaredError()]
@@ -120,11 +126,20 @@ def stable_diffusion_2(
         if is_xformers_installed:
             model.unet.enable_xformers_memory_efficient_attention()
             model.vae.enable_xformers_memory_efficient_attention()
+
+    if clip_qkv is not None:
+        if is_xformers_installed:
+            attn_processor = ClippedXFormersAttnProcessor(clip_val=clip_qkv)
+        else:
+            attn_processor = ClippedAttnProcessor2_0(clip_val=clip_qkv)
+        log.info('Using %s with clip_val %.1f' % (attn_processor.__class__, clip_qkv))
+        model.unet.set_attn_processor(attn_processor)
+
     return model
 
 
 def stable_diffusion_xl(
-    model_name: str = 'stabilityai/stable-diffusion-2-base',
+    model_name: str = 'stabilityai/stable-diffusion-xl-base-1.0',
     unet_model_name: str = 'stabilityai/stable-diffusion-xl-base-1.0',
     vae_model_name: str = 'madebyollin/sdxl-vae-fp16-fix',
     pretrained: bool = True,
@@ -137,6 +152,7 @@ def stable_diffusion_xl(
     precomputed_latents: bool = False,
     encode_latents_in_fp16: bool = True,
     fsdp: bool = True,
+    clip_qkv: Optional[float] = 6.0,
 ):
     """Stable diffusion 2 training setup + SDXL UNet and VAE.
 
@@ -144,8 +160,8 @@ def stable_diffusion_xl(
     prompts. Currently uses UNet and VAE config from SDXL, but text encoder/tokenizer from SD2.
 
     Args:
-        model_name (str): Name of the model to load. Determines the text encoder, tokenizer,
-            and noise scheduler. Defaults to 'stabilityai/stable-diffusion-2-base'.
+        model_name (str): Name of the model to load. Determines the text encoders, tokenizers,
+            and noise scheduler. Defaults to 'stabilityai/stable-diffusion-xl-base-1.0'.
         unet_model_name (str): Name of the UNet model to load. Defaults to
             'stabilityai/stable-diffusion-xl-base-1.0'.
         vae_model_name (str): Name of the VAE model to load. Defaults to
@@ -166,6 +182,8 @@ def stable_diffusion_xl(
         precomputed_latents (bool): Whether to use precomputed latents. Defaults to False.
         encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
         fsdp (bool): Whether to use FSDP. Defaults to True.
+        clip_qkv (float, optional): If not None, clip the qkv values to this value. Defaults to 6.0. Improves stability
+            of training.
     """
     if train_metrics is None:
         train_metrics = [MeanSquaredError()]
@@ -181,39 +199,34 @@ def stable_diffusion_xl(
             metric.requires_grad_(False)
 
     if pretrained:
-        raise NotImplementedError('Full SDXL pipeline not implemented yet.')
+        unet = UNet2DConditionModel.from_pretrained(unet_model_name, subfolder='unet')
     else:
         config = PretrainedConfig.get_config_dict(unet_model_name, subfolder='unet')
-        # Currently not doing micro-conditioning, so set config appropriately
-        config[0]['addition_embed_type'] = None
-        config[0]['cross_attention_dim'] = 1024
         unet = UNet2DConditionModel(**config[0])
 
-    # Prevent fsdp from wrapping up_blocks and down_blocks because the forward pass calls length on these
-    unet.up_blocks._fsdp_wrap = False
-    unet.down_blocks._fsdp_wrap = False
-    for block in unet.up_blocks:
-        block._fsdp_wrap = True
-    for block in unet.down_blocks:
-        block._fsdp_wrap = True
+        # Zero initialization trick
+        for name, layer in unet.named_modules():
+            # Final conv in ResNet blocks
+            if name.endswith('conv2'):
+                layer = zero_module(layer)
+            # proj_out in attention blocks
+            if name.endswith('to_out.0'):
+                layer = zero_module(layer)
+        # Last conv block out projection
+        unet.conv_out = zero_module(unet.conv_out)
 
-    if encode_latents_in_fp16:
-        vae = AutoencoderKL.from_pretrained(vae_model_name, torch_dtype=torch.float16)
-        text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder', torch_dtype=torch.float16)
-    else:
-        vae = AutoencoderKL.from_pretrained(vae_model_name)
-        text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder')
+    torch_dtype = torch.float16 if encode_latents_in_fp16 else None
+    try:
+        vae = AutoencoderKL.from_pretrained(vae_model_name, subfolder='vae', torch_dtype=torch_dtype)
+    except:  # for handling SDXL vae fp16 fixed checkpoint
+        vae = AutoencoderKL.from_pretrained(vae_model_name, torch_dtype=torch_dtype)
 
-    tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer')
+    tokenizer = SDXLTokenizer(model_name)
+    text_encoder = SDXLTextEncoder(model_name, encode_latents_in_fp16)
+
     noise_scheduler = DDPMScheduler.from_pretrained(model_name, subfolder='scheduler')
-    inference_noise_scheduler = DDIMScheduler(num_train_timesteps=noise_scheduler.config.num_train_timesteps,
-                                              beta_start=noise_scheduler.config.beta_start,
-                                              beta_end=noise_scheduler.config.beta_end,
-                                              beta_schedule=noise_scheduler.config.beta_schedule,
-                                              trained_betas=noise_scheduler.config.trained_betas,
-                                              clip_sample=noise_scheduler.config.clip_sample,
-                                              set_alpha_to_one=noise_scheduler.config.set_alpha_to_one,
-                                              prediction_type=prediction_type)
+    inference_noise_scheduler = EulerDiscreteScheduler.from_pretrained(model_name, subfolder='scheduler')
+    inference_noise_scheduler.prediction_type = prediction_type
 
     model = StableDiffusion(
         unet=unet,
@@ -231,12 +244,22 @@ def stable_diffusion_xl(
         precomputed_latents=precomputed_latents,
         encode_latents_in_fp16=encode_latents_in_fp16,
         fsdp=fsdp,
+        sdxl=True,
     )
     if torch.cuda.is_available():
         model = DeviceGPU().module_to_device(model)
         if is_xformers_installed:
             model.unet.enable_xformers_memory_efficient_attention()
             model.vae.enable_xformers_memory_efficient_attention()
+
+    if clip_qkv is not None:
+        if is_xformers_installed:
+            attn_processor = ClippedXFormersAttnProcessor(clip_val=clip_qkv)
+        else:
+            attn_processor = ClippedAttnProcessor2_0(clip_val=clip_qkv)
+        log.info('Using %s with clip_val %.1f' % (attn_processor.__class__, clip_qkv))
+        model.unet.set_attn_processor(attn_processor)
+
     return model
 
 
@@ -354,3 +377,70 @@ def continuous_pixel_diffusion(clip_model_name: str = 'openai/clip-vit-large-pat
         if is_xformers_installed:
             model.model.enable_xformers_memory_efficient_attention()
     return model
+
+
+class SDXLTextEncoder(torch.nn.Module):
+    """Wrapper around HuggingFace text encoders for SDXL.
+
+    Creates two text encoders (a CLIPTextModel and CLIPTextModelWithProjection) that behave like one.
+
+    Args:
+        model_name (str): Name of the model's text encoders to load. Defaults to 'stabilityai/stable-diffusion-xl-base-1.0'.
+        encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
+    """
+
+    def __init__(self, model_name='stabilityai/stable-diffusion-xl-base-1.0', encode_latents_in_fp16=True):
+        super().__init__()
+        torch_dtype = torch.float16 if encode_latents_in_fp16 else None
+        self.text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder', torch_dtype=torch_dtype)
+        self.text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(model_name,
+                                                                          subfolder='text_encoder_2',
+                                                                          torch_dtype=torch_dtype)
+
+    @property
+    def device(self):
+        return self.text_encoder.device
+
+    def forward(self, tokenized_text):
+        # first text encoder
+        conditioning = self.text_encoder(tokenized_text[0], output_hidden_states=True).hidden_states[-2]
+        # second text encoder
+        text_encoder_2_out = self.text_encoder_2(tokenized_text[1], output_hidden_states=True)
+        pooled_conditioning = text_encoder_2_out[0]  # (batch_size, 1280)
+        conditioning_2 = text_encoder_2_out.hidden_states[-2]  # (batch_size, 77, 1280)
+
+        conditioning = torch.concat([conditioning, conditioning_2], dim=-1)
+        return conditioning, pooled_conditioning
+
+
+class SDXLTokenizer:
+    """Wrapper around HuggingFace tokenizers for SDXL.
+
+    Tokenizes prompt with two tokenizers and returns the joined output.
+
+    Args:
+        model_name (str): Name of the model's text encoders to load. Defaults to 'stabilityai/stable-diffusion-xl-base-1.0'.
+    """
+
+    def __init__(self, model_name='stabilityai/stable-diffusion-xl-base-1.0'):
+        self.tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer')
+        self.tokenizer_2 = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer_2')
+
+    def __call__(self, prompt, padding, truncation, return_tensors, max_length=None):
+        tokenized_output = self.tokenizer(
+            prompt,
+            padding=padding,
+            max_length=self.tokenizer.model_max_length if max_length is None else max_length,
+            truncation=truncation,
+            return_tensors=return_tensors)
+        tokenized_output_2 = self.tokenizer_2(
+            prompt,
+            padding=padding,
+            max_length=self.tokenizer_2.model_max_length if max_length is None else max_length,
+            truncation=truncation,
+            return_tensors=return_tensors)
+
+        # Add second tokenizer output to first tokenizer
+        for key in tokenized_output.keys():
+            tokenized_output[key] = [tokenized_output[key], tokenized_output_2[key]]
+        return tokenized_output
