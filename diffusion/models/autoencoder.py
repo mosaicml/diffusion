@@ -73,9 +73,11 @@ class ResNetBlock(nn.Module):
         else:
             self.conv_shortcut = nn.Identity()
 
-        # Init the final conv layer parameters to zero.
+        # Init the final conv layer parameters to zero if desired. Otherwise, kaiming uniform
         if self.zero_init_last:
             self.conv2 = zero_module(self.conv2)
+        else:
+            nn.init.kaiming_normal_(self.conv2.weight, nonlinearity='linear')
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward through the residual block."""
@@ -106,8 +108,11 @@ class AttentionLayer(nn.Module):
         self.norm = nn.GroupNorm(num_groups=32, num_channels=self.input_channels, eps=1e-6, affine=True)
         # Conv layer to transform the input into q, k, and v
         self.qkv_conv = nn.Conv2d(self.input_channels, 3 * self.input_channels, kernel_size=1, stride=1, padding=0)
+        # Init the qkv conv weights
+        nn.init.kaiming_normal_(self.qkv_conv.weight, nonlinearity='linear')
         # Conv layer to project to the output.
         self.proj_conv = nn.Conv2d(self.input_channels, self.input_channels, kernel_size=1, stride=1, padding=0)
+        nn.init.kaiming_normal_(self.proj_conv.weight, nonlinearity='linear')
 
     def _reshape_for_attention(self, x: torch.Tensor) -> torch.Tensor:
         """Reshape the input tensor for attention."""
@@ -153,6 +158,7 @@ class Downsample(nn.Module):
         self.resample_with_conv = resample_with_conv
         if self.resample_with_conv:
             self.conv = nn.Conv2d(self.input_channels, self.input_channels, kernel_size=3, stride=2, padding=0)
+            nn.init.kaiming_normal_(self.conv.weight, nonlinearity='linear')
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.resample_with_conv:
@@ -179,6 +185,7 @@ class Upsample(nn.Module):
         self.resample_with_conv = resample_with_conv
         if self.resample_with_conv:
             self.conv = nn.Conv2d(self.input_channels, self.input_channels, kernel_size=3, stride=1, padding=1)
+            nn.init.kaiming_normal_(self.conv.weight, nonlinearity='linear')
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = F.interpolate(x, scale_factor=2, mode='nearest')
@@ -229,6 +236,7 @@ class Encoder(nn.Module):
 
         # Inital conv layer to get to the hidden dimensionality
         self.conv_in = nn.Conv2d(input_channels, hidden_channels, kernel_size=3, padding=1)
+        nn.init.kaiming_normal_(self.conv_in.weight, nonlinearity='linear')
 
         # construct the residual blocks
         self.blocks = nn.ModuleList()
@@ -272,6 +280,7 @@ class Encoder(nn.Module):
         self.norm_out = nn.GroupNorm(num_groups=32, num_channels=block_output_channels, eps=1e-6, affine=True)
         output_channels = 2 * self.latent_channels if self.double_latent_channels else self.latent_channels
         self.conv_out = nn.Conv2d(block_output_channels, output_channels, kernel_size=3, stride=1, padding=1)
+        nn.init.kaiming_normal_(self.conv_out.weight, nonlinearity='linear')
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward through the encoder."""
@@ -323,6 +332,8 @@ class Decoder(nn.Module):
         # Input conv layer to get to the hidden dimensionality
         channels = self.hidden_channels * self.channel_multipliers[-1]
         self.conv_in = nn.Conv2d(self.latent_channels, channels, kernel_size=3, stride=1, padding=1)
+        nn.init.kaiming_normal_(self.conv_in.weight, nonlinearity='linear')
+
         # Make the middle blocks
         self.blocks = nn.ModuleList()
         middle_block_1 = ResNetBlock(input_channels=channels,
@@ -361,6 +372,7 @@ class Decoder(nn.Module):
         # Make the final layers for the output
         self.norm_out = nn.GroupNorm(num_groups=32, num_channels=block_channels, eps=1e-6, affine=True)
         self.conv_out = nn.Conv2d(block_channels, self.output_channels, kernel_size=3, stride=1, padding=1)
+        nn.init.kaiming_normal_(self.conv_out.weight, nonlinearity='linear')
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward through the decoder."""
@@ -428,6 +440,7 @@ class AutoEncoder(nn.Module):
 
         channels = 2 * self.latent_channels if self.double_latent_channels else self.latent_channels
         self.quant_conv = nn.Conv2d(channels, channels, kernel_size=1, stride=1, padding=0)
+        nn.init.kaiming_normal_(self.quant_conv.weight, nonlinearity='linear')
 
         self.decoder = Decoder(latent_channels=self.latent_channels,
                                output_channels=self.output_channels,
@@ -440,6 +453,7 @@ class AutoEncoder(nn.Module):
                                zero_init_last=self.zero_init_last)
 
         self.post_quant_conv = nn.Conv2d(self.latent_channels, self.latent_channels, kernel_size=1, stride=1, padding=0)
+        nn.init.kaiming_normal_(self.post_quant_conv.weight, nonlinearity='linear')
 
     def get_last_layer_weight(self) -> torch.Tensor:
         """Get the weight of the last layer of the decoder."""
@@ -835,10 +849,10 @@ class ComposerDiffusersAutoEncoder(ComposerModel):
         input_key (str): Key for the input to the model. Default: `image`.
     """
 
-    def __init__(self, model: AutoencoderKL, loss_fn: AutoEncoderLoss, input_key: str = 'image'):
+    def __init__(self, model: AutoencoderKL, autoencoder_loss: AutoEncoderLoss, input_key: str = 'image'):
         super().__init__()
         self.model = model
-        self.loss_fn = loss_fn
+        self.autoencoder_loss = autoencoder_loss
         self.input_key = input_key
 
         # Set up train metrics
@@ -864,7 +878,7 @@ class ComposerDiffusersAutoEncoder(ComposerModel):
 
     def loss(self, outputs, batch):
         last_layer = self.get_last_layer_weight()
-        return self.loss_fn(outputs, batch, last_layer)
+        return self.autoencoder_loss(outputs, batch, last_layer)
 
     def eval_forward(self, batch, outputs=None):
         # Skip this if outputs have already been computed, e.g. during training

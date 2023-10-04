@@ -399,7 +399,7 @@ def build_diffusers_autoencoder(model_name: str = 'stabilityai/stable-diffusion-
                                        discriminator_num_layers=discriminator_num_layers)
 
     # Make the composer model
-    composer_model = ComposerDiffusersAutoEncoder(model=model, loss_fn=autoencoder_loss, input_key=input_key)
+    composer_model = ComposerDiffusersAutoEncoder(model=model, autoencoder_loss=autoencoder_loss, input_key=input_key)
     return composer_model
 
 

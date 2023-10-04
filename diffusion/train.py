@@ -44,7 +44,7 @@ def train(config: DictConfig) -> None:
             autoencoder_param_dict = {k: v for k, v in config.optimizer.items()}
 
         assert hasattr(model, 'model') and isinstance(model.model, nn.Module)
-        if model.learn_log_var:
+        if model.autoencoder_loss.learn_log_var:
             autoencoder_param_dict['params'] = chain(model.model.parameters(), [model.autoencoder_loss.log_var])
         else:
             autoencoder_param_dict['params'] = model.model.parameters()
