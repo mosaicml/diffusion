@@ -44,8 +44,14 @@ class DiscriminatorSchedule(Algorithm):
 
         # Ensure the discriminator is training/not training when appropriate
         elif event == Event.BATCH_START:
-            if state.timestamp.get(TimeUnit.BATCH).value >= self.start_iteration:
-                # Turn on the discriminator
+            if state.timestamp.get(TimeUnit.BATCH).value == self.start_iteration - 1:
+                # Turn on the discriminator just before it should start, but kill the gradients for the autoencoder.
+                # This mimics a separate optimizer for the discriminator for the first iteration
+                state.optimizers[0].param_groups[1]['lr'] = self.lr
+                state.optimizers[0].param_groups[1]['weight_decay'] = self.weight_decay
+                autoencoder_loss.set_discriminator_weight(0.0)
+            elif state.timestamp.get(TimeUnit.BATCH).value >= self.start_iteration:
+                # Turn on the discriminator completely.
                 state.optimizers[0].param_groups[1]['lr'] = self.lr
                 state.optimizers[0].param_groups[1]['weight_decay'] = self.weight_decay
                 autoencoder_loss.set_discriminator_weight(self.discriminator_weight)
