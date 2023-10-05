@@ -39,6 +39,8 @@ class StableDiffusion(ComposerModel):
         loss_fn (torch.nn.Module): torch loss function. Default: `F.mse_loss`.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
+        offset_noise (bool): Whether or not to use offset noise. Default `False`.
+        offset_noise_scale (float): The scale of the offset noise. Default `0.1`.
         train_metrics (list): List of torchmetrics to calculate during training.
             Default: `None`.
         val_metrics (list): List of torchmetrics to calculate during validation.
@@ -74,6 +76,8 @@ class StableDiffusion(ComposerModel):
                  inference_noise_scheduler,
                  loss_fn=F.mse_loss,
                  prediction_type: str = 'epsilon',
+                 offset_noise: bool = False,
+                 offset_noise_scale: float = 0.1,
                  train_metrics: Optional[List] = None,
                  val_metrics: Optional[List] = None,
                  val_seed: int = 1138,
@@ -95,6 +99,8 @@ class StableDiffusion(ComposerModel):
         self.prediction_type = prediction_type.lower()
         if self.prediction_type not in ['sample', 'epsilon', 'v_prediction']:
             raise ValueError(f'prediction type must be one of sample, epsilon, or v_prediction. Got {prediction_type}')
+        self.offset_noise = offset_noise
+        self.offset_noise_scale = offset_noise_scale
         self.val_seed = val_seed
         self.image_key = image_key
         self.image_latents_key = image_latents_key
@@ -200,6 +206,9 @@ class StableDiffusion(ComposerModel):
         timesteps = torch.randint(0, len(self.noise_scheduler), (latents.shape[0],), device=latents.device)
         # Add noise to the inputs (forward diffusion)
         noise = torch.randn_like(latents)
+        if self.offset_noise:
+            offset_noise = torch.randn(latents.shape[0], latents.shape[1], 1, 1, device=noise.device)
+            noise += self.offset_noise_scale * offset_noise
         noised_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
         # Generate the targets
         if self.prediction_type == 'epsilon':
@@ -332,7 +341,9 @@ class StableDiffusion(ComposerModel):
         width: Optional[int] = None,
         num_inference_steps: Optional[int] = 50,
         guidance_scale: Optional[float] = 3.0,
-        num_images_per_prompt: int = 1,
+        rescale_guidance: bool = False,
+        rescaled_guidance_scale: float = 0.7,
+        num_images_per_prompt: Optional[int] = 1,
         seed: Optional[int] = None,
         progress_bar: Optional[bool] = True,
         zero_out_negative_prompt: bool = True,
@@ -374,6 +385,8 @@ class StableDiffusion(ComposerModel):
                 Higher guidance scale encourages to generate images that are closely linked
                 to the text prompt, usually at the expense of lower image quality.
                 Default: `3.0`.
+            rescale_guidance (bool): Whether to use rescaled classifier free guidance or not. Default: `False`.
+            rescaled_guidance_scale (float): Rescaled guidance scale. Default: `0.7`.
             num_images_per_prompt (int): The number of images to generate per prompt.
                  Default: `1`.
             progress_bar (bool): Whether to use the tqdm progress bar during generation.
@@ -470,7 +483,12 @@ class StableDiffusion(ComposerModel):
                 # perform guidance. Note this is only techincally correct for prediction_type 'epsilon'
                 pred_uncond, pred_text = pred.chunk(2)
                 pred = pred_uncond + guidance_scale * (pred_text - pred_uncond)
-
+                # Optionally rescale the classifer free guidance
+                if rescale_guidance:
+                    std_pos = torch.std(pred_text, dim=(1, 2, 3), keepdim=True)
+                    std_cfg = torch.std(pred, dim=(1, 2, 3), keepdim=True)
+                    pred_rescaled = pred * (std_pos / std_cfg)
+                    pred = pred_rescaled * rescaled_guidance_scale + pred * (1 - rescaled_guidance_scale)
             # compute the previous noisy sample x_t -> x_t-1
             latents = self.inference_scheduler.step(pred, t, latents, generator=rng_generator).prev_sample
 

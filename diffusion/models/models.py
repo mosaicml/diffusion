@@ -33,6 +33,8 @@ def stable_diffusion_2(
     model_name: str = 'stabilityai/stable-diffusion-2-base',
     pretrained: bool = True,
     prediction_type: str = 'epsilon',
+    offset_noise: bool = False,
+    offset_noise_scale: float = 0.1,
     train_metrics: Optional[List] = None,
     val_metrics: Optional[List] = None,
     val_guidance_scales: Optional[List] = None,
@@ -63,6 +65,8 @@ def stable_diffusion_2(
         loss_bins (list, optional): List of tuples of (min, max) values to use for loss binning. If None, defaults to
             [(0, 1)].
         precomputed_latents (bool): Whether to use precomputed latents. Defaults to False.
+        offset_noise (bool): Whether or not to use offset noise. Defaults to False.
+        offset_noise_scale (float): The scale of the offset noise. Default `0.1`.
         encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
         fsdp (bool): Whether to use FSDP. Defaults to True.
         clip_qkv (float, optional): If not None, clip the qkv values to this value. Defaults to None.
@@ -112,6 +116,8 @@ def stable_diffusion_2(
         noise_scheduler=noise_scheduler,
         inference_noise_scheduler=inference_noise_scheduler,
         prediction_type=prediction_type,
+        offset_noise=offset_noise,
+        offset_noise_scale=offset_noise_scale,
         train_metrics=train_metrics,
         val_metrics=val_metrics,
         val_guidance_scales=val_guidance_scales,
