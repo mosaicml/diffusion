@@ -150,6 +150,8 @@ def stable_diffusion_xl(
     vae_model_name: str = 'madebyollin/sdxl-vae-fp16-fix',
     pretrained: bool = True,
     prediction_type: str = 'epsilon',
+    offset_noise: bool = False,
+    offset_noise_scale: float = 0.1,
     train_metrics: Optional[List] = None,
     val_metrics: Optional[List] = None,
     val_guidance_scales: Optional[List] = None,
@@ -176,6 +178,8 @@ def stable_diffusion_xl(
         pretrained (bool): Whether to load pretrained weights. Defaults to True.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
+        offset_noise (bool): Whether or not to use offset noise. Defaults to False.
+        offset_noise_scale (float): The scale of the offset noise. Default `0.1`.
         train_metrics (list, optional): List of metrics to compute during training. If None, defaults to
             [MeanSquaredError()].
         val_metrics (list, optional): List of metrics to compute during validation. If None, defaults to
@@ -242,6 +246,8 @@ def stable_diffusion_xl(
         noise_scheduler=noise_scheduler,
         inference_noise_scheduler=inference_noise_scheduler,
         prediction_type=prediction_type,
+        offset_noise=offset_noise,
+        offset_noise_scale=offset_noise_scale,
         train_metrics=train_metrics,
         val_metrics=val_metrics,
         val_guidance_scales=val_guidance_scales,
