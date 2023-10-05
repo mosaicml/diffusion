@@ -70,6 +70,7 @@ class ResNetBlock(nn.Module):
                                                kernel_size=1,
                                                stride=1,
                                                padding=0)
+            nn.init.kaiming_normal_(self.conv_shortcut.weight, nonlinearity='linear')
         else:
             self.conv_shortcut = nn.Identity()
 
