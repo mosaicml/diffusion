@@ -24,7 +24,7 @@ class SyntheticImageCaptionDataset(Dataset):
         super().__init__()
         self.image_size = image_size
         self.sdxl = sdxl
-        self.caption_shape = (2, caption_length) if self.sdxl else (caption_length)
+        self.caption_shape = (2, caption_length) if self.sdxl else (caption_length,)
 
     def __len__(self):
         return 100_000
