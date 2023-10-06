@@ -671,7 +671,7 @@ class AutoEncoderLoss(nn.Module):
 
         # Discriminator loss
         real = self.discriminator(batch[self.input_key])
-        fake = self.discriminator(self.reverse_gradients.apply(self.scale_gradients(recon_img)))
+        fake = self.discriminator(self.reverse_gradients.apply(self.scale_gradients(outputs['x_recon'])))
         real_loss = F.binary_cross_entropy_with_logits(real, torch.ones_like(real))
         fake_loss = F.binary_cross_entropy_with_logits(fake, torch.zeros_like(fake))
         losses['disc_real_loss'] = real_loss
