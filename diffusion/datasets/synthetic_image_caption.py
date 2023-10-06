@@ -40,7 +40,7 @@ class SyntheticImageCaptionDataset(Dataset):
             out['cond_crops_coords_top_left'] = torch.tensor([0, 0])
             out['cond_original_size'] = torch.tensor([self.image_size, self.image_size])
             out['cond_target_size'] = torch.tensor([self.image_size, self.image_size])
-        out['image'] = self.image[idx]
+        out['image'] = self.images[idx]
         out['captions'] = self.captions[idx]
         return out
 
