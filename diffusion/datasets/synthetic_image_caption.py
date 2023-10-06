@@ -32,9 +32,9 @@ class SyntheticImageCaptionDataset(Dataset):
     def __getitem__(self, idx):
         out = {}
         if self.sdxl:
-            out['cond_crops_coords_top_left'] = torch.tensor([0, 0])
-            out['cond_original_size'] = torch.tensor([self.image_size, self.image_size])
-            out['cond_target_size'] = torch.tensor([self.image_size, self.image_size])
+            out['cond_crops_coords_top_left'] = torch.tensor([0, 0], dtype=torch.float)
+            out['cond_original_size'] = torch.tensor([self.image_size, self.image_size], dtype=torch.float)
+            out['cond_target_size'] = torch.tensor([self.image_size, self.image_size], dtype=torch.float)
         out['image'] = torch.randn(3, self.image_size, self.image_size)
         out['captions'] = torch.randint(0, 128, self.caption_shape, dtype=torch.long)
         return out
