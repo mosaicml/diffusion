@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from transformers import AutoTokenizer
 
-from diffusion.datasets.laion.transforms import RandomCropSquareReturnTransform, LargestCenterSquareReturnTransform, RandomCropAspectRatioTransorm
+from diffusion.datasets.laion.transforms import LargestCenterSquare, RandomCropSquareReturnTransform, RandomCropAspectRatioTransorm
 from diffusion.models.models import SDXLTokenizer
 
 log = logging.getLogger(__name__)
@@ -132,7 +132,6 @@ class StreamingImageCaptionDataset(StreamingDataset):
             if torch.rand(1) < self.microcond_drop_prob:
                 out['cond_target_size'] = out['cond_target_size'] * 0
 
-
         # Caption
         if torch.rand(1) < self.caption_drop_prob:
             caption = ''
@@ -229,7 +228,7 @@ def build_streaming_image_caption_dataloader(
 
     # Set the crop to apply
     if crop_type == 'static':
-        crop = LargestCenterSquareReturnTransform(resize_size)
+        crop = LargestCenterSquare(resize_size)
     elif crop_type == 'random':
         crop = RandomCropSquareReturnTransform(resize_size)
     elif crop_type == 'aspect_ratio':
