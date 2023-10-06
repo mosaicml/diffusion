@@ -27,7 +27,7 @@ class SyntheticImageCaptionDataset(Dataset):
         self.caption_shape = (2, caption_length) if self.sdxl else (caption_length)
 
     def __len__(self):
-        return len(self.images)
+        return 100_000
 
     def __getitem__(self, idx):
         out = {}
