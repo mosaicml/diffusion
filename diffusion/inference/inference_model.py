@@ -114,7 +114,7 @@ class StableDiffusionXLInference():
     """Inference endpoint class for Stable Diffusion XL.
 
     Args:
-        model_name (str, optional): Name of the model to load. Default: 'stabilityai/stable-diffusion-xl-base-1.0'.
+        model_name (str): Name of the model to load. Default: 'stabilityai/stable-diffusion-xl-base-1.0'.
         unet_model_name (str): Name of the UNet model to load. Default: 'stabilityai/stable-diffusion-xl-base-1.0'.
         vae_model_name (str): Name of the VAE model to load. Defaults to
             'madebyollin/sdxl-vae-fp16-fix' as the official VAE checkpoint (from
