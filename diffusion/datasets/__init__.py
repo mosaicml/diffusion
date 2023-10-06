@@ -6,8 +6,16 @@
 from diffusion.datasets.coco import StreamingCOCOCaption, build_streaming_cocoval_dataloader
 from diffusion.datasets.image_caption import StreamingImageCaptionDataset, build_streaming_image_caption_dataloader
 from diffusion.datasets.laion import StreamingLAIONDataset, build_streaming_laion_dataloader
+from diffusion.datasets.synthetic_image_caption import (SyntheticImageCaptionDataset,
+                                                        build_synthetic_image_caption_dataloader)
 
 __all__ = [
-    'build_streaming_laion_dataloader', 'StreamingLAIONDataset', 'build_streaming_cocoval_dataloader',
-    'StreamingCOCOCaption', 'build_streaming_image_caption_dataloader', 'StreamingImageCaptionDataset'
+    'build_streaming_laion_dataloader',
+    'StreamingLAIONDataset',
+    'build_streaming_cocoval_dataloader',
+    'StreamingCOCOCaption',
+    'build_streaming_image_caption_dataloader',
+    'StreamingImageCaptionDataset',
+    'build_synthetic_image_caption_dataloader',
+    'SyntheticImageCaptionDataset',
 ]
