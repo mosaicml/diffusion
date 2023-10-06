@@ -235,8 +235,16 @@ def stable_diffusion_xl(
     text_encoder = SDXLTextEncoder(model_name, encode_latents_in_fp16)
 
     noise_scheduler = DDPMScheduler.from_pretrained(model_name, subfolder='scheduler')
-    inference_noise_scheduler = EulerDiscreteScheduler.from_pretrained(model_name, subfolder='scheduler')
-    inference_noise_scheduler.prediction_type = prediction_type
+    inference_noise_scheduler = EulerDiscreteScheduler(num_train_timesteps=1000,
+                                                       beta_start=0.00085,
+                                                       beta_end=0.012,
+                                                       beta_schedule='scaled_linear',
+                                                       trained_betas=None,
+                                                       prediction_type=prediction_type,
+                                                       interpolation_type='linear',
+                                                       use_karras_sigmas=False,
+                                                       timestep_spacing='leading',
+                                                       steps_offset=1)
 
     model = StableDiffusion(
         unet=unet,
