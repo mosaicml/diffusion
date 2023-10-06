@@ -98,19 +98,15 @@ class StreamingImageCaptionDataset(StreamingDataset):
             img = Image.open(BytesIO(sample[self.image_key]))
         if img.mode != 'RGB':
             img = img.convert('RGB')
-<<<<<<< HEAD
         orig_h, orig_w = img.size
 
         # Image transforms
-=======
->>>>>>> 9845c4e (Add aspect ratio cropping)
         if self.crop is not None:
             img, crop_top, crop_left = self.crop(img)
         else:
             crop_top, crop_left = 0, 0
         if self.transform is not None:
             img = self.transform(img)
-<<<<<<< HEAD
         out['image'] = img
 
         # SDXL microconditioning on image characteristics
@@ -137,8 +133,6 @@ class StreamingImageCaptionDataset(StreamingDataset):
                 out['cond_target_size'] = out['cond_target_size'] * 0
 
 
-=======
->>>>>>> 9845c4e (Add aspect ratio cropping)
         # Caption
         if torch.rand(1) < self.caption_drop_prob:
             caption = ''
