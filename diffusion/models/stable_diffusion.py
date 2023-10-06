@@ -169,6 +169,7 @@ class StableDiffusion(ComposerModel):
             latents, conditioning = batch[self.image_latents_key], batch[self.text_latents_key]
         else:
             inputs, conditioning = batch[self.image_key], batch[self.text_key]
+            print('Input shapes:', inputs.shape)
             if self.sdxl:
                 # If SDXL, separate the conditioning ([B, 2, 77]) from each tokenizer
                 conditioning, conditioning_2 = conditioning[:, 0, :], conditioning[:, 1, :]
