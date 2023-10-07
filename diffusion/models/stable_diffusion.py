@@ -152,8 +152,8 @@ class StableDiffusion(ComposerModel):
         self.text_encoder.requires_grad_(False)
         self.vae.requires_grad_(False)
         if self.encode_latents_in_fp16:
-            self.text_encoder.half()
-            self.vae.half()
+            self.text_encoder = self.text_encoder.half()
+            self.vae = self.vae.half()
         if fsdp:
             # only wrap models we are training
             self.text_encoder._fsdp_wrap = False
