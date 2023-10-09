@@ -197,9 +197,10 @@ class StableDiffusion(ComposerModel):
             latents *= self.latent_scale
 
         # Zero dropped captions if needed
-        conditioning *= batch['drop_caption_mask'].view(-1, 1, 1)
-        if pooled_conditioning is not None:
-            pooled_conditioning *= batch['drop_caption_mask'].view(-1, 1)
+        if 'drop_caption_mask' in batch.keys():
+            conditioning *= batch['drop_caption_mask'].view(-1, 1, 1)
+            if pooled_conditioning is not None:
+                pooled_conditioning *= batch['drop_caption_mask'].view(-1, 1)
 
         # Sample the diffusion timesteps
         timesteps = torch.randint(0, len(self.noise_scheduler), (latents.shape[0],), device=latents.device)
