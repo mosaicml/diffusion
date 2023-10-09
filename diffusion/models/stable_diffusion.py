@@ -196,6 +196,11 @@ class StableDiffusion(ComposerModel):
             # Magical scaling number (See https://github.com/huggingface/diffusers/issues/437#issuecomment-1241827515)
             latents *= self.latent_scale
 
+        # Zero dropped captions if needed
+        conditioning *= batch['drop_caption_mask'].view(-1, 1, 1)
+        if pooled_conditioning is not None:
+            pooled_conditioning *= batch['drop_caption_mask'].view(-1, 1)
+
         # Sample the diffusion timesteps
         timesteps = torch.randint(0, len(self.noise_scheduler), (latents.shape[0],), device=latents.device)
         # Add noise to the inputs (forward diffusion)
