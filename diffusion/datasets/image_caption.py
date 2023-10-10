@@ -167,7 +167,7 @@ def build_streaming_image_caption_dataloader(
     transform: Optional[List[Callable]] = None,
     image_key: str = 'image',
     caption_key: str = 'caption',
-    crop_type: Optional[str] = 'random',
+    crop_type: Optional[str] = 'square',
     streaming_kwargs: Optional[Dict] = None,
     dataloader_kwargs: Optional[Dict] = None,
 ):
@@ -187,15 +187,15 @@ def build_streaming_image_caption_dataloader(
         transform (Optional[Callable]): The transforms to apply to the image. Default: ``None``.
         image_key (str): Key associated with the image in the streaming dataset. Default: ``'image'``.
         caption_key (str): Key associated with the caption in the streaming dataset. Default: ``'caption'``.
-        rand_crop (bool): If True, randomly crop images. Otherwise, center crop. Default: ``False``.
+        crop_type (str, optional): Type of crop to perform, either ['square', 'random', 'aspect_ratio']. Default: ``'square'``.
         streaming_kwargs (dict, optional): Additional arguments to pass to the ``StreamingDataset``. Default: ``None``.
         dataloader_kwargs (dict, optional): Additional arguments to pass to the ``DataLoader``. Default: ``None``.
     """
     # Check crop type
     if crop_type is not None:
         crop_type = crop_type.lower()
-        if crop_type not in ['static', 'random', 'aspect_ratio']:
-            raise ValueError(f'Invalid crop_type: {crop_type}. Must be ["static", "random", "aspect_ratio", None]')
+        if crop_type not in ['square', 'random', 'aspect_ratio']:
+            raise ValueError(f'Invalid crop_type: {crop_type}. Must be ["square", "random", "aspect_ratio", None]')
 
     # Handle ``None`` kwargs
     if streaming_kwargs is None:
@@ -225,13 +225,13 @@ def build_streaming_image_caption_dataloader(
         log.info('Detected SDXL tokenizer, using SDXL crop transform and tokenizers.')
 
     # Set the crop to apply
-    if crop_type == 'static':
+    if crop_type == 'square':
         crop = LargestCenterSquare(resize_size)
     elif crop_type == 'random':
         crop = RandomCropSquare(resize_size)
     elif crop_type == 'aspect_ratio':
         crop = RandomCropAspectRatioTransorm()
-    elif crop_type is None:
+    else:
         crop = None
 
     if transform is None:
