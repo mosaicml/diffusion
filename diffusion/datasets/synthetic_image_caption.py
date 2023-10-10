@@ -17,7 +17,6 @@ class SyntheticImageCaptionDataset(Dataset):
         image_size (int): Size of the synthetic images. Default: ``512``.
         caption_length (int): Length of the synthetic captions. Default: ``77``.
         sdxl (bool): Whether or not to generate synthetic data for SDXL. Default: ``False``.
-
     """
 
     def __init__(self, image_size: int = 512, caption_length: int = 77, sdxl: bool = False):
