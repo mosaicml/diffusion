@@ -3,7 +3,7 @@
 
 """Autoencoder parts for training latent diffusion models."""
 
-from typing import Optional, Tuple
+from typing import Tuple
 
 import lpips
 import torch
@@ -11,188 +11,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from composer.models import ComposerModel
 from diffusers import AutoencoderKL
-from torch.autograd import Function
 from torchmetrics import MeanMetric, MeanSquaredError, Metric
 from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
-
-def zero_module(module: nn.Module) -> nn.Module:
-    """Zero out the parameters of a module and return it."""
-    for p in module.parameters():
-        nn.init.zeros_(p)
-    return module
-
-
-class ResNetBlock(nn.Module):
-    """Basic ResNet block.
-
-    Args:
-        input_channels (int): Number of input channels.
-        output_channels (int): Number of output channels.
-        use_conv_shortcut (bool): Whether to use a conv on the shortcut. Default: `False`.
-        dropout (float): Dropout probability. Defaults to 0.0.
-        zero_init_last (bool): Whether to initialize the last conv layer to zero. Default: `False`.
-    """
-
-    def __init__(
-        self,
-        input_channels: int,
-        output_channels: Optional[int] = None,
-        use_conv_shortcut: bool = False,
-        dropout_probability: float = 0.0,
-        zero_init_last: bool = False,
-    ):
-        super().__init__()
-        self.input_channels = input_channels
-        self.output_channels = output_channels if output_channels is not None else input_channels
-        self.use_conv_shortcut = use_conv_shortcut
-        self.dropout_probability = dropout_probability
-        self.zero_init_last = zero_init_last
-
-        self.norm1 = nn.GroupNorm(num_groups=32, num_channels=self.input_channels, eps=1e-6, affine=True)
-        self.conv1 = nn.Conv2d(self.input_channels, self.output_channels, kernel_size=3, stride=1, padding=1)
-        self.norm2 = nn.GroupNorm(num_groups=32, num_channels=self.output_channels, eps=1e-6, affine=True)
-        self.dropout = nn.Dropout2d(p=self.dropout_probability)
-        self.conv2 = nn.Conv2d(self.output_channels, self.output_channels, kernel_size=3, stride=1, padding=1)
-
-        # Optionally use a conv on the shortcut, but only if the input and output channels are different
-        if self.input_channels != self.output_channels:
-            if self.use_conv_shortcut:
-                self.conv_shortcut = nn.Conv2d(self.input_channels,
-                                               self.output_channels,
-                                               kernel_size=3,
-                                               stride=1,
-                                               padding=1)
-            else:
-                self.conv_shortcut = nn.Conv2d(self.input_channels,
-                                               self.output_channels,
-                                               kernel_size=1,
-                                               stride=1,
-                                               padding=0)
-            nn.init.kaiming_normal_(self.conv_shortcut.weight, nonlinearity='linear')
-        else:
-            self.conv_shortcut = nn.Identity()
-
-        # Init the final conv layer parameters to zero if desired. Otherwise, kaiming uniform
-        if self.zero_init_last:
-            self.conv2 = zero_module(self.conv2)
-        else:
-            nn.init.kaiming_normal_(self.conv2.weight, nonlinearity='linear')
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward through the residual block."""
-        shortcut = self.conv_shortcut(x)
-        h = self.norm1(x)
-        h = F.silu(h)
-        h = self.conv1(h)
-        h = self.norm2(h)
-        h = F.silu(h)
-        h = self.dropout(h)
-        h = self.conv2(h)
-        return h + shortcut
-
-
-class AttentionLayer(nn.Module):
-    """Basic single headed attention layer for use on tensors with HW dimensions.
-
-    Args:
-        input_channels (int): Number of input channels.
-        dropout (float): Dropout probability. Defaults to 0.0.
-    """
-
-    def __init__(self, input_channels: int, dropout_probability: float = 0.0):
-        super().__init__()
-        self.input_channels = input_channels
-        self.dropout_probability = dropout_probability
-        # Normalization layer. Here we're using groupnorm to be consistent with the original implementation.
-        self.norm = nn.GroupNorm(num_groups=32, num_channels=self.input_channels, eps=1e-6, affine=True)
-        # Conv layer to transform the input into q, k, and v
-        self.qkv_conv = nn.Conv2d(self.input_channels, 3 * self.input_channels, kernel_size=1, stride=1, padding=0)
-        # Init the qkv conv weights
-        nn.init.kaiming_normal_(self.qkv_conv.weight, nonlinearity='linear')
-        # Conv layer to project to the output.
-        self.proj_conv = nn.Conv2d(self.input_channels, self.input_channels, kernel_size=1, stride=1, padding=0)
-        nn.init.kaiming_normal_(self.proj_conv.weight, nonlinearity='linear')
-
-    def _reshape_for_attention(self, x: torch.Tensor) -> torch.Tensor:
-        """Reshape the input tensor for attention."""
-        # x is (B, C, H, W), need it to be (B, H*W, C) for attention
-        x = x.permute(0, 2, 3, 1).reshape(x.shape[0], -1, x.shape[1]).contiguous()
-        return x
-
-    def _reshape_from_attention(self, x: torch.Tensor, H: int, W: int) -> torch.Tensor:
-        """Reshape the input tensor from attention."""
-        # x is (B, H*W, C), need it to be (B, C, H, W) for conv
-        x = x.reshape(x.shape[0], H, W, -1).permute(0, 3, 1, 2).contiguous()
-        return x
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward through the attention layer."""
-        # Need to remember H, W to get back to it
-        H, W = x.shape[2:]
-        h = self.norm(x)
-        # Get q, k, and v
-        qkv = self.qkv_conv(h)
-        q, k, v = torch.split(qkv, self.input_channels, dim=1)
-        # Use torch's built in attention function
-        q, k, v = self._reshape_for_attention(q), self._reshape_for_attention(k), self._reshape_for_attention(v)
-        h = F.scaled_dot_product_attention(q, k, v, dropout_p=self.dropout_probability)
-        # Reshape back into an image style tensor
-        h = self._reshape_from_attention(h, H, W)
-        # Project to the output
-        h = self.proj_conv(h)
-        return h
-
-
-class Downsample(nn.Module):
-    """Downsampling layer that downsamples by a factor of 2.
-
-    Args:
-        input_channels (int): Number of input channels.
-        resample_with_conv (bool): Whether to use a conv for downsampling.
-    """
-
-    def __init__(self, input_channels: int, resample_with_conv: bool):
-        super().__init__()
-        self.input_channels = input_channels
-        self.resample_with_conv = resample_with_conv
-        if self.resample_with_conv:
-            self.conv = nn.Conv2d(self.input_channels, self.input_channels, kernel_size=3, stride=2, padding=0)
-            nn.init.kaiming_normal_(self.conv.weight, nonlinearity='linear')
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.resample_with_conv:
-            # Need to do asymmetric padding to ensure the correct pixels are used in the downsampling conv
-            # and ensure the correct output size is generated for even sizes.
-            x = F.pad(x, (0, 1, 0, 1), mode='constant', value=0)
-            x = self.conv(x)
-        else:
-            x = F.avg_pool2d(x, kernel_size=2, stride=2)
-        return x
-
-
-class Upsample(nn.Module):
-    """Upsampling layer that upsamples by a factor of 2.
-
-    Args:
-        input_channels (int): Number of input channels.
-        resample_with_conv (bool): Whether to use a conv for upsampling.
-    """
-
-    def __init__(self, input_channels: int, resample_with_conv: bool):
-        super().__init__()
-        self.input_channels = input_channels
-        self.resample_with_conv = resample_with_conv
-        if self.resample_with_conv:
-            self.conv = nn.Conv2d(self.input_channels, self.input_channels, kernel_size=3, stride=1, padding=1)
-            nn.init.kaiming_normal_(self.conv.weight, nonlinearity='linear')
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = F.interpolate(x, scale_factor=2, mode='nearest')
-        if self.resample_with_conv:
-            x = self.conv(x)
-        return x
+from diffusion.models.layers import AttentionLayer, Downsample, GradientScalingLayer, ResNetBlock, Upsample
 
 
 class Encoder(nn.Module):
@@ -534,35 +357,6 @@ class NlayerDiscriminator(nn.Module):
         return x
 
 
-class GradientReversalLayer(Function):
-    """Layer that reverses the direction of the gradient."""
-
-    @staticmethod
-    def forward(ctx, x):
-        return x
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        return (-grad_output)
-
-
-class GradientScalingLayer(nn.Module):
-    """Layer that scales the gradient."""
-
-    def __init__(self):
-        super().__init__()
-        self.scale = 1.0
-
-    def set_scale(self, scale: float):
-        self.scale = scale
-
-    def forward(self, x):
-        return x
-
-    def backward_hook(self, module, grad_input, grad_output):
-        return (self.scale * grad_input[0],)
-
-
 class AutoEncoderLoss(nn.Module):
     """Loss function for training an autoencoder. Includes LPIPs and a discriminator.
 
@@ -621,7 +415,6 @@ class AutoEncoderLoss(nn.Module):
         self.discriminator = NlayerDiscriminator(input_channels=self.output_channels,
                                                  num_filters=self.discriminator_num_filters,
                                                  num_layers=self.discriminator_num_layers)
-        self.reverse_gradients = GradientReversalLayer()
         self.scale_gradients = GradientScalingLayer()
         self.scale_gradients.register_full_backward_hook(self.scale_gradients.backward_hook)
 
@@ -641,8 +434,8 @@ class AutoEncoderLoss(nn.Module):
         disc_weight = nll_grads_norm / (disc_grads_norm + 1e-4)
         disc_weight = torch.clamp(disc_weight, 0.0, 1e4).detach()
         disc_weight *= self.discriminator_weight
-        # Set the discriminator weight
-        self.scale_gradients.set_scale(disc_weight.item())
+        # Set the discriminator weight. It should be negative to reverse gradients into the autoencoder.
+        self.scale_gradients.set_scale(-disc_weight.item())
         return disc_weight, nll_grads_norm, disc_grads_norm
 
     def forward(self, outputs: dict[str, torch.Tensor], batch: dict[str, torch.Tensor],
@@ -671,7 +464,7 @@ class AutoEncoderLoss(nn.Module):
 
         # Discriminator loss
         real = self.discriminator(batch[self.input_key])
-        fake = self.discriminator(self.reverse_gradients.apply(self.scale_gradients(outputs['x_recon'])))
+        fake = self.discriminator(self.scale_gradients(outputs['x_recon']))
         real_loss = F.binary_cross_entropy_with_logits(real, torch.ones_like(real))
         fake_loss = F.binary_cross_entropy_with_logits(fake, torch.zeros_like(fake))
         losses['disc_real_loss'] = real_loss
@@ -705,87 +498,16 @@ class ComposerAutoEncoder(ComposerModel):
     """Composer wrapper for the AutoEncoder.
 
     Args:
-        input_channels (int): Number of input channels. Default: `3`.
-        output_channels (int): Number of output channels. Default: `3`.
-        hidden_channels (int): Number of hidden channels. Default: `128`.
-        latent_channels (int): Number of latent channels. Default: `4`.
-        double_latent_channels (bool): Whether to double the latent channels. Default: `True`.
-        channel_multipliers (Tuple[int, ...]): Multipliers for the number of channels in each block. Default: `(1, 2, 4, 4)`.
-        num_residual_blocks (int): Number of residual blocks in each block. Default: `2`.
-        use_conv_shortcut (bool): Whether to use a conv for the shortcut. Default: `False`.
-        dropout (float): Dropout probability. Default: `0.0`.
-        resample_with_conv (bool): Whether to use a conv for down/up sampling. Default: `True`.
-        zero_init_last (bool): Whether to initialize the last conv layer to zero. Default: `False`.
+        model (AutoEncoder): AutoEncoder model to train.
+        autoencoder_loss (AutoEncoderLoss): Auto encoder loss module.
         input_key (str): Key for the input to the model. Default: `image`.
-        learn_log_var (bool): Whether to learn the output log variance. Default: `True`.
-        log_var_init (float): Initial value for the log variance. Default: `0.0`.
-        kl_divergence_weight (float): Weight for the KL divergence loss. Default: `1.0`.
-        lpips_weight (float): Weight for the LPIPs loss. Default: `0.25`.
-        discriminator_weight (float): Weight for the discriminator loss. Default: `0.5`.
-        discriminator_num_filters (int): Number of filters in the first layer of the discriminator. Default: `64`.
-        discriminator_num_layers (int): Number of layers in the discriminator. Default: `3`.
     """
 
-    def __init__(self,
-                 input_channels: int = 3,
-                 output_channels: int = 3,
-                 hidden_channels: int = 128,
-                 latent_channels: int = 4,
-                 double_latent_channels: bool = True,
-                 channel_multipliers: Tuple[int, ...] = (1, 2, 4, 4),
-                 num_residual_blocks: int = 2,
-                 use_conv_shortcut=False,
-                 dropout_probability: float = 0.0,
-                 resample_with_conv: bool = True,
-                 zero_init_last: bool = False,
-                 input_key: str = 'image',
-                 learn_log_var: bool = True,
-                 log_var_init: float = 0.0,
-                 kl_divergence_weight: float = 1.0,
-                 lpips_weight: float = 0.25,
-                 discriminator_weight: float = 0.5,
-                 discriminator_num_filters: int = 64,
-                 discriminator_num_layers: int = 3):
+    def __init__(self, model: AutoEncoder, autoencoder_loss: AutoEncoderLoss, input_key: str = 'image'):
         super().__init__()
-        self.input_channels = input_channels
-        self.output_channels = output_channels
-        self.hidden_channels = hidden_channels
-        self.latent_channels = latent_channels
-        self.double_latent_channels = double_latent_channels
-        self.channel_multipliers = channel_multipliers
-        self.num_residual_blocks = num_residual_blocks
-        self.use_conv_shortcut = use_conv_shortcut
-        self.dropout_probability = dropout_probability
-        self.resample_with_conv = resample_with_conv
-        self.zero_init_last = zero_init_last
+        self.model = model
+        self.autoencoder_loss = autoencoder_loss
         self.input_key = input_key
-
-        self.model = AutoEncoder(input_channels=self.input_channels,
-                                 output_channels=self.output_channels,
-                                 hidden_channels=self.hidden_channels,
-                                 latent_channels=self.latent_channels,
-                                 double_latent_channels=self.double_latent_channels,
-                                 channel_multipliers=self.channel_multipliers,
-                                 num_residual_blocks=self.num_residual_blocks,
-                                 use_conv_shortcut=self.use_conv_shortcut,
-                                 dropout_probability=self.dropout_probability,
-                                 resample_with_conv=self.resample_with_conv,
-                                 zero_init_last=self.zero_init_last)
-
-        self.learn_log_var = learn_log_var
-        self.log_var_init = log_var_init
-        self.kl_divergence_weight = kl_divergence_weight
-        self.lpips_weight = lpips_weight
-
-        self.autoencoder_loss = AutoEncoderLoss(input_key=self.input_key,
-                                                output_channels=self.output_channels,
-                                                learn_log_var=self.learn_log_var,
-                                                log_var_init=self.log_var_init,
-                                                kl_divergence_weight=self.kl_divergence_weight,
-                                                lpips_weight=self.lpips_weight,
-                                                discriminator_weight=discriminator_weight,
-                                                discriminator_num_filters=discriminator_num_filters,
-                                                discriminator_num_layers=discriminator_num_layers)
 
         # Set up train metrics
         train_metrics = [MeanSquaredError()]
@@ -852,7 +574,7 @@ class ComposerDiffusersAutoEncoder(ComposerModel):
 
     Args:
         model (diffusers.AutoencoderKL): Diffusers autoencoder to train.
-        loss_fn (AutoEncoderLoss): Auto encoder loss module.
+        autoencoder_loss (AutoEncoderLoss): Auto encoder loss module.
         input_key (str): Key for the input to the model. Default: `image`.
     """
 

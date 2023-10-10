@@ -14,8 +14,8 @@ from torchmetrics.image.fid import FrechetInceptionDistance
 from torchmetrics.multimodal.clip_score import CLIPScore
 from transformers import CLIPTextModel, CLIPTextModelWithProjection, CLIPTokenizer, PretrainedConfig
 
+from diffusion.models.autoencoder import AutoEncoder, AutoEncoderLoss, ComposerAutoEncoder, ComposerDiffusersAutoEncoder
 from diffusion.models.layers import ClippedAttnProcessor2_0, ClippedXFormersAttnProcessor, zero_module
-from diffusion.models.autoencoder import AutoEncoderLoss, ComposerAutoEncoder, ComposerDiffusersAutoEncoder
 from diffusion.models.pixel_diffusion import PixelDiffusion
 from diffusion.models.stable_diffusion import StableDiffusion
 from diffusion.schedulers.schedulers import ContinuousTimeScheduler
@@ -322,26 +322,34 @@ def build_autoencoder(input_channels: int = 3,
         discriminator_num_filters (int): Number of filters in the discriminator. Default: `64`.
         discriminator_num_layers (int): Number of layers in the discriminator. Default: `3`.
     """
-    model = ComposerAutoEncoder(input_channels=input_channels,
-                                output_channels=output_channels,
-                                hidden_channels=hidden_channels,
-                                latent_channels=latent_channels,
-                                double_latent_channels=double_latent_channels,
-                                channel_multipliers=channel_multipliers,
-                                num_residual_blocks=num_residual_blocks,
-                                use_conv_shortcut=use_conv_shortcut,
-                                dropout_probability=dropout_probability,
-                                resample_with_conv=resample_with_conv,
-                                zero_init_last=zero_init_last,
-                                input_key=input_key,
-                                learn_log_var=learn_log_var,
-                                log_var_init=log_var_init,
-                                kl_divergence_weight=kl_divergence_weight,
-                                lpips_weight=lpips_weight,
-                                discriminator_weight=discriminator_weight,
-                                discriminator_num_filters=discriminator_num_filters,
-                                discriminator_num_layers=discriminator_num_layers)
-    return model
+    # Build the autoencoder
+    autoencoder = AutoEncoder(
+        input_channels=input_channels,
+        output_channels=output_channels,
+        hidden_channels=hidden_channels,
+        latent_channels=latent_channels,
+        double_latent_channels=double_latent_channels,
+        channel_multipliers=channel_multipliers,
+        num_residual_blocks=num_residual_blocks,
+        use_conv_shortcut=use_conv_shortcut,
+        dropout_probability=dropout_probability,
+        resample_with_conv=resample_with_conv,
+        zero_init_last=zero_init_last,
+    )
+
+    # Configure the loss function
+    autoencoder_loss = AutoEncoderLoss(input_key=input_key,
+                                       output_channels=output_channels,
+                                       learn_log_var=learn_log_var,
+                                       log_var_init=log_var_init,
+                                       kl_divergence_weight=kl_divergence_weight,
+                                       lpips_weight=lpips_weight,
+                                       discriminator_weight=discriminator_weight,
+                                       discriminator_num_filters=discriminator_num_filters,
+                                       discriminator_num_layers=discriminator_num_layers)
+
+    composer_model = ComposerAutoEncoder(model=autoencoder, autoencoder_loss=autoencoder_loss, input_key=input_key)
+    return composer_model
 
 
 def build_diffusers_autoencoder(model_name: str = 'stabilityai/stable-diffusion-2-base',
