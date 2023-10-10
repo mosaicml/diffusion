@@ -19,28 +19,16 @@ class LargestCenterSquare:
     def __call__(self, img):
         # First, resize the image such that the smallest side is self.size while preserving aspect ratio.
         img = transforms.functional.resize(img, self.size, antialias=True)
+
         # Then take a center crop to a square.
-        img = self.center_crop(img)
-        return img
+        w, h = img.size
+        c_top = (h - self.size) // 2
+        c_left = (w - self.size) // 2
+        img = crop(img, c_top, c_left, self.size, self.size)
+        return img, c_top, c_left
 
 
 class RandomCropSquare:
-    """Randomly crop square of a PIL image."""
-
-    def __init__(self, size):
-        self.size = size
-        self.random_crop = RandomCrop(size)
-
-    def __call__(self, img):
-        # First, resize the image such that the smallest side is self.size while preserving aspect ratio.
-        img = transforms.functional.resize(img, self.size, antialias=True)
-        # Then take a center crop to a square & return crop params.
-        c_top, c_left, h, w = self.random_crop.get_params(img, (self.size, self.size))
-        img = crop(img, c_top, c_left, h, w)
-        return img
-
-
-class RandomCropSquareReturnTransform:
     """Randomly crop square of a PIL image and return the crop parameters."""
 
     def __init__(self, size):
@@ -86,6 +74,6 @@ class RandomCropAspectRatioTransorm:
         img = transforms.functional.resize(img, resize_size, antialias=True)
 
         # Crop based on aspect ratio
-        top, left, height, width = transforms.RandomCrop.get_params(img, output_size=(target_height, target_width))
-        img = crop(img, top, left, height, width)
-        return img, top, left
+        c_top, c_left, height, width = transforms.RandomCrop.get_params(img, output_size=(target_height, target_width))
+        img = crop(img, c_top, c_left, height, width)
+        return img, c_top, c_left
