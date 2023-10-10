@@ -10,7 +10,6 @@ from itertools import chain
 from typing import Any, Dict, List, Optional, Union
 
 import hydra
-import torch.nn as nn
 from composer import Algorithm, Callback, ComposerModel, DataSpec, Evaluator, Trainer
 from composer.algorithms.low_precision_groupnorm import apply_low_precision_groupnorm
 from composer.algorithms.low_precision_layernorm import apply_low_precision_layernorm
@@ -20,11 +19,13 @@ from composer.utils import dist, reproducibility
 from omegaconf import DictConfig, OmegaConf
 from torch.optim import Optimizer
 
+from diffusion.models.autoencoder import ComposerAutoEncoder, ComposerDiffusersAutoEncoder
+
 
 def make_autoencoder_optimizer(config: DictConfig, model: ComposerModel) -> Optimizer:
     """Configures the optimizer for use with an autoencoder + discriminator loss."""
     print('Configuring opimizer for autoencoder+discriminator')
-    assert isinstance(model.autoencoder_loss, nn.Module)
+    assert isinstance(model, ComposerAutoEncoder) or isinstance(model, ComposerDiffusersAutoEncoder)
 
     # Configure optimizer settings for the autoencoder
     if hasattr(config, 'autoencoder_optimizer'):
@@ -32,15 +33,12 @@ def make_autoencoder_optimizer(config: DictConfig, model: ComposerModel) -> Opti
     else:
         autoencoder_param_dict = {k: v for k, v in config.optimizer.items()}
 
-    assert hasattr(model, 'model') and isinstance(model.model, nn.Module)
     if model.autoencoder_loss.learn_log_var:
         autoencoder_param_dict['params'] = chain(model.model.parameters(), [model.autoencoder_loss.log_var])
     else:
         autoencoder_param_dict['params'] = model.model.parameters()
 
     # Configure optimizer settings for the discriminator
-    assert hasattr(model.autoencoder_loss, 'discriminator')
-    assert isinstance(model.autoencoder_loss.discriminator, nn.Module)
     if hasattr(config, 'discriminator_optimizer'):
         discriminator_param_dict = {k: v for k, v in config.discriminator_optimizer.items()}
     else:

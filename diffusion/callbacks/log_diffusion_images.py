@@ -116,6 +116,12 @@ class LogAutoencoderImages(Callback):
         self.log_latents = log_latents
         self.use_table = use_table
 
+    def _scale_latents(self, latents: torch.Tensor) -> torch.Tensor:
+        """Scale latents to be between 0 and 1 for visualization."""
+        latents = latents - latents.min()
+        latents = latents / latents.max()
+        return latents
+
     def eval_batch_end(self, state: State, logger: Logger):
         # Only log once per eval epoch
         if state.eval_timestamp.get(TimeUnit.BATCH).value == 1:
@@ -137,7 +143,7 @@ class LogAutoencoderImages(Callback):
                 recon_img = (recon[i] / 2 + 0.5).clamp(0, 1)
                 logged_images = [image, recon_img]
                 if self.log_latents:
-                    logged_images += [latents[i][j] for j in range(latents.shape[1])]
+                    logged_images += [self._scale_latents(latents[i][j]) for j in range(latents.shape[1])]
                 logger.log_images(images=logged_images,
                                   name=f'Image (input, reconstruction, latents) {i}',
                                   step=state.timestamp.batch.value,
