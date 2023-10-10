@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from transformers import AutoTokenizer
 
-from diffusion.datasets.laion.transforms import LargestCenterSquare, RandomCropSquare, RandomCropAspectRatioTransorm
+from diffusion.datasets.laion.transforms import LargestCenterSquare, RandomCropAspectRatioTransorm, RandomCropSquare
 from diffusion.models.models import SDXLTokenizer
 
 log = logging.getLogger(__name__)
@@ -86,8 +86,6 @@ class StreamingImageCaptionDataset(StreamingDataset):
         else:
             self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, subfolder='tokenizer')
 
-
-
     def __getitem__(self, index):
         sample = super().__getitem__(index)
         out = {}
@@ -118,7 +116,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
                 img_h, img_w = img.size
             else:
                 raise ValueError('Image after transformations must either be a PIL Image or Torch Tensor')
-            
+
             out['cond_crops_coords_top_left'] = torch.tensor([crop_top, crop_left])
             out['cond_original_size'] = torch.tensor([orig_w, orig_h])
             out['cond_target_size'] = torch.tensor([img_w, img_h])
@@ -237,10 +235,7 @@ def build_streaming_image_caption_dataloader(
         crop = None
 
     if transform is None:
-        transform = [
-            transforms.ToTensor(),
-            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-        ]
+        transform = [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
     transform = transforms.Compose(transform)
     assert isinstance(transform, Callable)
 
