@@ -3,7 +3,7 @@
 
 """Scheduler algorithm for a discriminator."""
 import torch.nn as nn
-from composer.core import Algorithm, Event, State, TimeUnit
+from composer.core import Algorithm, Event, State, Time, TimeUnit
 from composer.loggers import Logger
 
 __all__ = ['DiscriminatorSchedule']
@@ -16,11 +16,15 @@ class DiscriminatorSchedule(Algorithm):
         start_iteration (int): The iteration to start training the discriminator. Default: `0`.
     """
 
-    def __init__(self, start_iteration: int = 0) -> None:
-        self.start_iteration = start_iteration
+    def __init__(self, start_iteration: str = '0ba') -> None:
+        self.start_iteration = Time.from_timestring(start_iteration)
         self.lr = 0.0
         self.weight_decay = 0.0
         self.discriminator_weight = 0.0
+
+        # Verify the start iteration is in units of batches
+        if self.start_iteration.unit != TimeUnit.BATCH:
+            raise ValueError('start_iteration must be in units of batches')
 
     def match(self, event: Event, state: State) -> bool:
         return event in [Event.INIT, Event.BATCH_START, Event.AFTER_LOSS]
@@ -44,13 +48,7 @@ class DiscriminatorSchedule(Algorithm):
 
         # Ensure the discriminator is training/not training when appropriate
         elif event == Event.BATCH_START:
-            if state.timestamp.get(TimeUnit.BATCH).value == self.start_iteration - 1:
-                # Turn on the discriminator just before it should start, but kill the gradients for the autoencoder.
-                # This mimics a separate optimizer for the discriminator for the first iteration
-                state.optimizers[0].param_groups[1]['lr'] = self.lr
-                state.optimizers[0].param_groups[1]['weight_decay'] = self.weight_decay
-                autoencoder_loss.set_discriminator_weight(0.0)
-            elif state.timestamp.get(TimeUnit.BATCH).value >= self.start_iteration:
+            if state.timestamp.get(TimeUnit.BATCH).value >= self.start_iteration.value:
                 # Turn on the discriminator completely.
                 state.optimizers[0].param_groups[1]['lr'] = self.lr
                 state.optimizers[0].param_groups[1]['weight_decay'] = self.weight_decay
