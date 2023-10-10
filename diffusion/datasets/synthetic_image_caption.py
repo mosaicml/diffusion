@@ -53,7 +53,7 @@ def build_synthetic_image_caption_dataloader(
         batch_size (int): Batch size for the dataloader.
         image_size (int): Size of the synthetic images. Default: ``512``.
         caption_length (int): Length of the synthetic captions. Default: ``77``.
-        num_samples (int): Number of samples in the synthetic dataset. Default: ``100_000``.
+        sdxl (bool): Whether or not to generate synthetic data for SDXL. Default: ``False``.
         dataloader_kwargs (optional, dict): Additional arguments to pass to the dataloader. Default ``None``.
     """
     if dataloader_kwargs is None:
