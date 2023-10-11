@@ -6,8 +6,8 @@ import torch
 from diffusers import AutoencoderKL
 from transformers import PretrainedConfig
 
-from diffusion.models.autoencoder import (AttentionLayer, AutoEncoder, Decoder, Downsample, Encoder,
-                                          NlayerDiscriminator, ResNetBlock, Upsample)
+from diffusion.models.autoencoder import AutoEncoder, Decoder, Encoder, NlayerDiscriminator
+from diffusion.models.layers import AttentionLayer, Downsample, ResNetBlock, Upsample
 
 
 @pytest.mark.parametrize('input_channels', [32])

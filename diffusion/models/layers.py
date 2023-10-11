@@ -253,6 +253,9 @@ class ResNetBlock(nn.Module):
 
         self.norm1 = nn.GroupNorm(num_groups=32, num_channels=self.input_channels, eps=1e-6, affine=True)
         self.conv1 = nn.Conv2d(self.input_channels, self.output_channels, kernel_size=3, stride=1, padding=1)
+        nn.init.kaiming_normal_(self.conv1.weight, nonlinearity='linear')
+        # Output layer is immediately after a silu. Need to account for that in init.
+        self.conv1.weight.data *= 1.6761
         self.norm2 = nn.GroupNorm(num_groups=32, num_channels=self.output_channels, eps=1e-6, affine=True)
         self.dropout = nn.Dropout2d(p=self.dropout_probability)
         self.conv2 = nn.Conv2d(self.output_channels, self.output_channels, kernel_size=3, stride=1, padding=1)
@@ -277,13 +280,17 @@ class ResNetBlock(nn.Module):
 
         # Init the final conv layer parameters to zero if desired. Otherwise, kaiming uniform
         if self.zero_init_last:
+            self.residual_scale = 1.0
             self.conv2 = zero_module(self.conv2)
         else:
+            self.residual_scale = 0.70711
             nn.init.kaiming_normal_(self.conv2.weight, nonlinearity='linear')
+            # Output layer is immediately after a silu. Need to account for that in init.
+            self.conv2.weight.data *= 1.6761 * self.residual_scale
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward through the residual block."""
-        shortcut = self.conv_shortcut(x)
+        shortcut = self.residual_scale * self.conv_shortcut(x)
         h = self.norm1(x)
         h = F.silu(h)
         h = self.conv1(h)

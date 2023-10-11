@@ -3,7 +3,7 @@
 
 """Autoencoder parts for training latent diffusion models."""
 
-from typing import Tuple
+from typing import Dict, Tuple
 
 import lpips
 import torch
@@ -105,6 +105,8 @@ class Encoder(nn.Module):
         output_channels = 2 * self.latent_channels if self.double_latent_channels else self.latent_channels
         self.conv_out = nn.Conv2d(block_output_channels, output_channels, kernel_size=3, stride=1, padding=1)
         nn.init.kaiming_normal_(self.conv_out.weight, nonlinearity='linear')
+        # Output layer is immediately after a silu. Need to account for that in init.
+        self.conv_out.weight.data *= 1.6761
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward through the encoder."""
@@ -197,6 +199,9 @@ class Decoder(nn.Module):
         self.norm_out = nn.GroupNorm(num_groups=32, num_channels=block_channels, eps=1e-6, affine=True)
         self.conv_out = nn.Conv2d(block_channels, self.output_channels, kernel_size=3, stride=1, padding=1)
         nn.init.kaiming_normal_(self.conv_out.weight, nonlinearity='linear')
+        # Output layer is immediately after a silu. Need to account for that in init.
+        # Also want the output variance to mimic images with pixel values uniformly distributed in [-1, 1].
+        # These two effects essentially cancel out.
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward through the decoder."""
@@ -265,6 +270,13 @@ class AutoEncoder(nn.Module):
         channels = 2 * self.latent_channels if self.double_latent_channels else self.latent_channels
         self.quant_conv = nn.Conv2d(channels, channels, kernel_size=1, stride=1, padding=0)
         nn.init.kaiming_normal_(self.quant_conv.weight, nonlinearity='linear')
+        # KL divergence is minimized when mean is 0.0 and log variance is 0.0
+        # However, this corresponds to no information in the latent space.
+        # So, init these such that latents are mean 0 and variance 1, with a rough snr of 1
+        self.quant_conv.weight.data[:channels // 2] *= 0.707
+        self.quant_conv.weight.data[channels // 2:] *= 0.707
+        if self.quant_conv.bias is not None:
+            self.quant_conv.bias.data[channels // 2:].fill_(-0.9431)
 
         self.decoder = Decoder(latent_channels=self.latent_channels,
                                output_channels=self.output_channels,
@@ -283,7 +295,7 @@ class AutoEncoder(nn.Module):
         """Get the weight of the last layer of the decoder."""
         return self.decoder.conv_out.weight
 
-    def encode(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
+    def encode(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
         """Encode an input tensor into a latent tensor."""
         h = self.encoder(x)
         moments = self.quant_conv(h)
@@ -291,13 +303,13 @@ class AutoEncoder(nn.Module):
         mean, log_var = moments[:, :self.latent_channels], moments[:, self.latent_channels:]
         return {'mean': mean, 'log_var': log_var}
 
-    def decode(self, z: torch.Tensor) -> dict[str, torch.Tensor]:
+    def decode(self, z: torch.Tensor) -> Dict[str, torch.Tensor]:
         """Decode a latent tensor into an output tensor."""
         z = self.post_quant_conv(z)
         x_recon = self.decoder(z)
         return {'x_recon': x_recon}
 
-    def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
         """Forward through the autoencoder."""
         encoded = self.encode(x)
         mean, log_var = encoded['mean'], encoded['log_var']
@@ -316,16 +328,18 @@ class NlayerDiscriminator(nn.Module):
         input_channels (int): Number of input channels. Default: `3`.
         num_filters (int): Number of filters in the first layer. Default: `64`.
         num_layers (int): Number of layers in the discriminator. Default: `3`.
+        padding (int): How much padding to use in the conv layers. Default: `0`.
     """
 
-    def __init__(self, input_channels: int = 3, num_filters: int = 64, num_layers: int = 3):
+    def __init__(self, input_channels: int = 3, num_filters: int = 64, num_layers: int = 3, padding: int = 0):
         super().__init__()
         self.input_channels = input_channels
         self.num_filters = num_filters
         self.num_layers = num_layers
+        self.padding = padding
 
         self.blocks = nn.ModuleList()
-        input_conv = nn.Conv2d(self.input_channels, self.num_filters, kernel_size=4, stride=2, padding=1)
+        input_conv = nn.Conv2d(self.input_channels, self.num_filters, kernel_size=4, stride=2, padding=self.padding)
         nn.init.kaiming_normal_(input_conv.weight, nonlinearity='linear')
         self.blocks.append(input_conv)
 
@@ -333,21 +347,24 @@ class NlayerDiscriminator(nn.Module):
         for n in range(1, self.num_layers):
             in_filters = self.num_filters * 2**(n - 1)
             out_filters = self.num_filters * min(2**n, 8)
-            conv = nn.Conv2d(in_filters, out_filters, kernel_size=4, stride=2, padding=1, bias=False)
-            nn.init.kaiming_normal_(conv.weight, nonlinearity='leaky_relu', a=0.2)
+            conv = nn.Conv2d(in_filters, out_filters, kernel_size=4, stride=2, padding=self.padding, bias=False)
+            # Init these as if a linear layer follows them because batchnorm happens before leaky relu.
+            nn.init.kaiming_normal_(conv.weight, nonlinearity='linear')
             norm = nn.BatchNorm2d(out_filters)
             nonlinearity = nn.LeakyReLU(0.2, True)
             self.blocks.extend([conv, norm, nonlinearity])
         # Make the output layers
         final_out_filters = self.num_filters * min(2**self.num_layers, 8)
-        conv = nn.Conv2d(out_filters, final_out_filters, kernel_size=4, stride=1, padding=1, bias=False)
-        nn.init.kaiming_normal_(conv.weight, nonlinearity='leaky_relu', a=0.2)
+        conv = nn.Conv2d(out_filters, final_out_filters, kernel_size=4, stride=1, padding=self.padding, bias=False)
+        nn.init.kaiming_normal_(conv.weight, nonlinearity='linear')
         norm = nn.BatchNorm2d(final_out_filters)
         nonlinearity = nn.LeakyReLU(0.2, True)
         self.blocks.extend([conv, norm, nonlinearity])
         # Output layer
-        output_conv = nn.Conv2d(final_out_filters, 1, kernel_size=4, stride=1, padding=1, bias=False)
+        output_conv = nn.Conv2d(final_out_filters, 1, kernel_size=4, stride=1, padding=self.padding, bias=False)
         nn.init.kaiming_normal_(output_conv.weight, nonlinearity='linear')
+        # Should init output layer such that outputs are generally within the linear region of a sigmoid.
+        output_conv.weight.data *= 0.1
         self.blocks.append(output_conv)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -438,8 +455,8 @@ class AutoEncoderLoss(nn.Module):
         self.scale_gradients.set_scale(-disc_weight.item())
         return disc_weight, nll_grads_norm, disc_grads_norm
 
-    def forward(self, outputs: dict[str, torch.Tensor], batch: dict[str, torch.Tensor],
-                last_layer: torch.Tensor) -> dict[str, torch.Tensor]:
+    def forward(self, outputs: Dict[str, torch.Tensor], batch: Dict[str, torch.Tensor],
+                last_layer: torch.Tensor) -> Dict[str, torch.Tensor]:
         losses = {}
         # Basic L1 reconstruction loss
         ae_loss = F.l1_loss(outputs['x_recon'], batch[self.input_key], reduction='none')
