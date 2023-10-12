@@ -211,7 +211,7 @@ def build_streaming_image_caption_dataloader(
         sdxl = False
 
     # Setup the transforms to apply
-    crop_transform = LargestCenterSquare(resize_size) if rand_crop else RandomCropSquare(resize_size)
+    crop_transform = RandomCropSquare(resize_size) if rand_crop else LargestCenterSquare(resize_size)
     if transform is None:
         if sdxl:
             # Crop will return parameters so do separately
