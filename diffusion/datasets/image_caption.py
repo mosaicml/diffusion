@@ -42,6 +42,8 @@ class StreamingImageCaptionDataset(StreamingDataset):
         image_key (str): Key associated with the image in the streaming dataset. Default: ``'image'``.
         caption_key (str): Key associated with the caption in the streaming dataset. Default: ``'caption'``.
         sdxl (bool): Whether or not we're training SDXL. Default: `False`.
+        zero_dropped_captions (bool): If True, zero out text embeddings for dropped captions. Default: ``False``.
+
         **streaming_kwargs: Additional arguments to pass in the construction of the StreamingDataloader
     """
 
@@ -59,6 +61,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
         image_key: str = 'image',
         caption_key: str = 'caption',
         sdxl: bool = False,
+        zero_dropped_captions: bool = False,
         **streaming_kwargs,
     ) -> None:
 
@@ -80,6 +83,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
         self.caption_selection = caption_selection
         self.image_key = image_key
         self.caption_key = caption_key
+        self.zero_dropped_captions = zero_dropped_captions
 
         if self.sdxl:
             self.tokenizer = SDXLTokenizer(tokenizer_name_or_path)
@@ -133,12 +137,17 @@ class StreamingImageCaptionDataset(StreamingDataset):
         # Caption
         if torch.rand(1) < self.caption_drop_prob:
             caption = ''
+            if self.zero_dropped_captions:
+                out['drop_caption_mask'] = 0.0
+            else:
+                out['drop_caption_mask'] = 1.0
         else:
             caption = sample[self.caption_key]
             if isinstance(caption, List) and self.caption_selection == 'first':
                 caption = caption[0]
             if isinstance(caption, List) and self.caption_selection == 'random':
                 caption = random.sample(caption, k=1)[0]
+            out['drop_caption_mask'] = 1.0
 
         max_length = None if self.sdxl else self.tokenizer.model_max_length  # type: ignore
         tokenized_caption = self.tokenizer(caption,
@@ -168,6 +177,7 @@ def build_streaming_image_caption_dataloader(
     image_key: str = 'image',
     caption_key: str = 'caption',
     crop_type: Optional[str] = 'square',
+    zero_dropped_captions: bool = True,
     streaming_kwargs: Optional[Dict] = None,
     dataloader_kwargs: Optional[Dict] = None,
 ):
@@ -188,6 +198,7 @@ def build_streaming_image_caption_dataloader(
         image_key (str): Key associated with the image in the streaming dataset. Default: ``'image'``.
         caption_key (str): Key associated with the caption in the streaming dataset. Default: ``'caption'``.
         crop_type (str, optional): Type of crop to perform, either ['square', 'random', 'aspect_ratio']. Default: ``'square'``.
+        zero_dropped_captions (bool): If True, zero out text embeddings for dropped captions. Default: ``True``.
         streaming_kwargs (dict, optional): Additional arguments to pass to the ``StreamingDataset``. Default: ``None``.
         dataloader_kwargs (dict, optional): Additional arguments to pass to the ``DataLoader``. Default: ``None``.
     """
@@ -251,6 +262,7 @@ def build_streaming_image_caption_dataloader(
         caption_key=caption_key,
         batch_size=batch_size,
         sdxl=sdxl,
+        zero_dropped_captions=zero_dropped_captions,
         **streaming_kwargs,
     )
 
