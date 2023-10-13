@@ -84,6 +84,7 @@ class CleanFIDEvaluator:
         self.num_samples = num_samples if num_samples is not None else float('inf')
         self.precision = precision
         self.prompts = prompts if prompts is not None else ['A shiba inu wearing a blue sweater']
+        self.sdxl = model.sdxl
 
         # Init loggers
         if self.loggers and dist.get_local_rank() == 0:
@@ -95,6 +96,7 @@ class CleanFIDEvaluator:
         Trainer(model=self.model,
                 load_path=self.load_path,
                 load_weights_only=True,
+                load_strict_model_weights=False, # need this otherwise text encoder weights throw err
                 eval_dataloader=self.eval_dataloader,
                 seed=self.seed)
 
@@ -134,6 +136,13 @@ class CleanFIDEvaluator:
 
             real_images = batch[self.image_key]
             captions = batch[self.caption_key]
+            if self.sdxl:
+                crop_params = batch['cond_crops_coords_top_left']
+                input_size_params = batch['cond_original_size']
+            else:
+                crop_params = None
+                input_size_params = None
+
             # Ensure a new seed for each batch, as randomness in model.generate is fixed.
             seed = starting_seed + batch_id
             # Generate images from the captions
@@ -143,9 +152,15 @@ class CleanFIDEvaluator:
                                                        width=self.size,
                                                        guidance_scale=guidance_scale,
                                                        seed=seed,
+                                                       crop_params=crop_params,
+                                                       input_size_params=input_size_params,
                                                        progress_bar=False)  # type: ignore
             # Get the prompts from the tokens
-            text_captions = self.tokenizer.batch_decode(captions, skip_special_tokens=True)
+            if self.sdxl:
+                # Decode with first tokenizer
+                text_captions = self.tokenizer.tokenizer.batch_decode(captions[:,0,:], skip_special_tokens=True)
+            else:
+                text_captions = self.tokenizer.batch_decode(captions, skip_special_tokens=True)
             self.clip_metric.update((generated_images * 255).to(torch.uint8), text_captions)
             # Save the real images
             # Verify that the real images are in the proper range
