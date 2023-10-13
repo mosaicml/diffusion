@@ -43,7 +43,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
         image_key (str): Key associated with the image in the streaming dataset. Default: ``'image'``.
         caption_key (str): Key associated with the caption in the streaming dataset. Default: ``'caption'``.
         sdxl (bool): Whether or not we're training SDXL. Default: `False`.
-        zero_dropped_captions (bool): If True, zero out text embeddings for dropped captions. Default: ``True``.
+        zero_dropped_captions (bool): If True, zero out text embeddings for dropped captions. Default: ``False``.
 
         **streaming_kwargs: Additional arguments to pass in the construction of the StreamingDataloader
     """
@@ -62,7 +62,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
         image_key: str = 'image',
         caption_key: str = 'caption',
         sdxl: bool = False,
-        zero_dropped_captions: bool = True,
+        zero_dropped_captions: bool = False,
         **streaming_kwargs,
     ) -> None:
 
