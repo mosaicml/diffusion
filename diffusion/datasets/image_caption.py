@@ -12,7 +12,12 @@ import torch
 from PIL import Image
 from streaming import Stream, StreamingDataset
 from torch.utils.data import DataLoader
-from torchvision import transforms
+
+try:
+    from torchvision.transforms.v2 import transforms
+except ImportError:
+    from torchvision import transforms
+
 from transformers import AutoTokenizer
 
 from diffusion.datasets.laion.transforms import LargestCenterSquare, RandomCropSquare, RandomCropSquareReturnTransform

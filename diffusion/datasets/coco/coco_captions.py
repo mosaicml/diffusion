@@ -8,10 +8,14 @@ from typing import Optional
 
 from streaming.base import StreamingDataset
 from torch.utils.data import DataLoader
-from torchvision import transforms
 from transformers import CLIPTokenizer
 
 from diffusion.datasets.laion.transforms import LargestCenterSquare
+
+try:
+    from torchvision.transforms.v2 import transforms
+except ImportError:
+    from torchvision import transforms
 
 
 class StreamingCOCOCaption(StreamingDataset):

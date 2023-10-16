@@ -3,9 +3,13 @@
 
 """Transforms for the training and eval dataset."""
 
-import torchvision.transforms as transforms
-from torchvision.transforms import RandomCrop
-from torchvision.transforms.functional import crop
+try:
+    import torchvision.transforms.v2 as transforms
+except ImportError:
+    import torchvision.transforms as transforms
+
+RandomCrop = transforms.RandomCrop
+crop = transforms.functional
 
 
 class LargestCenterSquare:

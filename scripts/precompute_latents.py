@@ -16,11 +16,15 @@ from diffusers import AutoencoderKL
 from PIL import Image
 from streaming import MDSWriter, Stream, StreamingDataset
 from torch.utils.data import DataLoader
-from torchvision import transforms
 from tqdm import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
 
 from diffusion.datasets.laion.transforms import LargestCenterSquare
+
+try:
+    from torchvision.transforms.v2 import transforms
+except ImportError:
+    from torchvision import transforms
 
 
 class StreamingLAIONDataset(StreamingDataset):

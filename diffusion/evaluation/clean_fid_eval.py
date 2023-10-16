@@ -17,9 +17,13 @@ from composer.loggers import LoggerDestination, WandBLogger
 from composer.utils import dist
 from torch.utils.data import DataLoader
 from torchmetrics.multimodal import CLIPScore
-from torchvision.transforms.functional import to_pil_image
 from tqdm.auto import tqdm
 from transformers import PreTrainedTokenizerBase
+
+try:
+    from torchvision.transforms.v2.functional import to_pil_image
+except ImportError:
+    from torchvision.transforms.functional import to_pil_image
 
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
