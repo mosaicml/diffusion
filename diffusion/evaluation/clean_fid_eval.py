@@ -97,7 +97,7 @@ class CleanFIDEvaluator:
             model=self.model,
             load_path=self.load_path,
             load_weights_only=True,
-            load_strict_model_weights=False,  # need this otherwise text encoder weights throw err
+            load_strict_model_weights=False,  # Otherwise text encoder weights throws error
             eval_dataloader=self.eval_dataloader,
             seed=self.seed)
 
