@@ -38,7 +38,8 @@ class StreamingImageCaptionDataset(StreamingDataset):
         caption_selection (str): If there are multiple captions, specifies how to select a single caption.
             'first' selects the first caption in the list and 'random' selects a random caption in the list.
             If there is only one caption, this argument is ignored. Default: ``'first'``.
-        transform (Optional[Callable]): The transforms to apply to the image. Default: ``None``.
+        crop (Callable, optional): The crop transform to apply to the image before ``transform``. Default: ``None``
+        transform (Callable, optional): The transforms to apply to the image. Default: ``None``.
         image_key (str): Key associated with the image in the streaming dataset. Default: ``'image'``.
         caption_key (str): Key associated with the caption in the streaming dataset. Default: ``'caption'``.
         sdxl (bool): Whether or not we're training SDXL. Default: `False`.
@@ -96,7 +97,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
             img = Image.open(BytesIO(sample[self.image_key]))
         if img.mode != 'RGB':
             img = img.convert('RGB')
-        orig_h, orig_w = img.size
+        orig_w, orig_h = img.size
 
         # Image transforms
         if self.crop is not None:
@@ -113,7 +114,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
             if isinstance(img, torch.Tensor):
                 img_h, img_w = img.shape[-2], img.shape[-1]
             elif isinstance(img, Image.Image):
-                img_h, img_w = img.size
+                img_w, img_h = img.size
             else:
                 raise ValueError('Image after transformations must either be a PIL Image or Torch Tensor')
 
