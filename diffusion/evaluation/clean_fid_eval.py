@@ -40,6 +40,7 @@ class CleanFIDEvaluator:
             Default: ``[1.0]``.
         size (int): The size of the images to generate. Default: ``256``.
         batch_size (int): The per-device batch size to use for evaluation. Default: ``16``.
+        load_strict_model_weights (bool): Whether or not to strict load model weights. Default: ``True``.
         loggers (List[LoggerDestination], optional): The loggers to use for logging results. Default: ``None``.
         seed (int): The seed to use for evaluation. Default: ``17``.
         output_dir (str): The directory to save results to. Default: ``/tmp/``.
@@ -62,6 +63,7 @@ class CleanFIDEvaluator:
                  batch_size: int = 16,
                  image_key: str = 'image',
                  caption_key: str = 'caption',
+                 load_strict_model_weights: bool = True,
                  loggers: Optional[List[LoggerDestination]] = None,
                  seed: int = 17,
                  output_dir: str = '/tmp/',
@@ -78,6 +80,7 @@ class CleanFIDEvaluator:
         self.batch_size = batch_size
         self.image_key = image_key
         self.caption_key = caption_key
+        self.load_strict_model_weights = load_strict_model_weights
         self.loggers = loggers
         self.seed = seed
         self.output_dir = output_dir
@@ -97,7 +100,7 @@ class CleanFIDEvaluator:
             model=self.model,
             load_path=self.load_path,
             load_weights_only=True,
-            load_strict_model_weights=False,  # Otherwise text encoder weights throws error
+            load_strict_model_weights=self.load_strict_model_weights,
             eval_dataloader=self.eval_dataloader,
             seed=self.seed)
 
