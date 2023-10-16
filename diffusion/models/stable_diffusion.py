@@ -152,8 +152,8 @@ class StableDiffusion(ComposerModel):
         self.text_encoder.requires_grad_(False)
         self.vae.requires_grad_(False)
         if self.encode_latents_in_fp16:
-            self.text_encoder.half()
-            self.vae.half()
+            self.text_encoder = self.text_encoder.half()
+            self.vae = self.vae.half()
         if fsdp:
             # only wrap models we are training
             self.text_encoder._fsdp_wrap = False
@@ -195,6 +195,12 @@ class StableDiffusion(ComposerModel):
 
             # Magical scaling number (See https://github.com/huggingface/diffusers/issues/437#issuecomment-1241827515)
             latents *= self.latent_scale
+
+        # Zero dropped captions if needed
+        if 'drop_caption_mask' in batch.keys():
+            conditioning *= batch['drop_caption_mask'].view(-1, 1, 1)
+            if pooled_conditioning is not None:
+                pooled_conditioning *= batch['drop_caption_mask'].view(-1, 1)
 
         # Sample the diffusion timesteps
         timesteps = torch.randint(0, len(self.noise_scheduler), (latents.shape[0],), device=latents.device)
