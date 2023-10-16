@@ -3,7 +3,7 @@
 
 """Diffusion models."""
 
-from typing import List, Optional, Union
+from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.nn.functional as F
@@ -342,8 +342,8 @@ class StableDiffusion(ComposerModel):
         seed: Optional[int] = None,
         progress_bar: Optional[bool] = True,
         zero_out_negative_prompt: bool = True,
-        crop_params: Optional[Union[tuple, torch.Tensor]] = None,
-        input_size_params: Optional[Union[tuple, torch.Tensor]] = None,
+        crop_params: Optional[Union[Tuple[int, int], torch.Tensor]] = None,
+        input_size_params: Optional[Union[Tuple[int, int], torch.Tensor]] = None,
     ):
         """Generates image from noise.
 
@@ -455,13 +455,13 @@ class StableDiffusion(ComposerModel):
             if crop_params is None:
                 crop_params = torch.tensor([0., 0.]).repeat(batch_size, 1)
             elif isinstance(crop_params, tuple):  # convert to tensor
-                crop_params = torch.tensor([crop_params[0], crop_params[1]]).repeat(batch_size, 1).float()
+                crop_params = torch.tensor([crop_params[0], crop_params[1]], dtype=torch.float32).repeat(batch_size, 1)
             if input_size_params is None:
-                input_size_params = torch.tensor([width, height]).repeat(batch_size, 1).float()
+                input_size_params = torch.tensor([width, height], dtype=torch.float32).repeat(batch_size, 1)
             elif isinstance(input_size_params, tuple):  # convert to tensor
-                input_size_params = torch.tensor([input_size_params[0], input_size_params[1]]).repeat(batch_size,
-                                                                                                      1).float()
-            output_size_params = torch.tensor([width, height]).repeat(batch_size, 1).float()
+                input_size_params = torch.tensor([input_size_params[0], input_size_params[1]],
+                                                 dtype=torch.float32).repeat(batch_size, 1)
+            output_size_params = torch.tensor([width, height], dtype=torch.float32).repeat(batch_size, 1)
 
             if do_classifier_free_guidance:
                 crop_params = torch.cat([crop_params, crop_params])
