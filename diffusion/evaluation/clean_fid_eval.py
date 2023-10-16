@@ -93,12 +93,13 @@ class CleanFIDEvaluator:
                     wandb.init(**logger._init_kwargs)
 
         # Load the model
-        Trainer(model=self.model,
-                load_path=self.load_path,
-                load_weights_only=True,
-                load_strict_model_weights=False, # need this otherwise text encoder weights throw err
-                eval_dataloader=self.eval_dataloader,
-                seed=self.seed)
+        Trainer(
+            model=self.model,
+            load_path=self.load_path,
+            load_weights_only=True,
+            load_strict_model_weights=False,  # need this otherwise text encoder weights throw err
+            eval_dataloader=self.eval_dataloader,
+            seed=self.seed)
 
         # Move CLIP metric to device
         self.device = dist.get_local_rank()
@@ -158,7 +159,7 @@ class CleanFIDEvaluator:
             # Get the prompts from the tokens
             if self.sdxl:
                 # Decode with first tokenizer
-                text_captions = self.tokenizer.tokenizer.batch_decode(captions[:,0,:], skip_special_tokens=True)
+                text_captions = self.tokenizer.tokenizer.batch_decode(captions[:, 0, :], skip_special_tokens=True)
             else:
                 text_captions = self.tokenizer.batch_decode(captions, skip_special_tokens=True)
             self.clip_metric.update((generated_images * 255).to(torch.uint8), text_captions)

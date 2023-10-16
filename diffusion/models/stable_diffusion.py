@@ -3,7 +3,7 @@
 
 """Diffusion models."""
 
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import torch
 import torch.nn.functional as F
@@ -307,7 +307,7 @@ class StableDiffusion(ComposerModel):
             if self.sdxl:
                 # Decode captions with first tokenizer
                 captions = [
-                    self.tokenizer.tokenizer.decode(caption[:,0,:][0], skip_special_tokens=True)
+                    self.tokenizer.tokenizer.decode(caption[:, 0, :][0], skip_special_tokens=True)
                     for caption in batch[self.text_key]
                 ]
             else:
@@ -336,8 +336,8 @@ class StableDiffusion(ComposerModel):
         seed: Optional[int] = None,
         progress_bar: Optional[bool] = True,
         zero_out_negative_prompt: bool = True,
-        crop_params: Optional[tuple | torch.FloatTensor] = None,
-        input_size_params: Optional[tuple | torch.FloatTensor] = None,
+        crop_params: Optional[Union[tuple[int, int], torch.Tensor]] = None,
+        input_size_params: Optional[Union[tuple[int, int], torch.Tensor]] = None,
     ):
         """Generates image from noise.
 
@@ -382,10 +382,10 @@ class StableDiffusion(ComposerModel):
                 Default: `None`.
             zero_out_negative_prompt (bool): Whether or not to zero out negative prompt if it is
                 an empty string. Default: `True`.
-            crop_params (tuple or torch.FloatTensor of size [Bx2], optional): Crop parameters to use 
+            crop_params (tuple or torch.FloatTensor of size [Bx2], optional): Crop parameters to use
                 when generating images with SDXL. Default: `None`.
-            input_size_params (tuple or torch.FloatTensor of size [Bx2], optional): Size parameters 
-                (representing original size of input image) to use when generating images with SDXL. 
+            input_size_params (tuple or torch.FloatTensor of size [Bx2], optional): Size parameters
+                (representing original size of input image) to use when generating images with SDXL.
                 Default: `None`.
         """
         _check_prompt_given(prompt, tokenized_prompts, prompt_embeds)
@@ -448,17 +448,18 @@ class StableDiffusion(ComposerModel):
         if self.sdxl and pooled_embeddings is not None:
             if crop_params is None:
                 crop_params = torch.tensor([0., 0.]).repeat(batch_size, 1)
-            elif isinstance(crop_params, tuple): # convert to tensor   
+            elif isinstance(crop_params, tuple):  # convert to tensor
                 crop_params = torch.tensor([crop_params[0], crop_params[1]]).repeat(batch_size, 1).float()
             if input_size_params is None:
                 input_size_params = torch.tensor([width, height]).repeat(batch_size, 1).float()
-            elif isinstance(input_size_params, tuple): # convert to tensor 
-                input_size_params = torch.tensor([input_size_params[0], input_size_params[1]]).repeat(batch_size, 1).float()
-            output_size_params = torch.tensor([width, height]).repeat(batch_size, 1).float() 
+            elif isinstance(input_size_params, tuple):  # convert to tensor
+                input_size_params = torch.tensor([input_size_params[0], input_size_params[1]]).repeat(batch_size,
+                                                                                                      1).float()
+            output_size_params = torch.tensor([width, height]).repeat(batch_size, 1).float()
 
             if do_classifier_free_guidance:
-                crop_params = torch.cat([crop_params, crop_params]) 
-                input_size_params = torch.cat([input_size_params, input_size_params]) 
+                crop_params = torch.cat([crop_params, crop_params])
+                input_size_params = torch.cat([input_size_params, input_size_params])
                 output_size_params = torch.cat([output_size_params, output_size_params])
 
             add_time_ids = torch.cat([input_size_params, crop_params, output_size_params], dim=1).to(device)
