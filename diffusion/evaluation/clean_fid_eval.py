@@ -96,13 +96,12 @@ class CleanFIDEvaluator:
                     wandb.init(**logger._init_kwargs)
 
         # Load the model
-        Trainer(
-            model=self.model,
-            load_path=self.load_path,
-            load_weights_only=True,
-            load_strict_model_weights=self.load_strict_model_weights,
-            eval_dataloader=self.eval_dataloader,
-            seed=self.seed)
+        Trainer(model=self.model,
+                load_path=self.load_path,
+                load_weights_only=True,
+                load_strict_model_weights=self.load_strict_model_weights,
+                eval_dataloader=self.eval_dataloader,
+                seed=self.seed)
 
         # Move CLIP metric to device
         self.device = dist.get_local_rank()

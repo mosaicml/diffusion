@@ -342,8 +342,8 @@ class StableDiffusion(ComposerModel):
         seed: Optional[int] = None,
         progress_bar: Optional[bool] = True,
         zero_out_negative_prompt: bool = True,
-        crop_params: Optional[Union[tuple[int, int], torch.Tensor]] = None,
-        input_size_params: Optional[Union[tuple[int, int], torch.Tensor]] = None,
+        crop_params: Optional[Union[tuple, torch.Tensor]] = None,
+        input_size_params: Optional[Union[tuple, torch.Tensor]] = None,
     ):
         """Generates image from noise.
 
