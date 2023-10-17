@@ -312,8 +312,10 @@ def main(args: Namespace) -> None:
 
     for uploader in uploaders:
         uploader.join()
+        uploader.close()
     signal_queue.put(1)
     remove.join()
+    remove.close()
 
 
 if __name__ == '__main__':
