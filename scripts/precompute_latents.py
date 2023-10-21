@@ -33,9 +33,11 @@ class StreamingLAIONDataset(StreamingDataset):
         local (str, optional): Local filesystem directory where dataset is cached during operation. Default: ``None``.
         split (str, optional): The dataset split to use. Currently, only ``None`` is supported. Default: ``None``.
         shuffle (bool): Whether to shuffle the samples in this dataset. Default: ``False``.
+        shuffle_algo (str): What shuffle algorithm to use. Default: ``'py1s'``.
+        shuffle_block_size (int): Unit of shuffling. Default: ``1 << 18``.
         tokenizer_name_or_path (str): The name or path of the tokenizer to use. Default: ``'stabilityai/stable-diffusion-2-base'``.
         transform (Optional[Union[Callable, List[Callable]]]): The transforms to apply to the image. Default: ``None``.
-        predownload (Optional[int]): The number of samples to prefetch. Default: ``100_000``.
+        predownload (Optional[int]): The number of samples to prefetch. If ``None``, its value is set to ``8 * batch_size``. Default: ``None``.
         download_retry (Optional[int]): The number of times to retry a download. Default: ``2``.
         download_timeout (Optional[float]): The timeout for a download. Default: ``120``.
         batch_size (Optional[int]): Hint batch_size that will be used on each device's DataLoader. Default: ``None``.
@@ -47,10 +49,12 @@ class StreamingLAIONDataset(StreamingDataset):
                  local: Optional[str] = None,
                  split: Optional[str] = None,
                  shuffle: bool = False,
+                 shuffle_algo: str = 'py1s',
+                 shuffle_block_size: int = 1 << 18,
                  tokenizer_name_or_path: str = 'stabilityai/stable-diffusion-2-base',
                  caption_drop_prob: float = 0.0,
                  transform: Optional[List[Callable]] = None,
-                 predownload: int = 100_000,
+                 predownload: Optional[int] = None,
                  download_retry: int = 2,
                  download_timeout: float = 120,
                  batch_size: Optional[int] = None) -> None:
@@ -61,6 +65,8 @@ class StreamingLAIONDataset(StreamingDataset):
             local=local,
             split=split,
             shuffle=shuffle,
+            shuffle_algo=shuffle_algo,
+            shuffle_block_size=shuffle_block_size,
             predownload=predownload,
             keep_zip=False,
             download_retry=download_retry,

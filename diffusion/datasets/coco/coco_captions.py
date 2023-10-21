@@ -22,23 +22,21 @@ class StreamingCOCOCaption(StreamingDataset):
             Default: ``None``.
         local (str, optional): Local filesystem directory where dataset is cached during operation.
             Default: ``None``.
-        split (str, optional): The dataset split to use. Currently, only ``None`` is supported.
-            Default: ``None``.
         shuffle (bool): Whether to shuffle the samples in this dataset.
             Default: ``False``.
-        tokenizer_name_or_path (str): The name or path of the tokenizer to use.
-            Default: ``'stabilityai/stable-diffusion-2-base'``.
-        transform (Optional[Callable]): The transforms to apply to the image.
-            Default: ``None``.
-        predownload (Optional[int]): The number of samples to prefetch.
-            Default: ``100_000``.
-        download_retry (Optional[int]): The number of times to retry a download.
-            Default: ``2``.
-        download_timeout (Optional[float]): The timeout for a download.
-            Default: ``120``.
+        shuffle_algo (str): What shuffle algorithm to use.
+            Default: ``'py1s'``.
+        shuffle_block_size (int): Unit of shuffling.
+            Default: ``1 << 18``.
         batch_size (Optional[int]):  batch_size that will be used on each device's DataLoader.
             Default: ``None``.
-        image_size (Optional[int]): The size to resize the image to.
+        tokenizer_name_or_path (str): The name or path of the tokenizer to use.
+            Default: ``'stabilityai/stable-diffusion-2-base'``.
+        caption_selection (str): Which caption to use for the image. Must be 'random' or 'first'.
+            Default: ``'first'``.
+        download_timeout (Optional[float]): The timeout for a download.
+            Default: ``120``.
+        transform (Optional[Callable]): The transforms to apply to the image.
             Default: ``None``.
         num_canonical_nodes (int, optional): The number of canonical nodes for shuffle.
             Default: ``None``.
@@ -50,7 +48,9 @@ class StreamingCOCOCaption(StreamingDataset):
         remote,
         local,
         shuffle,
-        batch_size,
+        shuffle_algo: str = 'py1s',
+        shuffle_block_size: int = 1 << 18,
+        batch_size=None,
         tokenizer_name_or_path='stabilityai/stable-diffusion-2-base',
         caption_selection='first',
         download_timeout=120,
@@ -61,6 +61,8 @@ class StreamingCOCOCaption(StreamingDataset):
             remote=remote,
             local=local,
             shuffle=shuffle,
+            shuffle_algo=shuffle_algo,
+            shuffle_block_size=shuffle_block_size,
             batch_size=batch_size,
             download_timeout=download_timeout,
             num_canonical_nodes=num_canonical_nodes,
