@@ -49,7 +49,7 @@ reportMissingParameterType = "none"  # TODO: make this an error. Many tests are 
 reportCallInDefaultInitializer = "error"
 reportUnnecessaryComparison = "error"
 reportSelfClsParameterName = "error"
-# Need to ensure all implict string concatinations are wrapped with an extra set of paranethesis.
+# Need to ensure all implict string concatenations are wrapped with an extra set of paranethesis.
 reportImplicitStringConcatenation = "none"  # TODO: make this an error.
 reportInvalidStubStatement = "error"
 reportIncompleteStub = "error"
