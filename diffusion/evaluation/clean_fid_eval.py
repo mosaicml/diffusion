@@ -80,7 +80,6 @@ class CleanFIDEvaluator:
         self.batch_size = batch_size
         self.image_key = image_key
         self.caption_key = caption_key
-        self.load_strict_model_weights = load_strict_model_weights
         self.loggers = loggers
         self.seed = seed
         self.output_dir = output_dir
@@ -99,7 +98,7 @@ class CleanFIDEvaluator:
         Trainer(model=self.model,
                 load_path=self.load_path,
                 load_weights_only=True,
-                load_strict_model_weights=self.load_strict_model_weights,
+                load_strict_model_weights=load_strict_model_weights,
                 eval_dataloader=self.eval_dataloader,
                 seed=self.seed)
 
