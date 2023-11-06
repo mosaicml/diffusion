@@ -206,6 +206,12 @@ class StableDiffusion(ComposerModel):
             if pooled_conditioning is not None:
                 pooled_conditioning *= batch['drop_caption_mask'].view(-1, 1)
 
+        # Attention mask if needed
+        if 'attention_mask' in batch.keys():
+            attention_mask = batch['attention_mask']
+        else:
+            attention_mask = None
+
         # Sample the diffusion timesteps
         timesteps = torch.randint(0, len(self.noise_scheduler), (latents.shape[0],), device=latents.device)
         # Add noise to the inputs (forward diffusion)
@@ -235,6 +241,7 @@ class StableDiffusion(ComposerModel):
 
         # Forward through the model
         return self.unet(noised_latents, timesteps, conditioning,
+                         attention_mask=attention_mask,
                          added_cond_kwargs=added_cond_kwargs)['sample'], targets, timesteps
 
     def loss(self, outputs, batch):
@@ -454,6 +461,12 @@ class StableDiffusion(ComposerModel):
         self.inference_scheduler.set_timesteps(num_inference_steps)
         # scale the initial noise by the standard deviation required by the scheduler
         latents = latents * self.inference_scheduler.init_noise_sigma
+
+        # # Attention mask if needed
+        # if 'attention_mask' in batch.keys():
+        #     attention_mask = batch['attention_mask']
+        # else:
+        #     attention_mask = None
 
         added_cond_kwargs = {}
         # if using SDXL, prepare added time ids & embeddings
