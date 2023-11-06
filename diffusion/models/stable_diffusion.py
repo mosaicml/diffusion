@@ -240,7 +240,9 @@ class StableDiffusion(ComposerModel):
             added_cond_kwargs = {'text_embeds': add_text_embeds, 'time_ids': add_time_ids}
 
         # Forward through the model
-        return self.unet(noised_latents, timesteps, conditioning,
+        return self.unet(noised_latents,
+                         timesteps,
+                         conditioning,
                          encoder_attention_mask=attention_mask,
                          added_cond_kwargs=added_cond_kwargs)['sample'], targets, timesteps
 
@@ -429,27 +431,34 @@ class StableDiffusion(ComposerModel):
 
         do_classifier_free_guidance = guidance_scale > 1.0  # type: ignore
 
-        text_embeddings, pooled_text_embeddings = self._prepare_text_embeddings(prompt, tokenized_prompts,
-                                                                                prompt_embeds, num_images_per_prompt)
+        text_embeddings, pooled_text_embeddings, pad_attn_mask = self._prepare_text_embeddings(
+            prompt, tokenized_prompts, prompt_embeds, num_images_per_prompt)
         batch_size = len(text_embeddings)  # len prompts * num_images_per_prompt
         # classifier free guidance + negative prompts
         # negative prompt is given in place of the unconditional input in classifier free guidance
-        pooled_embeddings = None
+        pooled_embeddings, encoder_attn_mask = None, None
         if do_classifier_free_guidance:
             if not negative_prompt and not tokenized_negative_prompts and not negative_prompt_embeds and zero_out_negative_prompt:
                 # Negative prompt is empty and we want to zero it out
                 unconditional_embeddings = torch.zeros_like(text_embeddings)
                 pooled_unconditional_embeddings = torch.zeros_like(pooled_text_embeddings) if self.sdxl else None
+                uncond_pad_attn_mask = torch.zeros_like(pad_attn_mask) if pad_attn_mask is not None else None
             else:
                 if not negative_prompt:
                     negative_prompt = [''] * (batch_size // num_images_per_prompt)  # type: ignore
-                unconditional_embeddings, pooled_unconditional_embeddings = self._prepare_text_embeddings(
+                unconditional_embeddings, pooled_unconditional_embeddings, uncond_pad_attn_mask = self._prepare_text_embeddings(
                     negative_prompt, tokenized_negative_prompts, negative_prompt_embeds, num_images_per_prompt)
 
             # concat uncond + prompt
             text_embeddings = torch.cat([unconditional_embeddings, text_embeddings])
             if self.sdxl:
                 pooled_embeddings = torch.cat([pooled_unconditional_embeddings, pooled_text_embeddings])  # type: ignore
+
+            if pad_attn_mask is not None:
+                encoder_attn_mask = torch.cat([uncond_pad_attn_mask, pad_attn_mask])  # type: ignore
+        else:
+            pooled_embeddings = pooled_text_embeddings
+            encoder_attn_mask = pad_attn_mask
 
         # prepare for diffusion generation process
         latents = torch.randn(
@@ -461,12 +470,6 @@ class StableDiffusion(ComposerModel):
         self.inference_scheduler.set_timesteps(num_inference_steps)
         # scale the initial noise by the standard deviation required by the scheduler
         latents = latents * self.inference_scheduler.init_noise_sigma
-
-        # # Attention mask if needed
-        # if 'attention_mask' in batch.keys():
-        #     attention_mask = batch['attention_mask']
-        # else:
-        #     attention_mask = None
 
         added_cond_kwargs = {}
         # if using SDXL, prepare added time ids & embeddings
@@ -490,10 +493,12 @@ class StableDiffusion(ComposerModel):
 
             latent_model_input = self.inference_scheduler.scale_model_input(latent_model_input, t)
             # Model prediction
-            pred = self.unet(latent_model_input,
-                             t,
-                             encoder_hidden_states=text_embeddings,
-                             added_cond_kwargs=added_cond_kwargs).sample
+            pred = self.unet(
+                latent_model_input,
+                t,
+                encoder_hidden_states=text_embeddings,
+                encoder_attention_mask=encoder_attn_mask,  # should be [B, 77]
+                added_cond_kwargs=added_cond_kwargs).sample
 
             if do_classifier_free_guidance:
                 # perform guidance. Note this is only techincally correct for prediction_type 'epsilon'
@@ -518,17 +523,22 @@ class StableDiffusion(ComposerModel):
     def _prepare_text_embeddings(self, prompt, tokenized_prompts, prompt_embeds, num_images_per_prompt):
         """Tokenizes and embeds prompts if needed, then duplicates embeddings to support multiple generations per prompt."""
         device = self.text_encoder.device
-        pooled_text_embeddings = None
+        pooled_text_embeddings, encoder_attn_mask = None, None
         if prompt_embeds is None:
             max_length = None if self.sdxl else self.tokenizer.model_max_length
             if tokenized_prompts is None:
-                tokenized_prompts = self.tokenizer(prompt,
-                                                   padding='max_length',
-                                                   max_length=max_length,
-                                                   truncation=True,
-                                                   return_tensors='pt').input_ids
+                tokenized_out = self.tokenizer(prompt,
+                                               padding='max_length',
+                                               max_length=max_length,
+                                               truncation=True,
+                                               return_tensors='pt')
+                tokenized_prompts = tokenized_out.input_ids
+                encoder_attn_mask = tokenized_out.attention_mask
                 if self.sdxl:
                     tokenized_prompts = torch.stack([tokenized_prompts[0], tokenized_prompts[1]], dim=1)
+                    # For cross attention mask, take union of masks (want [B, 77])
+                    encoder_attn_mask = torch.logical_or(encoder_attn_mask[0],
+                                                         encoder_attn_mask[1]).to(encoder_attn_mask[0].dtype).to(device)
             if self.sdxl:
                 text_embeddings, pooled_text_embeddings = self.text_encoder(
                     [tokenized_prompts[:, 0, :].to(device), tokenized_prompts[:, 1, :].to(device)])  # type: ignore
@@ -544,10 +554,14 @@ class StableDiffusion(ComposerModel):
         text_embeddings = text_embeddings.repeat(1, num_images_per_prompt, 1)  # type: ignore
         text_embeddings = text_embeddings.view(bs_embed * num_images_per_prompt, seq_len, -1)
 
+        if encoder_attn_mask is not None:
+            encoder_attn_mask = encoder_attn_mask.repeat(1, num_images_per_prompt, 1)
+            encoder_attn_mask = encoder_attn_mask.view(bs_embed * num_images_per_prompt, seq_len)  # [B, 77]
+
         if self.sdxl and pooled_text_embeddings is not None:
             pooled_text_embeddings = pooled_text_embeddings.repeat(1, num_images_per_prompt)
             pooled_text_embeddings = pooled_text_embeddings.view(bs_embed * num_images_per_prompt, -1)
-        return text_embeddings, pooled_text_embeddings
+        return text_embeddings, pooled_text_embeddings, encoder_attn_mask
 
 
 def _check_prompt_lenths(prompt, negative_prompt):
