@@ -163,7 +163,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
         else:
             tokenized_caption = tokenized_caption.squeeze()
         out['captions'] = tokenized_caption
-        out['attention_mask'] = tokenizer_out['attention_mask'].squeeze()
+        out['attention_mask'] = tokenizer_out['attention_mask']
         return out
 
 
