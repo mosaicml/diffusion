@@ -241,7 +241,7 @@ class StableDiffusion(ComposerModel):
 
         # Forward through the model
         return self.unet(noised_latents, timesteps, conditioning,
-                         attention_mask=attention_mask,
+                         encoder_attention_mask=attention_mask,
                          added_cond_kwargs=added_cond_kwargs)['sample'], targets, timesteps
 
     def loss(self, outputs, batch):
