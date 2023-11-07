@@ -320,7 +320,7 @@ class StableDiffusion(ComposerModel):
             if self.sdxl:
                 # Decode captions with first tokenizer
                 captions = [
-                    self.tokenizer.tokenizer.decode(caption[0], skip_special_tokens=True)
+                    self.tokenizer.tokenizer.decode(caption[:, 0, :][0], skip_special_tokens=True)
                     for caption in batch[self.text_key]
                 ]
             else:
@@ -350,8 +350,8 @@ class StableDiffusion(ComposerModel):
         seed: Optional[int] = None,
         progress_bar: Optional[bool] = True,
         zero_out_negative_prompt: bool = True,
-        crop_params: Optional[list] = None,
-        size_params: Optional[list] = None,
+        crop_params: Optional[torch.Tensor] = None,
+        input_size_params: Optional[torch.Tensor] = None,
     ):
         """Generates image from noise.
 
@@ -398,9 +398,10 @@ class StableDiffusion(ComposerModel):
                 Default: `None`.
             zero_out_negative_prompt (bool): Whether or not to zero out negative prompt if it is
                 an empty string. Default: `True`.
-            crop_params (list, optional): Crop parameters to use when generating images with SDXL.
-                Default: `None`.
-            size_params (list, optional): Size parameters to use when generating images with SDXL.
+            crop_params (torch.FloatTensor of size [Bx2], optional): Crop parameters to use
+                when generating images with SDXL. Default: `None`.
+            input_size_params (torch.FloatTensor of size [Bx2], optional): Size parameters
+                (representing original size of input image) to use when generating images with SDXL.
                 Default: `None`.
         """
         _check_prompt_given(prompt, tokenized_prompts, prompt_embeds)
@@ -443,6 +444,9 @@ class StableDiffusion(ComposerModel):
             text_embeddings = torch.cat([unconditional_embeddings, text_embeddings])
             if self.sdxl:
                 pooled_embeddings = torch.cat([pooled_unconditional_embeddings, pooled_text_embeddings])  # type: ignore
+        else:
+            if self.sdxl:
+                pooled_embeddings = pooled_text_embeddings
 
         # prepare for diffusion generation process
         latents = torch.randn(
@@ -458,15 +462,19 @@ class StableDiffusion(ComposerModel):
         added_cond_kwargs = {}
         # if using SDXL, prepare added time ids & embeddings
         if self.sdxl and pooled_embeddings is not None:
-            if not crop_params:
-                crop_params = [0., 0.]
-            if not size_params:
-                size_params = [width, height]
-            add_time_ids = torch.tensor([[width, height, *crop_params, *size_params]], dtype=torch.float, device=device)
-            add_time_ids = add_time_ids.repeat(pooled_embeddings.shape[0], 1)
-            add_text_embeds = pooled_embeddings
+            if crop_params is None:
+                crop_params = torch.zeros((batch_size, 2), dtype=text_embeddings.dtype)
+            if input_size_params is None:
+                input_size_params = torch.tensor([width, height], dtype=text_embeddings.dtype).repeat(batch_size, 1)
+            output_size_params = torch.tensor([width, height], dtype=text_embeddings.dtype).repeat(batch_size, 1)
 
-            added_cond_kwargs = {'text_embeds': add_text_embeds, 'time_ids': add_time_ids}
+            if do_classifier_free_guidance:
+                crop_params = torch.cat([crop_params, crop_params])
+                input_size_params = torch.cat([input_size_params, input_size_params])
+                output_size_params = torch.cat([output_size_params, output_size_params])
+
+            add_time_ids = torch.cat([input_size_params, crop_params, output_size_params], dim=1).to(device)
+            added_cond_kwargs = {'text_embeds': pooled_embeddings, 'time_ids': add_time_ids}
 
         # backward diffusion process
         for t in tqdm(self.inference_scheduler.timesteps, disable=not progress_bar):
