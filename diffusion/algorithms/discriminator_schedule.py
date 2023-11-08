@@ -38,7 +38,6 @@ class DiscriminatorSchedule(Algorithm):
             autoencoder_loss = state.model.module.autoencoder_loss
         else:
             raise ValueError('Model does not have an autoencoder loss')
-
         assert isinstance(autoencoder_loss, nn.Module) and callable(
             autoencoder_loss.set_discriminator_weight), f'{type(autoencoder_loss)}'
 
