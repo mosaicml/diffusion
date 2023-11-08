@@ -28,16 +28,19 @@ class DiscriminatorSchedule(Algorithm):
             raise ValueError('start_iteration must be in units of batches')
 
     def match(self, event: Event, state: State) -> bool:
-        return event in [Event.INIT, Event.BATCH_START, Event.AFTER_LOSS]
+        return event in (Event.INIT, Event.BATCH_START)
 
     def apply(self, event: Event, state: State, logger: Logger) -> None:
-        if hasattr(state.model, 'autoencoder_loss') and isinstance(state.model.autoencoder_loss, nn.Module):
+        if hasattr(state.model, 'autoencoder_loss'):
             autoencoder_loss = state.model.autoencoder_loss
-        elif isinstance(state.model.module, nn.Module) and hasattr(state.model.module, 'autoencoder_loss'):
+        elif hasattr(state.model, 'module') and isinstance(state.model.module, nn.Module) and hasattr(
+                state.model.module, 'autoencoder_loss'):
             autoencoder_loss = state.model.module.autoencoder_loss
         else:
-            raise ValueError('Model does not have a discriminator weight')
-        assert isinstance(autoencoder_loss, nn.Module) and callable(autoencoder_loss.set_discriminator_weight)
+            raise ValueError('Model does not have an autoencoder loss')
+
+        assert isinstance(autoencoder_loss, nn.Module) and callable(
+            autoencoder_loss.set_discriminator_weight), f'{type(autoencoder_loss)}'
 
         # Grab the relevant scheduler params from the model and optimizer on init
         if event == Event.INIT:
