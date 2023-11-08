@@ -26,6 +26,8 @@ class LogDiffusionImages(Callback):
             A larger guidance scale generates images that are more aligned to
             the text prompt, usually at the expense of lower image quality.
             Default: ``0.0``.
+        rescaled_guidance (float, optional): Rescaled guidance scale. If not specified, rescaled guidance
+            will not be used. Default: ``None``.
         text_key (str, optional): Key in the batch to use for text prompts. Default: ``'captions'``.
         tokenized_prompts (torch.LongTensor or List[torch.LongTensor], optional): Batch of pre-tokenized prompts
             to use for evaluation. If SDXL, this will be a list of two pre-tokenized prompts Default: ``None``.
@@ -39,6 +41,7 @@ class LogDiffusionImages(Callback):
                  size: Optional[int] = 256,
                  num_inference_steps=50,
                  guidance_scale: Optional[float] = 0.0,
+                 rescaled_guidance: Optional[float] = None,
                  text_key: Optional[str] = 'captions',
                  tokenized_prompts: Optional[torch.LongTensor] = None,
                  seed: Optional[int] = 1138,
@@ -47,6 +50,7 @@ class LogDiffusionImages(Callback):
         self.size = size
         self.num_inference_steps = num_inference_steps
         self.guidance_scale = guidance_scale
+        self.rescaled_guidance = rescaled_guidance
         self.text_key = text_key
         self.seed = seed
         self.tokenized_prompts = tokenized_prompts
@@ -82,6 +86,7 @@ class LogDiffusionImages(Callback):
                     height=self.size,
                     width=self.size,
                     guidance_scale=self.guidance_scale,
+                    rescaled_guidance=self.rescaled_guidance,
                     progress_bar=False,
                     num_inference_steps=self.num_inference_steps,
                     seed=self.seed)
