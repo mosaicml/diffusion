@@ -9,6 +9,6 @@ from diffusion.callbacks.scheduled_garbage_collector import ScheduledGarbageColl
 
 __all__ = [
     'LogDiffusionImages',
-    'NaNCatcher'
+    'NaNCatcher',
     'ScheduledGarbageCollector',
 ]
