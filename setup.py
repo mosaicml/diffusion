@@ -26,7 +26,7 @@ extras_require['dev'] = {
     'pre-commit>=2.18.1,<3',
     'pytest==7.3.0',
     'coverage[toml]==7.2.2',
-    'pyarrow==11.0.0',
+    'pyarrow==14.0.1',
 }
 
 extras_require['all'] = set(dep for deps in extras_require.values() for dep in deps)
