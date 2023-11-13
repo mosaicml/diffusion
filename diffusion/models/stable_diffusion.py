@@ -39,6 +39,8 @@ class StableDiffusion(ComposerModel):
         loss_fn (torch.nn.Module): torch loss function. Default: `F.mse_loss`.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
+        offset_noise (float, optional): The scale of the offset noise. If not specified, offset noise will not
+            be used. Default `None`.
         train_metrics (list): List of torchmetrics to calculate during training.
             Default: `None`.
         val_metrics (list): List of torchmetrics to calculate during validation.
@@ -74,6 +76,7 @@ class StableDiffusion(ComposerModel):
                  inference_noise_scheduler,
                  loss_fn=F.mse_loss,
                  prediction_type: str = 'epsilon',
+                 offset_noise: Optional[float] = None,
                  train_metrics: Optional[List] = None,
                  val_metrics: Optional[List] = None,
                  val_seed: int = 1138,
@@ -95,6 +98,7 @@ class StableDiffusion(ComposerModel):
         self.prediction_type = prediction_type.lower()
         if self.prediction_type not in ['sample', 'epsilon', 'v_prediction']:
             raise ValueError(f'prediction type must be one of sample, epsilon, or v_prediction. Got {prediction_type}')
+        self.offset_noise = offset_noise
         self.val_seed = val_seed
         self.image_key = image_key
         self.image_latents_key = image_latents_key
@@ -206,6 +210,9 @@ class StableDiffusion(ComposerModel):
         timesteps = torch.randint(0, len(self.noise_scheduler), (latents.shape[0],), device=latents.device)
         # Add noise to the inputs (forward diffusion)
         noise = torch.randn_like(latents)
+        if self.offset_noise is not None:
+            offset_noise = torch.randn(latents.shape[0], latents.shape[1], 1, 1, device=noise.device)
+            noise += self.offset_noise * offset_noise
         noised_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
         # Generate the targets
         if self.prediction_type == 'epsilon':
@@ -313,7 +320,7 @@ class StableDiffusion(ComposerModel):
             if self.sdxl:
                 # Decode captions with first tokenizer
                 captions = [
-                    self.tokenizer.tokenizer.decode(caption[0], skip_special_tokens=True)
+                    self.tokenizer.tokenizer.decode(caption[:, 0, :][0], skip_special_tokens=True)
                     for caption in batch[self.text_key]
                 ]
             else:
@@ -338,12 +345,13 @@ class StableDiffusion(ComposerModel):
         width: Optional[int] = None,
         num_inference_steps: Optional[int] = 50,
         guidance_scale: Optional[float] = 3.0,
-        num_images_per_prompt: int = 1,
+        rescaled_guidance: Optional[float] = None,
+        num_images_per_prompt: Optional[int] = 1,
         seed: Optional[int] = None,
         progress_bar: Optional[bool] = True,
         zero_out_negative_prompt: bool = True,
-        crop_params: Optional[list] = None,
-        size_params: Optional[list] = None,
+        crop_params: Optional[torch.Tensor] = None,
+        input_size_params: Optional[torch.Tensor] = None,
     ):
         """Generates image from noise.
 
@@ -380,6 +388,8 @@ class StableDiffusion(ComposerModel):
                 Higher guidance scale encourages to generate images that are closely linked
                 to the text prompt, usually at the expense of lower image quality.
                 Default: `3.0`.
+            rescaled_guidance (float, optional): Rescaled guidance scale. If not specified, rescaled guidance will
+                not be used. Default: `None`.
             num_images_per_prompt (int): The number of images to generate per prompt.
                  Default: `1`.
             progress_bar (bool): Whether to use the tqdm progress bar during generation.
@@ -388,9 +398,10 @@ class StableDiffusion(ComposerModel):
                 Default: `None`.
             zero_out_negative_prompt (bool): Whether or not to zero out negative prompt if it is
                 an empty string. Default: `True`.
-            crop_params (list, optional): Crop parameters to use when generating images with SDXL.
-                Default: `None`.
-            size_params (list, optional): Size parameters to use when generating images with SDXL.
+            crop_params (torch.FloatTensor of size [Bx2], optional): Crop parameters to use
+                when generating images with SDXL. Default: `None`.
+            input_size_params (torch.FloatTensor of size [Bx2], optional): Size parameters
+                (representing original size of input image) to use when generating images with SDXL.
                 Default: `None`.
         """
         _check_prompt_given(prompt, tokenized_prompts, prompt_embeds)
@@ -433,6 +444,9 @@ class StableDiffusion(ComposerModel):
             text_embeddings = torch.cat([unconditional_embeddings, text_embeddings])
             if self.sdxl:
                 pooled_embeddings = torch.cat([pooled_unconditional_embeddings, pooled_text_embeddings])  # type: ignore
+        else:
+            if self.sdxl:
+                pooled_embeddings = pooled_text_embeddings
 
         # prepare for diffusion generation process
         latents = torch.randn(
@@ -448,15 +462,19 @@ class StableDiffusion(ComposerModel):
         added_cond_kwargs = {}
         # if using SDXL, prepare added time ids & embeddings
         if self.sdxl and pooled_embeddings is not None:
-            if not crop_params:
-                crop_params = [0., 0.]
-            if not size_params:
-                size_params = [width, height]
-            add_time_ids = torch.tensor([[width, height, *crop_params, *size_params]], dtype=torch.float, device=device)
-            add_time_ids = add_time_ids.repeat(pooled_embeddings.shape[0], 1)
-            add_text_embeds = pooled_embeddings
+            if crop_params is None:
+                crop_params = torch.zeros((batch_size, 2), dtype=text_embeddings.dtype)
+            if input_size_params is None:
+                input_size_params = torch.tensor([width, height], dtype=text_embeddings.dtype).repeat(batch_size, 1)
+            output_size_params = torch.tensor([width, height], dtype=text_embeddings.dtype).repeat(batch_size, 1)
 
-            added_cond_kwargs = {'text_embeds': add_text_embeds, 'time_ids': add_time_ids}
+            if do_classifier_free_guidance:
+                crop_params = torch.cat([crop_params, crop_params])
+                input_size_params = torch.cat([input_size_params, input_size_params])
+                output_size_params = torch.cat([output_size_params, output_size_params])
+
+            add_time_ids = torch.cat([input_size_params, crop_params, output_size_params], dim=1).to(device)
+            added_cond_kwargs = {'text_embeds': pooled_embeddings, 'time_ids': add_time_ids}
 
         # backward diffusion process
         for t in tqdm(self.inference_scheduler.timesteps, disable=not progress_bar):
@@ -476,7 +494,12 @@ class StableDiffusion(ComposerModel):
                 # perform guidance. Note this is only techincally correct for prediction_type 'epsilon'
                 pred_uncond, pred_text = pred.chunk(2)
                 pred = pred_uncond + guidance_scale * (pred_text - pred_uncond)
-
+                # Optionally rescale the classifer free guidance
+                if rescaled_guidance is not None:
+                    std_pos = torch.std(pred_text, dim=(1, 2, 3), keepdim=True)
+                    std_cfg = torch.std(pred, dim=(1, 2, 3), keepdim=True)
+                    pred_rescaled = pred * (std_pos / std_cfg)
+                    pred = pred_rescaled * rescaled_guidance + pred * (1 - rescaled_guidance)
             # compute the previous noisy sample x_t -> x_t-1
             latents = self.inference_scheduler.step(pred, t, latents, generator=rng_generator).prev_sample
 

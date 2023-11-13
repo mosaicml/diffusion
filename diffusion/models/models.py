@@ -33,6 +33,7 @@ def stable_diffusion_2(
     model_name: str = 'stabilityai/stable-diffusion-2-base',
     pretrained: bool = True,
     prediction_type: str = 'epsilon',
+    offset_noise: Optional[float] = None,
     train_metrics: Optional[List] = None,
     val_metrics: Optional[List] = None,
     val_guidance_scales: Optional[List] = None,
@@ -63,6 +64,8 @@ def stable_diffusion_2(
         loss_bins (list, optional): List of tuples of (min, max) values to use for loss binning. If None, defaults to
             [(0, 1)].
         precomputed_latents (bool): Whether to use precomputed latents. Defaults to False.
+        offset_noise (float, optional): The scale of the offset noise. If not specified, offset noise will not
+            be used. Default `None`.
         encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
         fsdp (bool): Whether to use FSDP. Defaults to True.
         clip_qkv (float, optional): If not None, clip the qkv values to this value. Defaults to None.
@@ -112,6 +115,7 @@ def stable_diffusion_2(
         noise_scheduler=noise_scheduler,
         inference_noise_scheduler=inference_noise_scheduler,
         prediction_type=prediction_type,
+        offset_noise=offset_noise,
         train_metrics=train_metrics,
         val_metrics=val_metrics,
         val_guidance_scales=val_guidance_scales,
@@ -144,6 +148,7 @@ def stable_diffusion_xl(
     vae_model_name: str = 'madebyollin/sdxl-vae-fp16-fix',
     pretrained: bool = True,
     prediction_type: str = 'epsilon',
+    offset_noise: Optional[float] = None,
     train_metrics: Optional[List] = None,
     val_metrics: Optional[List] = None,
     val_guidance_scales: Optional[List] = None,
@@ -170,6 +175,8 @@ def stable_diffusion_xl(
         pretrained (bool): Whether to load pretrained weights. Defaults to True.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
+        offset_noise (float, optional): The scale of the offset noise. If not specified, offset noise will not
+            be used. Default `None`.
         train_metrics (list, optional): List of metrics to compute during training. If None, defaults to
             [MeanSquaredError()].
         val_metrics (list, optional): List of metrics to compute during validation. If None, defaults to
@@ -225,8 +232,16 @@ def stable_diffusion_xl(
     text_encoder = SDXLTextEncoder(model_name, encode_latents_in_fp16)
 
     noise_scheduler = DDPMScheduler.from_pretrained(model_name, subfolder='scheduler')
-    inference_noise_scheduler = EulerDiscreteScheduler.from_pretrained(model_name, subfolder='scheduler')
-    inference_noise_scheduler.prediction_type = prediction_type
+    inference_noise_scheduler = EulerDiscreteScheduler(num_train_timesteps=1000,
+                                                       beta_start=0.00085,
+                                                       beta_end=0.012,
+                                                       beta_schedule='scaled_linear',
+                                                       trained_betas=None,
+                                                       prediction_type=prediction_type,
+                                                       interpolation_type='linear',
+                                                       use_karras_sigmas=False,
+                                                       timestep_spacing='leading',
+                                                       steps_offset=1)
 
     model = StableDiffusion(
         unet=unet,
@@ -236,6 +251,7 @@ def stable_diffusion_xl(
         noise_scheduler=noise_scheduler,
         inference_noise_scheduler=inference_noise_scheduler,
         prediction_type=prediction_type,
+        offset_noise=offset_noise,
         train_metrics=train_metrics,
         val_metrics=val_metrics,
         val_guidance_scales=val_guidance_scales,
