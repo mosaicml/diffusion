@@ -328,26 +328,26 @@ class NlayerDiscriminator(nn.Module):
         input_channels (int): Number of input channels. Default: `3`.
         num_filters (int): Number of filters in the first layer. Default: `64`.
         num_layers (int): Number of layers in the discriminator. Default: `3`.
-        padding (int): How much padding to use in the conv layers. Default: `0`.
     """
 
-    def __init__(self, input_channels: int = 3, num_filters: int = 64, num_layers: int = 3, padding: int = 0):
+    def __init__(self, input_channels: int = 3, num_filters: int = 64, num_layers: int = 3):
         super().__init__()
         self.input_channels = input_channels
         self.num_filters = num_filters
         self.num_layers = num_layers
-        self.padding = padding
 
-        self.blocks = nn.ModuleList()
-        input_conv = nn.Conv2d(self.input_channels, self.num_filters, kernel_size=4, stride=2, padding=self.padding)
+        self.blocks = nn.Sequential()
+        input_conv = nn.Conv2d(self.input_channels, self.num_filters, kernel_size=4, stride=2, padding=1)
         nn.init.kaiming_normal_(input_conv.weight, nonlinearity='linear')
-        self.blocks.append(input_conv)
+        nonlinearity = nn.LeakyReLU(0.2, True)
+        self.blocks.extend([input_conv, nonlinearity])
 
+        num_filters = self.num_filters
         out_filters = self.num_filters
         for n in range(1, self.num_layers):
-            in_filters = self.num_filters * 2**(n - 1)
             out_filters = self.num_filters * min(2**n, 8)
-            conv = nn.Conv2d(in_filters, out_filters, kernel_size=4, stride=2, padding=self.padding, bias=False)
+            conv = nn.Conv2d(num_filters, out_filters, kernel_size=4, stride=2, padding=1, bias=False)
+            num_filters = out_filters
             # Init these as if a linear layer follows them because batchnorm happens before leaky relu.
             nn.init.kaiming_normal_(conv.weight, nonlinearity='linear')
             norm = nn.BatchNorm2d(out_filters)
@@ -355,13 +355,13 @@ class NlayerDiscriminator(nn.Module):
             self.blocks.extend([conv, norm, nonlinearity])
         # Make the output layers
         final_out_filters = self.num_filters * min(2**self.num_layers, 8)
-        conv = nn.Conv2d(out_filters, final_out_filters, kernel_size=4, stride=1, padding=self.padding, bias=False)
+        conv = nn.Conv2d(out_filters, final_out_filters, kernel_size=4, stride=1, padding=1, bias=False)
         nn.init.kaiming_normal_(conv.weight, nonlinearity='linear')
         norm = nn.BatchNorm2d(final_out_filters)
         nonlinearity = nn.LeakyReLU(0.2, True)
         self.blocks.extend([conv, norm, nonlinearity])
         # Output layer
-        output_conv = nn.Conv2d(final_out_filters, 1, kernel_size=4, stride=1, padding=self.padding, bias=False)
+        output_conv = nn.Conv2d(final_out_filters, 1, kernel_size=4, stride=1, padding=1, bias=False)
         nn.init.kaiming_normal_(output_conv.weight, nonlinearity='linear')
         # Should init output layer such that outputs are generally within the linear region of a sigmoid.
         output_conv.weight.data *= 0.1
@@ -369,9 +369,7 @@ class NlayerDiscriminator(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward through the discriminator."""
-        for block in self.blocks:
-            x = block(x)
-        return x
+        return self.blocks(x)
 
 
 class AutoEncoderLoss(nn.Module):

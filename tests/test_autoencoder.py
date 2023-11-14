@@ -90,7 +90,7 @@ def test_decoder():
 @pytest.mark.parametrize('width', [32])
 @pytest.mark.parametrize('num_layers', [3])
 def test_discriminator(height, width, num_layers):
-    discriminator = NlayerDiscriminator(input_channels=3, num_filters=16, num_layers=num_layers, padding=1)
+    discriminator = NlayerDiscriminator(input_channels=3, num_filters=16, num_layers=num_layers)
     x = torch.randn(1, 3, height, width)
     y = discriminator(x)
     downsample_factor = 2**(num_layers + 1)
