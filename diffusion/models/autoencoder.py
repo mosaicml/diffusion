@@ -456,7 +456,7 @@ class AutoEncoderLoss(nn.Module):
         # Basic L1 reconstruction loss
         ae_loss = F.l1_loss(outputs['x_recon'], batch[self.input_key], reduction='none')
         # Count the number of output elements to normalize the loss
-        num_output_elements = ae_loss.numel() // ae_loss.shape[0]
+        num_output_elements = ae_loss[0].numel()
         losses['ae_loss'] = ae_loss.mean()
 
         # LPIPs loss. Images for LPIPS must be in [-1, 1]
@@ -494,7 +494,7 @@ class AutoEncoderLoss(nn.Module):
         log_var = outputs['log_var']
         kl_div_loss = -0.5 * (1 + log_var - mean.pow(2) - log_var.exp())
         # Count the number of latent elements to normalize the loss
-        num_latent_elements = mean.numel() // kl_div_loss.shape[0]
+        num_latent_elements = mean[0].numel()
         losses['kl_div_loss'] = kl_div_loss.mean()
 
         # Combine the losses. Downweight the kl_div_loss to account for differing dimensionalities.
