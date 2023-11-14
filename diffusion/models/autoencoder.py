@@ -424,9 +424,6 @@ class AutoEncoderLoss(nn.Module):
             param.requires_grad_(False)
 
         # Set up the discriminator
-        self.discriminator_num_filters = discriminator_num_filters
-        self.discriminator_num_layers = discriminator_num_layers
-        self.discriminator_weight = discriminator_weight
         self.discriminator = NlayerDiscriminator(input_channels=self.output_channels,
                                                  num_filters=self.discriminator_num_filters,
                                                  num_layers=self.discriminator_num_layers)
@@ -470,8 +467,7 @@ class AutoEncoderLoss(nn.Module):
 
         # Make the nll loss
         rec_loss = ae_loss + self.lpips_weight * lpips_loss
-        # Note: the +2 here comes from the nll of the laplace distribution.
-        # It's only here to make you feel better by keeping the loss positive for longer.
+        # Note: the + 2 here comes from the nll of the laplace distribution.
         nll_loss = rec_loss / torch.exp(self.log_var) + self.log_var + 2
         nll_loss = nll_loss.mean()
         losses['nll_loss'] = nll_loss
