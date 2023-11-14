@@ -342,9 +342,9 @@ class AttentionLayer(nn.Module):
         h = self.norm(x)
         # Get q, k, and v
         qkv = self.qkv_conv(h)
-        q, k, v = torch.split(qkv, self.input_channels, dim=1)
+        qkv = self._reshape_for_attention(qkv)
+        q, k, v = torch.split(qkv, self.input_channels, dim=2)
         # Use torch's built in attention function
-        q, k, v = self._reshape_for_attention(q), self._reshape_for_attention(k), self._reshape_for_attention(v)
         h = F.scaled_dot_product_attention(q, k, v, dropout_p=self.dropout_probability)
         # Reshape back into an image style tensor
         h = self._reshape_from_attention(h, H, W)
