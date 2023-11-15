@@ -25,13 +25,13 @@ from diffusion.models.autoencoder import ComposerAutoEncoder, ComposerDiffusersA
 def make_autoencoder_optimizer(config: DictConfig, model: ComposerModel) -> Optimizer:
     """Configures the optimizer for use with an autoencoder + discriminator loss."""
     print('Configuring opimizer for autoencoder+discriminator')
-    assert isinstance(model, ComposerAutoEncoder) or isinstance(model, ComposerDiffusersAutoEncoder)
+    assert isinstance(model, (ComposerAutoEncoder, ComposerDiffusersAutoEncoder))
 
     # Configure optimizer settings for the autoencoder
     if hasattr(config, 'autoencoder_optimizer'):
-        autoencoder_param_dict = {k: v for k, v in config.autoencoder_optimizer.items()}
+        autoencoder_param_dict = dict(config.autoencoder_optimizer.items())
     else:
-        autoencoder_param_dict = {k: v for k, v in config.optimizer.items()}
+        autoencoder_param_dict = dict(config.optimizer.items())
 
     if model.autoencoder_loss.learn_log_var:
         autoencoder_param_dict['params'] = chain(model.model.parameters(), [model.autoencoder_loss.log_var])
@@ -40,9 +40,9 @@ def make_autoencoder_optimizer(config: DictConfig, model: ComposerModel) -> Opti
 
     # Configure optimizer settings for the discriminator
     if hasattr(config, 'discriminator_optimizer'):
-        discriminator_param_dict = {k: v for k, v in config.discriminator_optimizer.items()}
+        discriminator_param_dict = dict(config.discriminator_optimizer.items())
     else:
-        discriminator_param_dict = {k: v for k, v in config.optimizer.items()}
+        discriminator_param_dict = dict(config.optimizer.items())
     discriminator_param_dict['params'] = model.autoencoder_loss.discriminator.parameters()
 
     params = [autoencoder_param_dict, discriminator_param_dict]
