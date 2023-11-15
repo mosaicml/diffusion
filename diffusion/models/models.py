@@ -291,6 +291,7 @@ def build_autoencoder(input_channels: int = 3,
                       dropout_probability: float = 0.0,
                       resample_with_conv: bool = True,
                       zero_init_last: bool = False,
+                      use_attention: bool = True,
                       input_key: str = 'image',
                       learn_log_var: bool = True,
                       log_var_init: float = 0.0,
@@ -313,6 +314,7 @@ def build_autoencoder(input_channels: int = 3,
         dropout_probability (float): Dropout probability. Default: `0.0`.
         resample_with_conv (bool): Whether to use a convolutional resampling layer. Default: `True`.
         zero_init_last (bool): Whether to zero initialize the last layer in resblocks+discriminator. Default: `False`.
+        use_attention (bool): Whether to use attention in the encoder and decoder. Default: `True`.
         input_key (str): Key to use for the input. Default: `image`.
         learn_log_var (bool): Whether to learn the output log variance in the VAE. Default: `True`.
         log_var_init (float): Initial value for the output log variance. Default: `0.0`.
@@ -335,6 +337,7 @@ def build_autoencoder(input_channels: int = 3,
         dropout_probability=dropout_probability,
         resample_with_conv=resample_with_conv,
         zero_init_last=zero_init_last,
+        use_attention=use_attention,
     )
 
     # Configure the loss function

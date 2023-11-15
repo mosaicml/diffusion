@@ -32,6 +32,7 @@ class Encoder(nn.Module):
         dropout (float): Dropout probability. Default: `0.0`.
         resample_with_conv (bool): Whether to use a conv for downsampling. Default: `True`.
         zero_init_last (bool): Whether to initialize the last conv layer to zero. Default: `False`.
+        use_attention (bool): Whether to use attention layers. Default: `True`.
     """
 
     def __init__(self,
@@ -44,7 +45,8 @@ class Encoder(nn.Module):
                  use_conv_shortcut: bool = False,
                  dropout_probability: float = 0.0,
                  resample_with_conv: bool = True,
-                 zero_init_last: bool = False):
+                 zero_init_last: bool = False,
+                 use_attention: bool = True):
         super().__init__()
         self.input_channels = input_channels
         self.latent_channels = latent_channels
@@ -57,6 +59,7 @@ class Encoder(nn.Module):
         self.dropout_probability = dropout_probability
         self.resample_with_conv = resample_with_conv
         self.zero_init_last = zero_init_last
+        self.use_attention = use_attention
 
         # Inital conv layer to get to the hidden dimensionality
         self.conv_in = nn.Conv2d(input_channels, hidden_channels, kernel_size=3, padding=1)
@@ -90,8 +93,9 @@ class Encoder(nn.Module):
                                      zero_init_last=zero_init_last)
         self.blocks.append(middle_block_1)
 
-        attention = AttentionLayer(input_channels=block_output_channels)
-        self.blocks.append(attention)
+        if self.use_attention:
+            attention = AttentionLayer(input_channels=block_output_channels)
+            self.blocks.append(attention)
 
         middle_block_2 = ResNetBlock(input_channels=block_output_channels,
                                      output_channels=block_output_channels,
@@ -132,6 +136,7 @@ class Decoder(nn.Module):
         dropout (float): Dropout probability. Default: `0.0`.
         resample_with_conv (bool): Whether to use a conv for upsampling. Default: `True`.
         zero_init_last (bool): Whether to initialize the last conv layer to zero. Default: `False`.
+        use_attention (bool): Whether to use attention layers. Default: `True`.
     """
 
     def __init__(self,
@@ -143,7 +148,8 @@ class Decoder(nn.Module):
                  use_conv_shortcut=False,
                  dropout_probability: float = 0.0,
                  resample_with_conv: bool = True,
-                 zero_init_last: bool = False):
+                 zero_init_last: bool = False,
+                 use_attention: bool = True):
         super().__init__()
         self.latent_channels = latent_channels
         self.output_channels = output_channels
@@ -154,6 +160,7 @@ class Decoder(nn.Module):
         self.dropout_probability = dropout_probability
         self.resample_with_conv = resample_with_conv
         self.zero_init_last = zero_init_last
+        self.use_attention = use_attention
 
         # Input conv layer to get to the hidden dimensionality
         channels = self.hidden_channels * self.channel_multipliers[-1]
@@ -169,8 +176,9 @@ class Decoder(nn.Module):
                                      zero_init_last=zero_init_last)
         self.blocks.append(middle_block_1)
 
-        attention = AttentionLayer(input_channels=channels)
-        self.blocks.append(attention)
+        if self.use_attention:
+            attention = AttentionLayer(input_channels=channels)
+            self.blocks.append(attention)
 
         middle_block_2 = ResNetBlock(input_channels=channels,
                                      output_channels=channels,
@@ -229,6 +237,7 @@ class AutoEncoder(nn.Module):
         dropout (float): Dropout probability. Default: `0.0`.
         resample_with_conv (bool): Whether to use a conv for down/up sampling. Default: `True`.
         zero_init_last (bool): Whether to initialize the last conv layer to zero. Default: `False`.
+        use_attention (bool): Whether to use attention layers. Default: `True`.
     """
 
     def __init__(self,
@@ -242,7 +251,8 @@ class AutoEncoder(nn.Module):
                  use_conv_shortcut=False,
                  dropout_probability: float = 0.0,
                  resample_with_conv: bool = True,
-                 zero_init_last: bool = False):
+                 zero_init_last: bool = False,
+                 use_attention: bool = True):
         super().__init__()
         self.input_channels = input_channels
         self.output_channels = output_channels
@@ -255,6 +265,7 @@ class AutoEncoder(nn.Module):
         self.dropout_probability = dropout_probability
         self.resample_with_conv = resample_with_conv
         self.zero_init_last = zero_init_last
+        self.use_attention = use_attention
 
         self.encoder = Encoder(input_channels=self.input_channels,
                                hidden_channels=self.hidden_channels,
@@ -265,7 +276,8 @@ class AutoEncoder(nn.Module):
                                use_conv_shortcut=self.use_conv_shortcut,
                                dropout_probability=self.dropout_probability,
                                resample_with_conv=self.resample_with_conv,
-                               zero_init_last=self.zero_init_last)
+                               zero_init_last=self.zero_init_last,
+                               use_attention=self.use_attention)
 
         channels = 2 * self.latent_channels if self.double_latent_channels else self.latent_channels
         self.quant_conv = nn.Conv2d(channels, channels, kernel_size=1, stride=1, padding=0)
@@ -286,7 +298,8 @@ class AutoEncoder(nn.Module):
                                use_conv_shortcut=self.use_conv_shortcut,
                                dropout_probability=self.dropout_probability,
                                resample_with_conv=self.resample_with_conv,
-                               zero_init_last=self.zero_init_last)
+                               zero_init_last=self.zero_init_last,
+                               use_attention=self.use_attention)
 
         self.post_quant_conv = nn.Conv2d(self.latent_channels, self.latent_channels, kernel_size=1, stride=1, padding=0)
         nn.init.kaiming_normal_(self.post_quant_conv.weight, nonlinearity='linear')
