@@ -22,7 +22,7 @@ def test_resnet_block(input_channels, output_channels, use_conv_shortcut, dropou
                         zero_init_last=True)
     x = torch.randn(1, input_channels, 5, 5)
     y = block(x)
-    assert y.shape == (1, output_channels, 5, 5)
+    assert y.shape == (1, output_channels, 5, 5), f'{y.shape}'
     if input_channels == output_channels:
         # Model should be exactly identity here
         torch.testing.assert_close(x, y)
@@ -94,7 +94,8 @@ def test_discriminator(height, width, num_layers):
     x = torch.randn(1, 3, height, width)
     y = discriminator(x)
     downsample_factor = 2**(num_layers + 1)
-    assert y.shape == (1, 1, height // downsample_factor, width // downsample_factor)
+    assert y.shape == (1, 1, height // downsample_factor,
+                       width // downsample_factor), f'{y.shape}, {height}, {width}, {downsample_factor}'
 
 
 def test_autoencoder():
