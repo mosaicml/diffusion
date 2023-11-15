@@ -41,7 +41,7 @@ class Encoder(nn.Module):
                  double_latent_channels: bool = True,
                  channel_multipliers: Tuple[int, ...] = (1, 2, 4, 8),
                  num_residual_blocks: int = 4,
-                 use_conv_shortcut=False,
+                 use_conv_shortcut: bool = False,
                  dropout_probability: float = 0.0,
                  resample_with_conv: bool = True,
                  zero_init_last: bool = False):
