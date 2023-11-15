@@ -7,7 +7,7 @@ from diffusers import AutoencoderKL
 from transformers import PretrainedConfig
 
 from diffusion.models.autoencoder import AutoEncoder, Decoder, Encoder, NlayerDiscriminator
-from diffusion.models.layers import AttentionLayer, Downsample, ResNetBlock, Upsample
+from diffusion.models.layers import AttentionLayer, Downsample, GradientScalingLayer, ResNetBlock, Upsample
 
 
 @pytest.mark.parametrize('input_channels', [32])
@@ -96,6 +96,26 @@ def test_discriminator(height, width, num_layers):
     downsample_factor = 2**(num_layers + 1)
     assert y.shape == (1, 1, height // downsample_factor,
                        width // downsample_factor), f'{y.shape}, {height}, {width}, {downsample_factor}'
+
+
+@pytest.mark.parametrize('scale', [1, -1, -0.5, 0.5])
+def test_attention_gradient_scaling(scale):
+    # Make the layer
+    layer = GradientScalingLayer()
+    # Need to register the backward hook to scale the gradient
+    layer.register_full_backward_hook(layer.backward_hook)
+    # Input vector
+    x = torch.randn(1, 3, requires_grad=True)
+    # Forward pass
+    y = layer(x)
+    # Check that the output is the same as the input
+    torch.testing.assert_close(x, y)
+    # Set the scale
+    layer.set_scale(scale)
+    # Take the gradient
+    grad = torch.autograd.grad(y.sum(), x, retain_graph=True)[0]
+    # Check that the gradient is 1 times the scale
+    torch.testing.assert_close(grad, scale * torch.ones_like(grad))
 
 
 def test_autoencoder():
