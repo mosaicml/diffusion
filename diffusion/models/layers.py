@@ -418,7 +418,7 @@ class GradientScalingLayer(nn.Module):
 
     def __init__(self):
         super().__init__()
-        self.scale = 1.0
+        self.scale: float = 1.0
 
     def set_scale(self, scale: float):
         self.scale = scale
