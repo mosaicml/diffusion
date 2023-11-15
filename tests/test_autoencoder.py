@@ -117,4 +117,4 @@ def test_autoencoder():
     # Check that the number of parameters is the same
     hf_params = sum(p.numel() for p in hf_autoencoder.parameters() if p.requires_grad)
     params = sum(p.numel() for p in autoencoder.parameters() if p.requires_grad)
-    assert hf_params == params
+    assert hf_params == params, f'{hf_params} == {params}'
