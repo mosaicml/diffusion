@@ -377,6 +377,7 @@ class NlayerDiscriminator(nn.Module):
         output_conv = nn.Conv2d(final_out_filters, 1, kernel_size=4, stride=1, padding=1, bias=False)
         nn.init.kaiming_normal_(output_conv.weight, nonlinearity='linear')
         # Should init output layer such that outputs are generally within the linear region of a sigmoid.
+        # This likely makes little difference in practice.
         output_conv.weight.data *= 0.1
         self.blocks.append(output_conv)
 
