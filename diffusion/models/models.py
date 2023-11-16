@@ -41,6 +41,7 @@ def stable_diffusion_2(
     loss_bins: Optional[List] = None,
     precomputed_latents: bool = False,
     encode_latents_in_fp16: bool = True,
+    mask_pad_tokens: bool = False,
     fsdp: bool = True,
     clip_qkv: Optional[float] = None,
 ):
@@ -67,6 +68,7 @@ def stable_diffusion_2(
         offset_noise (float, optional): The scale of the offset noise. If not specified, offset noise will not
             be used. Default `None`.
         encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
+        mask_pad_tokens (bool): Whether to mask pad tokens in cross attention. Defaults to False.
         fsdp (bool): Whether to use FSDP. Defaults to True.
         clip_qkv (float, optional): If not None, clip the qkv values to this value. Defaults to None.
     """
@@ -123,6 +125,7 @@ def stable_diffusion_2(
         loss_bins=loss_bins,
         precomputed_latents=precomputed_latents,
         encode_latents_in_fp16=encode_latents_in_fp16,
+        mask_pad_tokens=mask_pad_tokens,
         fsdp=fsdp,
     )
     if torch.cuda.is_available():
@@ -156,6 +159,7 @@ def stable_diffusion_xl(
     loss_bins: Optional[List] = None,
     precomputed_latents: bool = False,
     encode_latents_in_fp16: bool = True,
+    mask_pad_tokens: bool = False,
     fsdp: bool = True,
     clip_qkv: Optional[float] = 6.0,
 ):
@@ -188,6 +192,7 @@ def stable_diffusion_xl(
             [(0, 1)].
         precomputed_latents (bool): Whether to use precomputed latents. Defaults to False.
         encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
+        mask_pad_tokens (bool): Whether to mask pad tokens in cross attention. Defaults to False.
         fsdp (bool): Whether to use FSDP. Defaults to True.
         clip_qkv (float, optional): If not None, clip the qkv values to this value. Defaults to 6.0. Improves stability
             of training.
@@ -259,6 +264,7 @@ def stable_diffusion_xl(
         loss_bins=loss_bins,
         precomputed_latents=precomputed_latents,
         encode_latents_in_fp16=encode_latents_in_fp16,
+        mask_pad_tokens=mask_pad_tokens,
         fsdp=fsdp,
         sdxl=True,
     )

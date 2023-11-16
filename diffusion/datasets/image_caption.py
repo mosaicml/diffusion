@@ -151,17 +151,22 @@ class StreamingImageCaptionDataset(StreamingDataset):
             out['drop_caption_mask'] = 1.0
 
         max_length = None if self.sdxl else self.tokenizer.model_max_length  # type: ignore
-        tokenized_caption = self.tokenizer(caption,
-                                           padding='max_length',
-                                           max_length=max_length,
-                                           truncation=True,
-                                           return_tensors='pt')['input_ids']
+        tokenizer_out = self.tokenizer(caption,
+                                       padding='max_length',
+                                       max_length=max_length,
+                                       truncation=True,
+                                       return_tensors='pt')
         if self.sdxl:
-            tokenized_caption = [tokenized_cap.squeeze() for tokenized_cap in tokenized_caption]
+            tokenized_caption = [tokenized_cap.squeeze() for tokenized_cap in tokenizer_out.input_ids]
             tokenized_caption = torch.stack(tokenized_caption)
+            # Take union over both tokenizers padding masks
+            attention_masks = tokenizer_out.attention_mask
+            attention_mask = torch.logical_or(attention_masks[0], attention_masks[1]).to(attention_masks[0].dtype)
         else:
-            tokenized_caption = tokenized_caption.squeeze()
+            tokenized_caption = tokenizer_out.input_ids.squeeze()
+            attention_mask = tokenizer_out.attention_mask
         out['captions'] = tokenized_caption
+        out['attention_mask'] = attention_mask
         return out
 
 
