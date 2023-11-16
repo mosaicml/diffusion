@@ -162,7 +162,12 @@ class StableDiffusion(ComposerModel):
             # only wrap models we are training
             self.text_encoder._fsdp_wrap = False
             self.vae._fsdp_wrap = False
-            self.unet._fsdp_wrap = True
+            self.unet.mid_block._fsdp_wrap = True
+            for block in self.unet.down_blocks:
+                block._fsdp_wrap = True
+            for block in self.unet.up_blocks:
+                block._fsdp_wrap = True
+
 
     def forward(self, batch):
         latents, conditioning, conditioning_2, pooled_conditioning = None, None, None, None
