@@ -589,6 +589,8 @@ class ComposerAutoEncoder(ComposerModel):
             metric.update(clamped_imgs, batch[self.input_key])
         elif isinstance(metric, StructuralSimilarityIndexMeasure):
             metric.update(clamped_imgs, batch[self.input_key])
+        elif isinstance(metric, MeanSquaredError):
+            metric.update(outputs['x_recon'], batch[self.input_key])
         else:
             metric.update(outputs['x_recon'], batch[self.input_key])
 
