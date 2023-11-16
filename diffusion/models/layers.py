@@ -397,7 +397,7 @@ class Upsample(nn.Module):
             nn.init.kaiming_normal_(self.conv.weight, nonlinearity='linear')
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = F.interpolate(x, scale_factor=2, mode='nearest')
+        x = F.interpolate(x, scale_factor=2, mode='nearest', antialias=False)
         if self.resample_with_conv:
             x = self.conv(x)
         return x
