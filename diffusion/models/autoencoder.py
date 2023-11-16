@@ -1,7 +1,10 @@
 # Copyright 2022 MosaicML Diffusion authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Autoencoder parts for training latent diffusion models."""
+"""Autoencoder parts for training latent diffusion models.
+
+Based on the implementation from https://github.com/CompVis/stable-diffusion
+"""
 
 from typing import Dict, Tuple
 
