@@ -350,7 +350,7 @@ class AttentionLayer(nn.Module):
         h = self._reshape_from_attention(h, H, W)
         # Project to the output
         h = self.proj_conv(h)
-        return h
+        return x + h
 
 
 class Downsample(nn.Module):
