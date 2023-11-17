@@ -394,7 +394,7 @@ class AutoEncoderLoss(nn.Module):
 
     Args:
         input_key (str): Key for the input to the model. Default: `image`.
-        output_channels (int): Number of output channels. Default: `3`.
+        ae_output_channels (int): Number of output channels. Default: `3`.
         learn_log_var (bool): Whether to learn the output log variance. Default: `True`.
         log_var_init (float): Initial value for the log variance. Default: `0.0`.
         kl_divergence_weight (float): Weight for the KL divergence loss. Default: `1.0`.
@@ -406,7 +406,7 @@ class AutoEncoderLoss(nn.Module):
 
     def __init__(self,
                  input_key: str = 'image',
-                 output_channels: int = 3,
+                 ae_output_channels: int = 3,
                  learn_log_var: bool = True,
                  log_var_init: float = 0.0,
                  kl_divergence_weight: float = 1.0,
@@ -416,7 +416,7 @@ class AutoEncoderLoss(nn.Module):
                  discriminator_num_layers: int = 3):
         super().__init__()
         self.input_key = input_key
-        self.output_channels = output_channels
+        self.ae_output_channels = ae_output_channels
         self.learn_log_var = learn_log_var
         self.log_var_init = log_var_init
         self.kl_divergence_weight = kl_divergence_weight
@@ -441,7 +441,7 @@ class AutoEncoderLoss(nn.Module):
             param.requires_grad_(False)
 
         # Set up the discriminator
-        self.discriminator = NlayerDiscriminator(input_channels=self.output_channels,
+        self.discriminator = NlayerDiscriminator(input_channels=self.ae_output_channels,
                                                  num_filters=self.discriminator_num_filters,
                                                  num_layers=self.discriminator_num_layers)
         self.scale_gradients = GradientScalingLayer()

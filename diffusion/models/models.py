@@ -342,7 +342,7 @@ def build_autoencoder(input_channels: int = 3,
 
     # Configure the loss function
     autoencoder_loss = AutoEncoderLoss(input_key=input_key,
-                                       output_channels=output_channels,
+                                       ae_output_channels=output_channels,
                                        learn_log_var=learn_log_var,
                                        log_var_init=log_var_init,
                                        kl_divergence_weight=kl_divergence_weight,
@@ -400,7 +400,7 @@ def build_diffusers_autoencoder(model_name: str = 'stabilityai/stable-diffusion-
 
     # Configure the loss function
     autoencoder_loss = AutoEncoderLoss(input_key=input_key,
-                                       output_channels=output_channels,
+                                       ae_output_channels=output_channels,
                                        learn_log_var=learn_log_var,
                                        log_var_init=log_var_init,
                                        kl_divergence_weight=kl_divergence_weight,
