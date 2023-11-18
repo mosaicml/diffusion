@@ -34,6 +34,7 @@ class StableDiffusionInference():
         pretrained (bool): Whether to load pretrained weights. Default: True.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
+        local_checkpoint_path (str): Path to the local checkpoint. Default: '/tmp/model.pt'.
         **kwargs: Additional keyword arguments to pass to the model.
     """
 
@@ -41,6 +42,7 @@ class StableDiffusionInference():
                  model_name: str = 'stabilityai/stable-diffusion-2-base',
                  pretrained: bool = False,
                  prediction_type: str = 'epsilon',
+                 local_checkpoint_path: str = LOCAL_CHECKPOINT_PATH
                  **kwargs):
         self.device = torch.cuda.current_device()
 
@@ -54,7 +56,7 @@ class StableDiffusionInference():
         )
 
         if not pretrained:
-            state_dict = torch.load(LOCAL_CHECKPOINT_PATH)
+            state_dict = torch.load(local_checkpoint_path)
             for key in list(state_dict['state']['model'].keys()):
                 if 'val_metrics.' in key:
                     del state_dict['state']['model'][key]
