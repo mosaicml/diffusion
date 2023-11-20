@@ -473,12 +473,13 @@ class StableDiffusion(ComposerModel):
             text_embeddings = torch.cat([unconditional_embeddings, text_embeddings])
             if self.sdxl:
                 pooled_embeddings = torch.cat([pooled_unconditional_embeddings, pooled_text_embeddings])  # type: ignore
+            if pad_attn_mask is not None:
+                encoder_attn_mask = torch.cat([uncond_pad_attn_mask, pad_attn_mask])  # type: ignore
         else:
             if self.sdxl:
                 pooled_embeddings = pooled_text_embeddings
-
             if pad_attn_mask is not None:
-                encoder_attn_mask = torch.cat([uncond_pad_attn_mask, pad_attn_mask])  # type: ignore
+                encoder_attn_mask = pad_attn_mask
 
         # prepare for diffusion generation process
         latents = torch.randn(
