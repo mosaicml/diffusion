@@ -17,6 +17,7 @@ install_requires = [
     'triton==2.0.0',
     'torchmetrics[image]==0.11.4',
     'clean-fid',
+    'lpips',
     'clip@git+https://github.com/openai/CLIP.git',
 ]
 
