@@ -65,13 +65,11 @@ class StreamingImageCaptionDataset(StreamingDataset):
         zero_dropped_captions: bool = False,
         **streaming_kwargs,
     ) -> None:
-        
+
         # Set defaults for vision-friendly streaming args.
-        if 'shuffle_block_size' not in streaming_kwargs:
-            streaming_kwargs['shuffle_block_size'] = 1 << 18
-        if 'shuffle_algo' not in streaming_kwargs:
-            streaming_kwargs['shuffle_algo'] = 'py1s'
-        
+        streaming_kwargs.setdefault('shuffle_block_size', 1 << 18)
+        streaming_kwargs.setdefault('shuffle_algo', 'py1s')
+
         super().__init__(
             streams=streams,
             remote=remote,

@@ -50,7 +50,7 @@ class StreamingCOCOCaption(StreamingDataset):
         shuffle,
         shuffle_algo: str = 'py1s',
         shuffle_block_size: int = 1 << 18,
-        batch_size=None,
+        batch_size: Optional[int] = None,
         tokenizer_name_or_path='stabilityai/stable-diffusion-2-base',
         caption_selection='first',
         download_timeout=120,
