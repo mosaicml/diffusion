@@ -357,8 +357,8 @@ class AutoEncoder(nn.Module):
     def device(self) -> torch.device:
         return next(self.parameters()).device
 
-    def state_dict(self) -> Dict[str, Any]:
-        state = super(AutoEncoder, self).state_dict()
+    def state_dict(self, *args, **kwargs) -> Dict[str, Any]:
+        state = super(AutoEncoder, self).state_dict(*args, **kwargs)
         # Save the autoencoder config
         state['config'] = {}
         state['config']['input_channels'] = self.input_channels
