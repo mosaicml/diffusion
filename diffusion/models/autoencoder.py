@@ -6,7 +6,7 @@
 Based on the implementation from https://github.com/CompVis/stable-diffusion
 """
 
-from typing import Any, Dict, Tuple
+from typing import Dict, Tuple
 
 import lpips
 import torch
@@ -315,6 +315,8 @@ class AutoEncoder(nn.Module):
         self.resample_with_conv = resample_with_conv
         self.zero_init_last = zero_init_last
         self.use_attention = use_attention
+        self.config = {}
+        self.set_extra_state(None)
 
         self.encoder = Encoder(input_channels=self.input_channels,
                                hidden_channels=self.hidden_channels,
@@ -357,23 +359,25 @@ class AutoEncoder(nn.Module):
     def device(self) -> torch.device:
         return next(self.parameters()).device
 
-    def state_dict(self, *args, **kwargs) -> Dict[str, Any]:
-        state = super(AutoEncoder, self).state_dict(*args, **kwargs)
+    def get_extra_state(self):
+        return self.config
+
+    def set_extra_state(self, state):
         # Save the autoencoder config
-        state['config'] = {}
-        state['config']['input_channels'] = self.input_channels
-        state['config']['output_channels'] = self.output_channels
-        state['config']['hidden_channels'] = self.hidden_channels
-        state['config']['latent_channels'] = self.latent_channels
-        state['config']['double_latent_channels'] = self.double_latent_channels
-        state['config']['channel_multipliers'] = self.channel_multipliers
-        state['config']['num_residual_blocks'] = self.num_residual_blocks
-        state['config']['use_conv_shortcut'] = self.use_conv_shortcut
-        state['config']['dropout_probability'] = self.dropout_probability
-        state['config']['resample_with_conv'] = self.resample_with_conv
-        state['config']['use_attention'] = self.use_attention
-        state['config']['zero_init_last'] = self.zero_init_last
-        return state
+        config = {}
+        config['input_channels'] = self.input_channels
+        config['output_channels'] = self.output_channels
+        config['hidden_channels'] = self.hidden_channels
+        config['latent_channels'] = self.latent_channels
+        config['double_latent_channels'] = self.double_latent_channels
+        config['channel_multipliers'] = self.channel_multipliers
+        config['num_residual_blocks'] = self.num_residual_blocks
+        config['use_conv_shortcut'] = self.use_conv_shortcut
+        config['dropout_probability'] = self.dropout_probability
+        config['resample_with_conv'] = self.resample_with_conv
+        config['use_attention'] = self.use_attention
+        config['zero_init_last'] = self.zero_init_last
+        self.config = config
 
     def get_last_layer_weight(self) -> torch.Tensor:
         """Get the weight of the last layer of the decoder."""
