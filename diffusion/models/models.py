@@ -4,10 +4,12 @@
 """Constructors for diffusion models."""
 
 import logging
+import os
 from typing import List, Optional, Tuple
 
 import torch
 from composer.devices import DeviceGPU
+from composer.utils.file_helpers import get_file
 from diffusers import AutoencoderKL, DDIMScheduler, DDPMScheduler, EulerDiscreteScheduler, UNet2DConditionModel
 from torchmetrics import MeanSquaredError
 from torchmetrics.image.fid import FrechetInceptionDistance
@@ -15,6 +17,7 @@ from torchmetrics.multimodal.clip_score import CLIPScore
 from transformers import CLIPTextModel, CLIPTextModelWithProjection, CLIPTokenizer, PretrainedConfig
 
 from diffusion.models.autoencoder import AutoEncoder, AutoEncoderLoss, ComposerAutoEncoder, ComposerDiffusersAutoEncoder
+from diffusion.models.latent_diffusion import LatentDiffusion
 from diffusion.models.layers import ClippedAttnProcessor2_0, ClippedXFormersAttnProcessor, zero_module
 from diffusion.models.pixel_diffusion import PixelDiffusion
 from diffusion.models.stable_diffusion import StableDiffusion
@@ -287,6 +290,59 @@ def stable_diffusion_xl(
         log.info('Using %s with clip_val %.1f' % (attn_processor.__class__, clip_qkv))
         model.unet.set_attn_processor(attn_processor)
 
+    return model
+
+
+def latent_diffusion(autoencoder_path: str,
+                     autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
+                     encode_latents_in_fp16=True,
+                     prediction_type: str = 'epsilon'):
+    """Setup for generic latent diffusion model.
+
+    Args:
+        autoencoder_path (str): Path to autoencoder weights.
+        autoencoder_local_path (str): Path to autoencoder weights. Default: `/tmp/autoencoder_weights.pt`.
+        encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
+        prediction_type (str): The type of prediction to use. Must be one of 'epsilon' or 'v_prediction'. Default: `epsilon`.
+        use_xformers (bool): Whether to use xformers attention. Defaults to True.
+    """
+    # Download the autoencoder weights and init them
+    if not os.path.exists(autoencoder_local_path):
+        get_file(path=autoencoder_path, destination=autoencoder_local_path)
+    # Load the autoencoder weights from the state dict
+    vae = AutoEncoder(zero_init_last=True, use_attention=False, latent_channels=32)
+    state_dict = torch.load(autoencoder_local_path)
+    # Need to clean up the state dict to remove loss and metrics.
+    cleaned_state_dict = {}
+    for key in list(state_dict['state']['model'].keys()):
+        if key.split('.')[0] == 'model':
+            cleaned_key = '.'.join(key.split('.')[1:])
+            cleaned_state_dict[cleaned_key] = state_dict['state']['model'][key]
+        else:
+            print(f'Skipping key {key}')
+    vae.load_state_dict(cleaned_state_dict, strict=True)
+
+    model_name = 'stabilityai/stable-diffusion-2-base'
+    if encode_latents_in_fp16:
+        vae = vae.half()
+        text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder', torch_dtype=torch.float16)
+    else:
+        text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder')
+
+    config = PretrainedConfig.get_config_dict(model_name, subfolder='unet')
+    new_config = config[0]
+    new_config['in_channels'] = 32
+    new_config['out_channels'] = 32
+    unet = UNet2DConditionModel(**new_config)
+
+    tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer')
+
+    model = LatentDiffusion(model=unet,
+                            autoencoder=vae,
+                            text_encoder=text_encoder,
+                            tokenizer=tokenizer,
+                            prediction_type=prediction_type,
+                            encode_latents_in_fp16=encode_latents_in_fp16)
     return model
 
 
