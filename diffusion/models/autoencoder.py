@@ -225,6 +225,52 @@ class Decoder(nn.Module):
         return h
 
 
+class GaussianDistribution:
+    """Gaussian distribution parameterized with mean and log variance."""
+
+    def __init__(self, mean: torch.Tensor, log_var: torch.Tensor):
+        self.mean = mean
+        self.log_var = log_var
+        self.var = torch.exp(log_var)
+        self.std = torch.exp(0.5 * log_var)
+
+    def __getitem__(self, key):
+        if key == 'latent_dist':
+            return GaussianDistribution(self.mean[key], self.log_var[key])
+        elif key == 'mean':
+            return self.mean[key]
+        elif key == 'log_var':
+            return self.log_var[key]
+        else:
+            raise KeyError(key)
+
+    @property
+    def latent_dist(self):
+        return self
+
+    def sample(self) -> torch.Tensor:
+        """Sample from the distribution."""
+        return self.mean + self.std * torch.randn_like(self.mean)
+
+
+class AutoEncoderOutput:
+    """Output from an autoencoder."""
+
+    def __init__(self, x_recon: torch.Tensor):
+        self.x_recon = x_recon
+
+    def __getitem__(self, key):
+        if key == 'x_recon':
+            return self.x_recon
+        else:
+            raise KeyError(key)
+
+    @property
+    def sample(self) -> torch.Tensor:
+        """Sample from the output."""
+        return self.x_recon
+
+
 class AutoEncoder(nn.Module):
     """Autoencoder module for training a latent diffusion model.
 
@@ -307,32 +353,34 @@ class AutoEncoder(nn.Module):
         self.post_quant_conv = nn.Conv2d(self.latent_channels, self.latent_channels, kernel_size=1, stride=1, padding=0)
         nn.init.kaiming_normal_(self.post_quant_conv.weight, nonlinearity='linear')
 
+    @property
+    def device(self) -> torch.device:
+        return next(self.parameters()).device
+
     def get_last_layer_weight(self) -> torch.Tensor:
         """Get the weight of the last layer of the decoder."""
         return self.decoder.conv_out.weight
 
-    def encode(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
+    def encode(self, x: torch.Tensor) -> GaussianDistribution:
         """Encode an input tensor into a latent tensor."""
         h = self.encoder(x)
         moments = self.quant_conv(h)
         # Split the moments into mean and log variance
         mean, log_var = moments[:, :self.latent_channels], moments[:, self.latent_channels:]
-        return {'mean': mean, 'log_var': log_var}
+        return GaussianDistribution(mean, log_var)
 
-    def decode(self, z: torch.Tensor) -> Dict[str, torch.Tensor]:
+    def decode(self, z: torch.Tensor) -> AutoEncoderOutput:
         """Decode a latent tensor into an output tensor."""
         z = self.post_quant_conv(z)
         x_recon = self.decoder(z)
-        return {'x_recon': x_recon}
+        return AutoEncoderOutput(x_recon)
 
     def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
         """Forward through the autoencoder."""
-        encoded = self.encode(x)
-        mean, log_var = encoded['mean'], encoded['log_var']
-        # Reparameteriztion trick
-        z = mean + torch.exp(0.5 * log_var) * torch.randn_like(mean)
+        encoded_dist = self.encode(x)
+        z = encoded_dist.sample()
         x_recon = self.decode(z)['x_recon']
-        return {'x_recon': x_recon, 'latents': z, 'mean': mean, 'log_var': log_var}
+        return {'x_recon': x_recon, 'latents': z, 'mean': encoded_dist.mean, 'log_var': encoded_dist.log_var}
 
 
 class NlayerDiscriminator(nn.Module):

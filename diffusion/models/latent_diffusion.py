@@ -29,6 +29,7 @@ class LatentDiffusion(ComposerModel):
         tokenizer (transformers.PreTrainedTokenizer): Tokenizer used for
             text_encoder. For a `CLIPTextModel` this will be the
             `CLIPTokenizer` from HuggingFace transformers.
+        prediction_type (str): The type of prediction to use. Currently only `epsilon` and `v_prediction` are supported.
         offset_noise (float, optional): The scale of the offset noise. If not specified, offset noise will not
             be used. Default `None`.
         latent_scale (float): The scaling factor of the latents. Default: `1.0`.
@@ -47,11 +48,13 @@ class LatentDiffusion(ComposerModel):
                  autoencoder: AutoEncoder,
                  text_encoder,
                  tokenizer,
+                 prediction_type: str = 'epsilon',
                  offset_noise: Optional[float] = None,
                  latent_scale: float = 1.0,
                  T_max: int = 1000,
                  image_key: str = 'image',
                  text_key: str = 'captions',
+                 attention_mask_key: str = 'attention_mask',
                  fsdp: bool = False,
                  encode_latents_in_fp16: bool = False):
         super().__init__()
@@ -59,11 +62,15 @@ class LatentDiffusion(ComposerModel):
         self.autoencoder = autoencoder
         self.text_encoder = text_encoder
         self.tokenizer = tokenizer
+        self.prediction_type = prediction_type.lower()
+        if self.prediction_type not in ['epsilon', 'v_prediction']:
+            raise ValueError(f'Unrecognized prediction type {self.prediction_type}')
         self.offset_noise = offset_noise
         self.latent_scale = latent_scale
         self.T_max = T_max
         self.image_key = image_key
         self.text_key = text_key
+        self.attention_mask_key = attention_mask_key
         self.fsdp = fsdp
         self.encode_latents_in_fp16 = encode_latents_in_fp16
 
@@ -91,9 +98,9 @@ class LatentDiffusion(ComposerModel):
         if self.encode_latents_in_fp16:
             # Disable autocast context as models are in fp16
             with torch.cuda.amp.autocast(enabled=False):
-                latents = self.autoencoder.encode(images.half())['latents'].data
+                latents = self.autoencoder.encode(images.half()).latent_dist.sample().data
         else:
-            latents = self.autoencoder.encode(images)['latents'].data
+            latents = self.autoencoder.encode(images).latent_dist.sample().data
         return latents
 
     def tokenize_text(self, text: Union[str, List[str]]):
@@ -103,15 +110,30 @@ class LatentDiffusion(ComposerModel):
         tokenizer_out = self.tokenizer(text, padding='max_length', truncation=True, return_tensors='pt')
         return tokenizer_out.input_ids, tokenizer_out.attention_mask
 
-    def embed_text(self, tokenized_text):
-        """Get the text embeddings from the text encoder(s)."""
+    def embed_text(self, tokenized_text, attention_mask):
+        """Get the text embeddings from the text encoder(s).
+
+        Tokenized text is expected to be of shape (batch_size, sequence_length) for a single tokenizer,
+        or (batch_size, num_tokenizers, sequence_length) for multiple tokenizers.
+        """
+        # Ensure that the tokenized text is on the same device as the text encoder
+        tokenized_text = tokenized_text.to(self.text_encoder.device)
+        if attention_mask is not None:
+            attention_mask = attention_mask.to(self.text_encoder.device)
         # There are possibly multiple text tokenizations depending on the model. Get them all.
-        conditionings = [tokenized_text[:, i, :] for i in range(tokenized_text.shape[1])]
-        conditionings = [c.view(-1, c.shape[-1]) for c in conditionings]
+        if tokenized_text.ndim > 2:
+            conditionings = [tokenized_text[:, i, :] for i in range(tokenized_text.shape[1])]
+            conditionings = [c.view(-1, c.shape[-1]) for c in conditionings]
+        elif tokenized_text.ndim <= 2:
+            conditionings = [tokenized_text]
+        else:
+            raise ValueError('Invalid tokenized text shape.')
+        # Embed the text. In the event there are multiple tokenizations the text encoder expects a list.
         if len(conditionings) > 1:
-            conditioning, pooled_conditioning = self.text_encoder(conditionings)
+            conditioning, pooled_conditioning = self.text_encoder(conditionings, attention_mask=attention_mask)
         elif len(conditionings) == 1:
-            conditioning = self.text_encoder(conditionings[0])[0]
+            attention_mask = attention_mask.squeeze()
+            conditioning = self.text_encoder(conditionings[0], attention_mask=attention_mask)[0]
             pooled_conditioning = None
         else:
             raise ValueError('No conditioning vectors were found.')
@@ -130,20 +152,32 @@ class LatentDiffusion(ComposerModel):
         cos_t = torch.cos(timesteps * torch.pi / (2 * self.T_max)).view(-1, 1, 1, 1)
         sin_t = torch.sin(timesteps * torch.pi / (2 * self.T_max)).view(-1, 1, 1, 1)
         noised_latents = cos_t * latents + sin_t * noise
-        # Get the (velocity) targets
-        targets = -sin_t * latents + cos_t * noise
+        if self.prediction_type == 'epsilon':
+            # Get the (epsilon) targets
+            targets = noise
+        elif self.prediction_type == 'v_prediction':
+            # Get the (velocity) targets
+            targets = -sin_t * latents + cos_t * noise
+        else:
+            raise ValueError(f'Unrecognized prediction type {self.prediction_type}')
         # TODO: Implement other prediction types
         return noised_latents, targets, timesteps
 
     def forward(self, batch):
         images, tokenized_text = batch[self.image_key], batch[self.text_key]
+        # Attention mask if used
+        if self.attention_mask_key in batch.keys():
+            attention_mask = batch[self.attention_mask_key]
+        else:
+            attention_mask = None
+
         # Prep the image latents
         latents = self.embed_images(images)
         # Scale the latents by the magical number
         latents /= self.latent_scale
 
         # Prep the text embeddings
-        conditioning, pooled_conditioning = self.embed_text(tokenized_text)
+        conditioning, pooled_conditioning = self.embed_text(tokenized_text, attention_mask)
         # Zero dropped captions if needed
         if 'drop_caption_mask' in batch:
             conditioning *= batch['drop_caption_mask'].view(-1, 1, 1)
@@ -162,7 +196,11 @@ class LatentDiffusion(ComposerModel):
             added_cond_kwargs = {'text_embeds': add_text_embeds, 'time_ids': add_time_ids}
 
         # Forward through the model
-        model_out = self.model(noised_latents, timesteps, conditioning, added_cond_kwargs=added_cond_kwargs)['sample']
+        model_out = self.model(noised_latents,
+                               timesteps,
+                               conditioning,
+                               encoder_attention_mask=attention_mask,
+                               added_cond_kwargs=added_cond_kwargs)['sample']
         return {'predictions': model_out, 'targets': targets}
 
     def loss(self, outputs, batch):
@@ -188,6 +226,24 @@ class LatentDiffusion(ComposerModel):
         else:
             raise ValueError(f'Unrecognized metric {metric.__class__.__name__}')
 
+    def update_latents(self, latents, predictions, t, delta_t):
+        """Gets the latent update."""
+        if self.prediction_type == 'epsilon':
+            angle = t * torch.pi / (2 * self.T_max)
+            cos_t = torch.cos(angle).view(-1, 1, 1, 1)
+            sin_t = torch.sin(angle).view(-1, 1, 1, 1)
+            if angle == torch.pi / 2:
+                # Optimal update here is to do nothing.
+                pass
+            elif torch.abs(torch.pi / 2 - angle) < 1e-4:
+                # Need to avoid instability near t = T_max
+                latents = latents - (predictions - sin_t * latents)
+            else:
+                latents = latents - (predictions - sin_t * latents) * delta_t / cos_t
+        elif self.prediction_type == 'v_prediction':
+            latents = latents - delta_t * predictions
+        return latents
+
     @torch.no_grad()
     def generate(
         self,
@@ -207,7 +263,7 @@ class LatentDiffusion(ComposerModel):
         """Generates image from noise.
 
         Performs the backward diffusion process, each inference step takes
-        one forward pass through the unet.
+        one forward pass through the model.
 
         Args:
             prompt (str or List[str]): The prompt or prompts to guide the image generation.
@@ -254,21 +310,23 @@ class LatentDiffusion(ComposerModel):
             negative_prompt = [''] * len(prompt)
 
         # Create rng for the generation
-        device = next(self.autoencoder.parameters()).device
+        device = self.autoencoder.device
         rng_generator = torch.Generator(device=device)
         if seed:
             rng_generator = rng_generator.manual_seed(seed)  # type: ignore
 
         # Create the prompt embeddings
         tokenized_prompts, tokenized_prompts_pad_mask = self.tokenize_text(prompt)
-        text_embeddings, pooled_text_embeddings = self.embed_text(tokenized_prompts)
+        text_embeddings, pooled_text_embeddings = self.embed_text(tokenized_prompts, tokenized_prompts_pad_mask)
         # Create the negative prompt embeddings
         tokenized_negative_prompts, tokenized_negative_prompts_pad_mask = self.tokenize_text(negative_prompt)
-        negative_prompt_embeds, pooled_negative_prompt_embeds = self.embed_text(tokenized_negative_prompts)
+        negative_prompt_embeds, pooled_negative_prompt_embeds = self.embed_text(tokenized_negative_prompts,
+                                                                                tokenized_negative_prompts_pad_mask)
         # Concatenate prompt and negative prompt
         text_embeddings = torch.cat([negative_prompt_embeds, text_embeddings])
         if tokenized_prompts_pad_mask is not None:
             attention_masks = torch.cat([tokenized_negative_prompts_pad_mask, tokenized_prompts_pad_mask])
+            attention_masks = attention_masks.to(device)
         else:
             attention_masks = None
         if pooled_text_embeddings is not None and pooled_negative_prompt_embeds is not None:
@@ -294,10 +352,9 @@ class LatentDiffusion(ComposerModel):
             output_size_params = torch.cat([output_size_params, output_size_params])
             add_time_ids = torch.cat([input_size_params, crop_params, output_size_params], dim=1).to(device)
             added_cond_kwargs['time_ids'] = add_time_ids
-
         # Make the timesteps
         timesteps = torch.linspace(self.T_max, 0, num_inference_steps + 1, device=device)
-        time_deltas = -torch.diff(timesteps)
+        time_deltas = -torch.diff(timesteps) * (torch.pi / (2 * self.T_max))
         timesteps = timesteps[:-1]
         # backward diffusion process
         for i, t in enumerate(tqdm(timesteps, disable=not progress_bar)):
@@ -319,12 +376,11 @@ class LatentDiffusion(ComposerModel):
                 std_cfg = torch.std(pred, dim=(1, 2, 3), keepdim=True)
                 pred_rescaled = pred * (std_pos / std_cfg)
                 pred = pred_rescaled * rescaled_guidance + pred * (1 - rescaled_guidance)
-            # compute the previous noisy sample x_t -> x_t-1
-            latents = latents + time_deltas[i] * outputs
+            latents = self.update_latents(latents, pred, t, time_deltas[i])
 
         # We now use the vae to decode the generated latents back into the image.
         # scale and decode the image latents with vae
         latents *= self.latent_scale
-        image = self.autoencoder.decode(latents)['x_recon']
+        image = self.autoencoder.decode(latents).sample
         image = (image / 2 + 0.5).clamp(0, 1)
         return image.detach()  # (batch*num_images_per_prompt, channel, h, w)
