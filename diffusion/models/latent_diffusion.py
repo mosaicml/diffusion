@@ -8,6 +8,7 @@ from typing import List, Optional, Union
 import torch
 import torch.nn.functional as F
 from composer.models import ComposerModel
+from torch.quasirandom import SobolEngine
 from torchmetrics import MeanSquaredError
 from tqdm.auto import tqdm
 
@@ -41,6 +42,7 @@ class LatentDiffusion(ComposerModel):
         fsdp (bool): whether to use FSDP, Default: `False`.
         encode_latents_in_fp16 (bool): whether to encode latents in fp16.
             Default: `False`.
+        use_quasirandom_timesteps (bool): whether to use quasirandom timesteps.
     """
 
     def __init__(self,
@@ -56,7 +58,8 @@ class LatentDiffusion(ComposerModel):
                  text_key: str = 'captions',
                  attention_mask_key: str = 'attention_mask',
                  fsdp: bool = False,
-                 encode_latents_in_fp16: bool = False):
+                 encode_latents_in_fp16: bool = False,
+                 use_quasirandom_timesteps: bool = True):
         super().__init__()
         self.model = model
         self.autoencoder = autoencoder
@@ -73,6 +76,11 @@ class LatentDiffusion(ComposerModel):
         self.attention_mask_key = attention_mask_key
         self.fsdp = fsdp
         self.encode_latents_in_fp16 = encode_latents_in_fp16
+        self.use_quasirandom_timesteps = use_quasirandom_timesteps
+
+        # Set up randomness
+        if self.use_quasirandom_timesteps:
+            self.sobol_engine = SobolEngine(dimension=1, scramble=True)
 
         # Set up metrics
         self.train_metrics = [MeanSquaredError()]
@@ -142,7 +150,10 @@ class LatentDiffusion(ComposerModel):
     def diffusion_forward_process(self, latents: torch.Tensor):
         """Diffusion forward process."""
         # Sample (continuous) timesteps
-        timesteps = self.T_max * torch.rand(latents.shape[0], device=latents.device)
+        if self.use_quasirandom_timesteps:
+            timesteps = self.T_max * self.sobol_engine.draw(latents.shape[0]).squeeze().to(latents.device)
+        else:
+            timesteps = self.T_max * torch.rand(latents.shape[0], device=latents.device)
         # Generate the noise, optionally shifting it with additional offset noise
         noise = torch.randn_like(latents)
         if self.offset_noise is not None:
