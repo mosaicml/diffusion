@@ -65,5 +65,5 @@ class LogLatentStatistics(Callback):
             self.latent_statistics[f'channel_std_{i}'] = self._calc_std(
                 self.latent_statistics[f'channel_mean_{i}'], self.latent_statistics[f'channel_second_moment_{i}'])
             del self.latent_statistics[f'channel_second_moment_{i}']
-        latent_statistics = {'latent_statistics' + k: v for k, v in self.latent_statistics.items()}
+        latent_statistics = {'latent_statistics/' + k: v for k, v in self.latent_statistics.items()}
         logger.log_metrics(latent_statistics)
