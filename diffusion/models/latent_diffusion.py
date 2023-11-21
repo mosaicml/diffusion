@@ -59,7 +59,7 @@ class LatentDiffusion(ComposerModel):
                  attention_mask_key: str = 'attention_mask',
                  fsdp: bool = False,
                  encode_latents_in_fp16: bool = False,
-                 use_quasirandom_timesteps: bool = True):
+                 use_quasirandom_timesteps: bool = False):
         super().__init__()
         self.model = model
         self.autoencoder = autoencoder
