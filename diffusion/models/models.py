@@ -293,10 +293,13 @@ def stable_diffusion_xl(
     return model
 
 
-def latent_diffusion(autoencoder_path: str,
-                     autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
-                     encode_latents_in_fp16=True,
-                     prediction_type: str = 'epsilon'):
+def latent_diffusion(
+    autoencoder_path: str,
+    autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
+    encode_latents_in_fp16=True,
+    prediction_type: str = 'epsilon',
+    use_quasirandom_timesteps: bool = False,
+):
     """Setup for generic latent diffusion model.
 
     Args:
@@ -304,7 +307,7 @@ def latent_diffusion(autoencoder_path: str,
         autoencoder_local_path (str): Path to autoencoder weights. Default: `/tmp/autoencoder_weights.pt`.
         encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
         prediction_type (str): The type of prediction to use. Must be one of 'epsilon' or 'v_prediction'. Default: `epsilon`.
-        use_xformers (bool): Whether to use xformers attention. Defaults to True.
+        use_quasirandom_timesteps (bool): Whether to use quasirandom timesteps. Defaults to False.
     """
     # Download the autoencoder weights and init them
     if not os.path.exists(autoencoder_local_path):
@@ -342,7 +345,8 @@ def latent_diffusion(autoencoder_path: str,
                             text_encoder=text_encoder,
                             tokenizer=tokenizer,
                             prediction_type=prediction_type,
-                            encode_latents_in_fp16=encode_latents_in_fp16)
+                            encode_latents_in_fp16=encode_latents_in_fp16,
+                            use_quasirandom_timesteps=use_quasirandom_timesteps)
     return model
 
 
