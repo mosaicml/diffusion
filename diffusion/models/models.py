@@ -317,36 +317,49 @@ def latent_diffusion(
     if not os.path.exists(autoencoder_local_path):
         get_file(path=autoencoder_path, destination=autoencoder_local_path)
     # Load the autoencoder weights from the state dict
-    # Soon the config will be in state_dict['state']['model']['model._extra_state']['config']!
-    vae = AutoEncoder(zero_init_last=True, use_attention=False, latent_channels=32)
     state_dict = torch.load(autoencoder_local_path)
+    # Get the config from the state dict and init the model using it
+    autoencoder_config = state_dict['state']['model']['model._extra_state']['config']
+    autoencoder = AutoEncoder(**autoencoder_config)
     # Need to clean up the state dict to remove loss and metrics.
     cleaned_state_dict = {}
     for key in list(state_dict['state']['model'].keys()):
         if key.split('.')[0] == 'model':
             cleaned_key = '.'.join(key.split('.')[1:])
             cleaned_state_dict[cleaned_key] = state_dict['state']['model'][key]
-        else:
-            print(f'Skipping key {key}')
-    vae.load_state_dict(cleaned_state_dict, strict=False)
+    autoencoder.load_state_dict(cleaned_state_dict, strict=True)
+    # If present, extract the channel means and standard deviations from the state dict
+    latent_statistics = state_dict['state']['callbacks']['LogLatentStatistics']
+
+    if latent_means is None:
+        latent_means = []
+        for i in range(autoencoder_config['latent_channels']):
+            latent_means.append(latent_statistics[f'channel_mean_{i}'])
+    if latent_stds is None:
+        latent_stds = []
+        for i in range(autoencoder_config['latent_channels']):
+            latent_stds.append(latent_statistics[f'channel_std_{i}'])
+
+    print(f'Latent means: {latent_means}')
+    print(f'Latent stds: {latent_stds}')
 
     model_name = 'stabilityai/stable-diffusion-2-base'
     if encode_latents_in_fp16:
-        vae = vae.half()
+        autoencoder = autoencoder.half()
         text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder', torch_dtype=torch.float16)
     else:
         text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder')
 
     config = PretrainedConfig.get_config_dict(model_name, subfolder='unet')
     new_config = config[0]
-    new_config['in_channels'] = 32
-    new_config['out_channels'] = 32
+    new_config['in_channels'] = autoencoder_config['latent_channels']
+    new_config['out_channels'] = autoencoder_config['latent_channels']
     unet = UNet2DConditionModel(**new_config)
 
     tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer')
 
     model = LatentDiffusion(model=unet,
-                            autoencoder=vae,
+                            autoencoder=autoencoder,
                             text_encoder=text_encoder,
                             tokenizer=tokenizer,
                             prediction_type=prediction_type,

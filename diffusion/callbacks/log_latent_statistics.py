@@ -11,7 +11,11 @@ from composer import Callback, Logger, State
 
 
 class LogLatentStatistics(Callback):
-    """Logging callback for latent statistics."""
+    """Logging callback for latent statistics.
+
+    Args:
+        latent_key (str, optional): The key for the latents in the outputs dict. Defaults to 'latents'.
+    """
 
     def __init__(self, latent_key: str = 'latents'):
         self.latent_key = latent_key
