@@ -42,7 +42,7 @@ class StableDiffusionInference():
                  model_name: str = 'stabilityai/stable-diffusion-2-base',
                  pretrained: bool = False,
                  prediction_type: str = 'epsilon',
-                 local_checkpoint_path: str = LOCAL_CHECKPOINT_PATH
+                 local_checkpoint_path: str = LOCAL_CHECKPOINT_PATH,
                  **kwargs):
         self.device = torch.cuda.current_device()
 
@@ -139,6 +139,7 @@ class StableDiffusionXLInference():
                  clip_qkv: Optional[float] = None,
                  pretrained: bool = False,
                  prediction_type: str = 'epsilon',
+                 local_checkpoint_path: str = LOCAL_CHECKPOINT_PATH,
                  **kwargs):
         self.device = torch.cuda.current_device()
 
@@ -155,7 +156,7 @@ class StableDiffusionXLInference():
         )
 
         if not pretrained:
-            state_dict = torch.load(LOCAL_CHECKPOINT_PATH)
+            state_dict = torch.load(local_checkpoint_path)
             for key in list(state_dict['state']['model'].keys()):
                 if 'val_metrics.' in key:
                     del state_dict['state']['model'][key]
