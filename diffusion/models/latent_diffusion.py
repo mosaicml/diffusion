@@ -159,6 +159,8 @@ class LatentDiffusion(ComposerModel):
             latent_means = torch.zeros(latents.shape[1], device=latents.device)
         elif isinstance(self.latent_means, (tuple, list)):
             latent_means = torch.tensor(self.latent_means, device=latents.device)
+        elif isinstance(self.latent_means, torch.Tensor):
+            latent_means = self.latent_means
         else:
             raise ValueError(f'Unrecognized latent means type {type(self.latent_means)}')
         # Init the standard deviations
@@ -167,6 +169,8 @@ class LatentDiffusion(ComposerModel):
             latent_stds = torch.ones(latents.shape[1], device=latents.device)
         elif isinstance(self.latent_stds, (tuple, list)):
             latent_stds = torch.tensor(self.latent_stds, device=latents.device)
+        elif isinstance(self.latent_stds, torch.Tensor):
+            latent_stds = self.latent_stds
         else:
             raise ValueError(f'Unrecognized latent stds type {type(self.latent_stds)}')
         return latent_means, latent_stds

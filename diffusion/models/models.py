@@ -317,7 +317,7 @@ def latent_diffusion(
     if not os.path.exists(autoencoder_local_path):
         get_file(path=autoencoder_path, destination=autoencoder_local_path)
     # Load the autoencoder weights from the state dict
-    state_dict = torch.load(autoencoder_local_path)
+    state_dict = torch.load(autoencoder_local_path, map_location='cpu')
     # Get the config from the state dict and init the model using it
     autoencoder_config = state_dict['state']['model']['model._extra_state']['config']
     autoencoder = AutoEncoder(**autoencoder_config)
