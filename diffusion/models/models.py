@@ -218,6 +218,7 @@ def stable_diffusion_xl(
         config = PretrainedConfig.get_config_dict(unet_model_name, subfolder='unet')
         if use_e5:
             config[0]['projection_class_embeddings_input_dim'] = 2048
+            config[0]['cross_attention_dim'] = 2304
         unet = UNet2DConditionModel(**config[0])
 
         # Zero initialization trick
