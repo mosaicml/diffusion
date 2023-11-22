@@ -220,7 +220,7 @@ def stable_diffusion_xl(
             config[0]['projection_class_embeddings_input_dim'] = 2048
             config[0]['cross_attention_dim'] = 2304
         unet = UNet2DConditionModel(**config[0])
-        print('projection_class_embeddings_input_dim:', unet.config[0]['projection_class_embeddings_input_dim'])
+        print('projection_class_embeddings_input_dim:', unet.config['projection_class_embeddings_input_dim'])
 
         # Zero initialization trick
         for name, layer in unet.named_modules():
