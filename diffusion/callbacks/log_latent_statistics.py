@@ -5,6 +5,7 @@
 
 import math
 from collections import defaultdict
+from typing import Dict
 
 from composer import Callback, Logger, State
 
@@ -18,10 +19,18 @@ class LogLatentStatistics(Callback):
         self.num_channels = 0
         self.latent_statistics = defaultdict(lambda: 0.0)
 
+    def state_dict(self) -> Dict[str, float]:
+        return self.latent_statistics
+
+    def load_state_dict(self, state: Dict[str, float]) -> None:
+        self.latent_statistics = state
+
     def _running_average(self, old_value: float, new_value: float) -> float:
+        """Compute the running average of a value."""
         return old_value * self.counter / (self.counter + 1) + new_value / (self.counter + 1)
 
     def _calc_std(self, mean: float, second_moment: float) -> float:
+        """Compute the standard deviation from the mean and the second moment."""
         return math.sqrt(second_moment - mean**2)
 
     def eval_start(self, state: State, logger: Logger):

@@ -5,7 +5,7 @@
 
 import logging
 import os
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 import torch
 from composer.devices import DeviceGPU
@@ -296,6 +296,8 @@ def stable_diffusion_xl(
 def latent_diffusion(
     autoencoder_path: str,
     autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
+    latent_means: Optional[Union[Tuple[float, ...], List[float]]] = None,
+    latent_stds: Optional[Union[Tuple[float, ...], List[float]]] = None,
     encode_latents_in_fp16=True,
     prediction_type: str = 'epsilon',
     use_quasirandom_timesteps: bool = False,
@@ -305,6 +307,8 @@ def latent_diffusion(
     Args:
         autoencoder_path (str): Path to autoencoder weights.
         autoencoder_local_path (str): Path to autoencoder weights. Default: `/tmp/autoencoder_weights.pt`.
+        latent_means (tuple): Tuple of latent means. Default: `None`.
+        latent_stds (tuple): Tuple of latent standard deviations. Default: `None`.
         encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
         prediction_type (str): The type of prediction to use. Must be one of 'epsilon' or 'v_prediction'. Default: `epsilon`.
         use_quasirandom_timesteps (bool): Whether to use quasirandom timesteps. Defaults to False.
@@ -313,6 +317,7 @@ def latent_diffusion(
     if not os.path.exists(autoencoder_local_path):
         get_file(path=autoencoder_path, destination=autoencoder_local_path)
     # Load the autoencoder weights from the state dict
+    # Soon the config will be in state_dict['state']['model']['model._extra_state']['config']!
     vae = AutoEncoder(zero_init_last=True, use_attention=False, latent_channels=32)
     state_dict = torch.load(autoencoder_local_path)
     # Need to clean up the state dict to remove loss and metrics.
@@ -323,7 +328,7 @@ def latent_diffusion(
             cleaned_state_dict[cleaned_key] = state_dict['state']['model'][key]
         else:
             print(f'Skipping key {key}')
-    vae.load_state_dict(cleaned_state_dict, strict=True)
+    vae.load_state_dict(cleaned_state_dict, strict=False)
 
     model_name = 'stabilityai/stable-diffusion-2-base'
     if encode_latents_in_fp16:
@@ -345,6 +350,8 @@ def latent_diffusion(
                             text_encoder=text_encoder,
                             tokenizer=tokenizer,
                             prediction_type=prediction_type,
+                            latent_means=tuple(latent_means) if latent_means is not None else None,
+                            latent_stds=tuple(latent_stds) if latent_stds is not None else None,
                             encode_latents_in_fp16=encode_latents_in_fp16,
                             use_quasirandom_timesteps=use_quasirandom_timesteps)
     return model

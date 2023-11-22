@@ -360,7 +360,7 @@ class AutoEncoder(nn.Module):
         return next(self.parameters()).device
 
     def get_extra_state(self):
-        return self.config
+        return {'config': self.config}
 
     def set_extra_state(self, state):
         # Save the autoencoder config

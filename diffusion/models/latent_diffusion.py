@@ -33,7 +33,10 @@ class LatentDiffusion(ComposerModel):
         prediction_type (str): The type of prediction to use. Currently only `epsilon` and `v_prediction` are supported.
         offset_noise (float, optional): The scale of the offset noise. If not specified, offset noise will not
             be used. Default `None`.
-        latent_scale (float): The scaling factor of the latents. Default: `1.0`.
+        latent_means (tuple[float], optional): The means of the latents. If not specified, the means will be
+            set to zero. Default `None`.
+        latent_stds (tuple[float], optional): The standard deviations of the latents. If not specified, the
+            standard deviations will be set to one. Default `None`.
         T_max (int): The maximum time for the forward diffusion process. Default: `1000`.
         image_key (str): The name of the image inputs in the dataloader batch.
             Default: `image_tensor`.
@@ -52,7 +55,8 @@ class LatentDiffusion(ComposerModel):
                  tokenizer,
                  prediction_type: str = 'epsilon',
                  offset_noise: Optional[float] = None,
-                 latent_scale: float = 1.0,
+                 latent_means: Optional[tuple[float]] = None,
+                 latent_stds: Optional[tuple[float]] = None,
                  T_max: int = 1000,
                  image_key: str = 'image',
                  text_key: str = 'captions',
@@ -69,7 +73,8 @@ class LatentDiffusion(ComposerModel):
         if self.prediction_type not in ['epsilon', 'v_prediction']:
             raise ValueError(f'Unrecognized prediction type {self.prediction_type}')
         self.offset_noise = offset_noise
-        self.latent_scale = latent_scale
+        self.latent_means = latent_means
+        self.latent_stds = latent_stds
         self.T_max = T_max
         self.image_key = image_key
         self.text_key = text_key
@@ -147,6 +152,37 @@ class LatentDiffusion(ComposerModel):
             raise ValueError('No conditioning vectors were found.')
         return conditioning, pooled_conditioning
 
+    def init_latent_stats(self, latents: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        # Init the means
+        if self.latent_means is None:
+            # Default to zero mean latents
+            latent_means = torch.zeros(latents.shape[1], device=latents.device)
+        elif isinstance(self.latent_means, (tuple, list)):
+            latent_means = torch.tensor(self.latent_means, device=latents.device)
+        else:
+            raise ValueError(f'Unrecognized latent means type {type(self.latent_means)}')
+        # Init the standard deviations
+        if self.latent_stds is None:
+            # Default to unit variance latents
+            latent_stds = torch.ones(latents.shape[1], device=latents.device)
+        elif isinstance(self.latent_stds, (tuple, list)):
+            latent_stds = torch.tensor(self.latent_stds, device=latents.device)
+        else:
+            raise ValueError(f'Unrecognized latent stds type {type(self.latent_stds)}')
+        return latent_means, latent_stds
+
+    def scale_latents(self, latents):
+        """Scale the latents by their means and standard deviations."""
+        self.latent_means, self.latent_stds = self.init_latent_stats(latents)
+        latents = (latents - self.latent_means.view(1, -1, 1, 1)) / self.latent_stds.view(1, -1, 1, 1)
+        return latents
+
+    def unscale_latents(self, latents):
+        """Unscale the latents by their means and standard deviations."""
+        self.latent_means, self.latent_stds = self.init_latent_stats(latents)
+        latents = latents * self.latent_stds.view(1, -1, 1, 1) + self.latent_means.view(1, -1, 1, 1)
+        return latents
+
     def diffusion_forward_process(self, latents: torch.Tensor):
         """Diffusion forward process."""
         # Sample (continuous) timesteps
@@ -184,8 +220,8 @@ class LatentDiffusion(ComposerModel):
 
         # Prep the image latents
         latents = self.embed_images(images)
-        # Scale the latents by the magical number
-        latents /= self.latent_scale
+        # Scale the latents by their means and standard deviations
+        latents = self.scale_latents(latents)
 
         # Prep the text embeddings
         conditioning, pooled_conditioning = self.embed_text(tokenized_text, attention_mask)
@@ -391,7 +427,7 @@ class LatentDiffusion(ComposerModel):
 
         # We now use the vae to decode the generated latents back into the image.
         # scale and decode the image latents with vae
-        latents *= self.latent_scale
+        latents = self.unscale_latents(latents)
         image = self.autoencoder.decode(latents).sample
         image = (image / 2 + 0.5).clamp(0, 1)
         return image.detach()  # (batch*num_images_per_prompt, channel, h, w)
