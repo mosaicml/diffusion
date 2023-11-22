@@ -606,6 +606,6 @@ class SDXLTokenizer:
             return_tensors=return_tensors)
 
         # Add second tokenizer output to first tokenizer
-        for key in tokenized_output.keys():
+        for key in tokenized_output_2.keys():
             tokenized_output[key] = [tokenized_output[key], tokenized_output_2[key]]
         return tokenized_output
