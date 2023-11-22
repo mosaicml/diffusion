@@ -6,6 +6,7 @@
 import operator
 import time
 from collections.abc import Iterable
+from itertools import chain
 from typing import Any, Dict, List, Optional, Union
 
 import hydra
@@ -16,6 +17,37 @@ from composer.core import Precision
 from composer.loggers import LoggerDestination
 from composer.utils import dist, reproducibility
 from omegaconf import DictConfig, OmegaConf
+from torch.optim import Optimizer
+
+from diffusion.models.autoencoder import ComposerAutoEncoder, ComposerDiffusersAutoEncoder
+
+
+def make_autoencoder_optimizer(config: DictConfig, model: ComposerModel) -> Optimizer:
+    """Configures the optimizer for use with an autoencoder + discriminator loss."""
+    print('Configuring opimizer for autoencoder+discriminator')
+    assert isinstance(model, (ComposerAutoEncoder, ComposerDiffusersAutoEncoder))
+
+    # Configure optimizer settings for the autoencoder
+    if hasattr(config, 'autoencoder_optimizer'):
+        autoencoder_param_dict = dict(config.autoencoder_optimizer.items())
+    else:
+        autoencoder_param_dict = dict(config.optimizer.items())
+
+    if model.autoencoder_loss.learn_log_var:
+        autoencoder_param_dict['params'] = chain(model.model.parameters(), [model.autoencoder_loss.log_var])
+    else:
+        autoencoder_param_dict['params'] = model.model.parameters()
+
+    # Configure optimizer settings for the discriminator
+    if hasattr(config, 'discriminator_optimizer'):
+        discriminator_param_dict = dict(config.discriminator_optimizer.items())
+    else:
+        discriminator_param_dict = dict(config.optimizer.items())
+    discriminator_param_dict['params'] = model.autoencoder_loss.discriminator.parameters()
+
+    params = [autoencoder_param_dict, discriminator_param_dict]
+    optimizer = hydra.utils.instantiate(config.optimizer, params)
+    return optimizer
 
 
 def train(config: DictConfig) -> None:
@@ -30,7 +62,11 @@ def train(config: DictConfig) -> None:
 
     model: ComposerModel = hydra.utils.instantiate(config.model)
 
-    optimizer = hydra.utils.instantiate(config.optimizer, params=model.parameters())
+    # Check if this is training an autoencoder. If so, the optimizer needs different param groups
+    if hasattr(model, 'autoencoder_loss'):
+        optimizer = make_autoencoder_optimizer(config, model)
+    else:
+        optimizer = hydra.utils.instantiate(config.optimizer, params=model.parameters())
 
     # Load train dataset. Currently this expects to load according to the datasetHparam method.
     # This means adding external datasets is currently not super easy. Will refactor or check for

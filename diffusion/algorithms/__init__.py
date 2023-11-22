@@ -3,6 +3,7 @@
 
 """Composer algorithms."""
 
+from diffusion.algorithms.discriminator_schedule import DiscriminatorSchedule
 from diffusion.algorithms.ema import EMA
 
-__all__ = ['EMA']
+__all__ = ['EMA', 'DiscriminatorSchedule']
