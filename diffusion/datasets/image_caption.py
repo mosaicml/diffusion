@@ -242,6 +242,8 @@ def build_streaming_image_caption_dataloader(
     sdxl = (tokenizer_name_or_path == 'stabilityai/stable-diffusion-xl-base-1.0')
     if sdxl:
         log.info('Detected SDXL tokenizer, using SDXL crop transform and tokenizers.')
+        if use_e5:
+            log.info('Using E5 text encoder')
 
     # Set the crop to apply
     if crop_type == 'square':

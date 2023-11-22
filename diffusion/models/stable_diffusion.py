@@ -260,8 +260,6 @@ class StableDiffusion(ComposerModel):
         # Skip this if outputs have already been computed, e.g. during training
         if outputs is not None:
             return outputs
-        # Get unet outputs
-        unet_out, targets, timesteps = self.forward(batch)
         # Sample images from the prompts in the batch
         prompts = batch[self.text_key]
         height, width = batch[self.image_key].shape[-2], batch[self.image_key].shape[-1]
@@ -282,6 +280,8 @@ class StableDiffusion(ComposerModel):
             batch['cond_crops_coords_top_left'] = torch.tensor([[0., 0.]]).repeat(bsz, 1).to(device)
             # Set to resolution we are trying to generate
             batch['cond_target_size'] = torch.tensor([[width, height]]).repeat(bsz, 1).to(device)
+
+        unet_out, targets, timesteps = self.forward(batch)
 
         generated_images = {}
         for guidance_scale in self.val_guidance_scales:
