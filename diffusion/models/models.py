@@ -12,7 +12,7 @@ from diffusers import AutoencoderKL, DDIMScheduler, DDPMScheduler, EulerDiscrete
 from torchmetrics import MeanSquaredError
 from torchmetrics.image.fid import FrechetInceptionDistance
 from torchmetrics.multimodal.clip_score import CLIPScore
-from transformers import CLIPTextModel, CLIPTextModelWithProjection, CLIPTokenizer, PretrainedConfig
+from transformers import AutoModel, AutoTokenizer, CLIPTextModel, CLIPTextModelWithProjection, CLIPTokenizer, PretrainedConfig
 
 from diffusion.models.autoencoder import AutoEncoder, AutoEncoderLoss, ComposerAutoEncoder, ComposerDiffusersAutoEncoder
 from diffusion.models.layers import ClippedAttnProcessor2_0, ClippedXFormersAttnProcessor, zero_module
@@ -150,6 +150,7 @@ def stable_diffusion_xl(
     model_name: str = 'stabilityai/stable-diffusion-xl-base-1.0',
     unet_model_name: str = 'stabilityai/stable-diffusion-xl-base-1.0',
     vae_model_name: str = 'madebyollin/sdxl-vae-fp16-fix',
+    use_e5: bool = False,
     pretrained: bool = True,
     prediction_type: str = 'epsilon',
     offset_noise: Optional[float] = None,
@@ -234,8 +235,8 @@ def stable_diffusion_xl(
     except:  # for handling SDXL vae fp16 fixed checkpoint
         vae = AutoencoderKL.from_pretrained(vae_model_name, torch_dtype=torch_dtype)
 
-    tokenizer = SDXLTokenizer(model_name)
-    text_encoder = SDXLTextEncoder(model_name, encode_latents_in_fp16)
+    tokenizer = SDXLTokenizer(model_name, use_e5=use_e5)
+    text_encoder = SDXLTextEncoder(model_name, encode_latents_in_fp16, use_e5=use_e5)
 
     noise_scheduler = DDPMScheduler.from_pretrained(model_name, subfolder='scheduler')
     inference_noise_scheduler = EulerDiscreteScheduler(num_train_timesteps=1000,
@@ -546,11 +547,14 @@ class SDXLTextEncoder(torch.nn.Module):
         encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
     """
 
-    def __init__(self, model_name='stabilityai/stable-diffusion-xl-base-1.0', encode_latents_in_fp16=True):
+    def __init__(self, model_name='stabilityai/stable-diffusion-xl-base-1.0', encode_latents_in_fp16=True, use_e5=False):
         super().__init__()
         torch_dtype = torch.float16 if encode_latents_in_fp16 else None
         self.text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder', torch_dtype=torch_dtype)
-        self.text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(model_name,
+        if use_e5:
+            self.text_encoder_2 = AutoModel.from_pretrained('intfloat/e5-large-v2', torch_dtype=torch_dtype)
+        else:
+            self.text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(model_name,
                                                                           subfolder='text_encoder_2',
                                                                           torch_dtype=torch_dtype)
 
@@ -579,9 +583,13 @@ class SDXLTokenizer:
         model_name (str): Name of the model's text encoders to load. Defaults to 'stabilityai/stable-diffusion-xl-base-1.0'.
     """
 
-    def __init__(self, model_name='stabilityai/stable-diffusion-xl-base-1.0'):
+    def __init__(self, model_name='stabilityai/stable-diffusion-xl-base-1.0', use_e5=False):
         self.tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer')
-        self.tokenizer_2 = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer_2')
+        if use_e5:
+            self.tokenizer_2 = AutoTokenizer.from_pretrained('intfloat/e5-large-v2')
+        else:
+            self.tokenizer_2 = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer_2')
+
 
     def __call__(self, prompt, padding, truncation, return_tensors, max_length=None):
         tokenized_output = self.tokenizer(
@@ -593,7 +601,7 @@ class SDXLTokenizer:
         tokenized_output_2 = self.tokenizer_2(
             prompt,
             padding=padding,
-            max_length=self.tokenizer_2.model_max_length if max_length is None else max_length,
+            max_length=self.tokenizer.model_max_length if max_length is None else max_length,
             truncation=truncation,
             return_tensors=return_tensors)
 

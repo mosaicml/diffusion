@@ -62,6 +62,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
         image_key: str = 'image',
         caption_key: str = 'caption',
         sdxl: bool = False,
+        use_e5: bool = False,
         zero_dropped_captions: bool = False,
         **streaming_kwargs,
     ) -> None:
@@ -87,7 +88,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
         self.zero_dropped_captions = zero_dropped_captions
 
         if self.sdxl:
-            self.tokenizer = SDXLTokenizer(tokenizer_name_or_path)
+            self.tokenizer = SDXLTokenizer(tokenizer_name_or_path, use_e5=use_e5)
         else:
             self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, subfolder='tokenizer')
 
@@ -175,6 +176,7 @@ def build_streaming_image_caption_dataloader(
     local: Union[str, List],
     batch_size: int,
     tokenizer_name_or_path: str = 'stabilityai/stable-diffusion-2-base',
+    use_e5: bool = False,
     caption_drop_prob: float = 0.0,
     microcond_drop_prob: float = 0.0,
     resize_size: int = 256,
@@ -268,6 +270,7 @@ def build_streaming_image_caption_dataloader(
         caption_key=caption_key,
         batch_size=batch_size,
         sdxl=sdxl,
+        use_e5=use_e5,
         zero_dropped_captions=zero_dropped_captions,
         **streaming_kwargs,
     )
