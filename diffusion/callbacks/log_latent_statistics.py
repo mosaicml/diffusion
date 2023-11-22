@@ -20,10 +20,13 @@ class LogLatentStatistics(Callback):
         self.latent_statistics = defaultdict(lambda: 0.0)
 
     def state_dict(self) -> Dict[str, float]:
-        return self.latent_statistics
+        return dict(self.latent_statistics)
 
     def load_state_dict(self, state: Dict[str, float]) -> None:
-        self.latent_statistics = state
+        latent_statistics = defaultdict(lambda: 0.0)
+        for k, v in state.items():
+            latent_statistics[k] = v
+        self.latent_statistics = latent_statistics
 
     def _running_average(self, old_value: float, new_value: float) -> float:
         """Compute the running average of a value."""
