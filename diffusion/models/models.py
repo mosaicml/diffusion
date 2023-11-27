@@ -18,7 +18,7 @@ from transformers import CLIPTextModel, CLIPTextModelWithProjection, CLIPTokeniz
 
 from diffusion.models.autoencoder import AutoEncoder, AutoEncoderLoss, ComposerAutoEncoder, ComposerDiffusersAutoEncoder
 from diffusion.models.latent_diffusion import LatentDiffusion
-from diffusion.models.layers import ClippedAttnProcessor2_0, ClippedXFormersAttnProcessor, zero_module
+from diffusion.models.layers import ClippedAttnProcessor2_0, ClippedXFormersAttnProcessor, FourierFeatures, zero_module
 from diffusion.models.pixel_diffusion import PixelDiffusion
 from diffusion.models.stable_diffusion import StableDiffusion
 from diffusion.schedulers.schedulers import ContinuousTimeScheduler
@@ -301,6 +301,7 @@ def latent_diffusion(
     encode_latents_in_fp16=True,
     prediction_type: str = 'epsilon',
     use_quasirandom_timesteps: bool = False,
+    fourier_features: Optional[int] = None,
 ):
     """Setup for generic latent diffusion model.
 
@@ -312,6 +313,7 @@ def latent_diffusion(
         encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
         prediction_type (str): The type of prediction to use. Must be one of 'epsilon' or 'v_prediction'. Default: `epsilon`.
         use_quasirandom_timesteps (bool): Whether to use quasirandom timesteps. Defaults to False.
+        fourier_features (int): Number of fourier features to use. Defaults to None.
     """
     # Download the autoencoder weights and init them
     if not os.path.exists(autoencoder_local_path):
@@ -353,7 +355,15 @@ def latent_diffusion(
     config = PretrainedConfig.get_config_dict(model_name, subfolder='unet')
     new_config = config[0]
     new_config['in_channels'] = autoencoder_config['latent_channels']
+    # Optionally include fourier features
+    if fourier_features is not None:
+        # Each fourier feature is two dimensional.
+        new_config['in_channels'] += 2 * fourier_features
+        fourier_feature_transform = FourierFeatures(autoencoder_config['latent_channels'], fourier_features)
+    else:
+        fourier_feature_transform = None
     new_config['out_channels'] = autoencoder_config['latent_channels']
+
     unet = UNet2DConditionModel(**new_config)
 
     tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer')
@@ -366,7 +376,8 @@ def latent_diffusion(
                             latent_means=tuple(latent_means) if latent_means is not None else None,
                             latent_stds=tuple(latent_stds) if latent_stds is not None else None,
                             encode_latents_in_fp16=encode_latents_in_fp16,
-                            use_quasirandom_timesteps=use_quasirandom_timesteps)
+                            use_quasirandom_timesteps=use_quasirandom_timesteps,
+                            fourier_feature_transform=fourier_feature_transform)
     return model
 
 

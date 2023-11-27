@@ -45,25 +45,29 @@ class LatentDiffusion(ComposerModel):
         fsdp (bool): whether to use FSDP, Default: `False`.
         encode_latents_in_fp16 (bool): whether to encode latents in fp16.
             Default: `False`.
-        use_quasirandom_timesteps (bool): whether to use quasirandom timesteps.
+        use_quasirandom_timesteps (bool): whether to use quasirandom timesteps. Default: `False`.
+        fourier_feature_transform (nn.Module, optional): Fourier feature transformation layer. Default: `None`.
     """
 
-    def __init__(self,
-                 model: torch.nn.Module,
-                 autoencoder: AutoEncoder,
-                 text_encoder,
-                 tokenizer,
-                 prediction_type: str = 'epsilon',
-                 offset_noise: Optional[float] = None,
-                 latent_means: Optional[tuple[float]] = None,
-                 latent_stds: Optional[tuple[float]] = None,
-                 T_max: int = 1000,
-                 image_key: str = 'image',
-                 text_key: str = 'captions',
-                 attention_mask_key: str = 'attention_mask',
-                 fsdp: bool = False,
-                 encode_latents_in_fp16: bool = False,
-                 use_quasirandom_timesteps: bool = False):
+    def __init__(
+        self,
+        model: torch.nn.Module,
+        autoencoder: AutoEncoder,
+        text_encoder,
+        tokenizer,
+        prediction_type: str = 'epsilon',
+        offset_noise: Optional[float] = None,
+        latent_means: Optional[tuple[float]] = None,
+        latent_stds: Optional[tuple[float]] = None,
+        T_max: int = 1000,
+        image_key: str = 'image',
+        text_key: str = 'captions',
+        attention_mask_key: str = 'attention_mask',
+        fsdp: bool = False,
+        encode_latents_in_fp16: bool = False,
+        use_quasirandom_timesteps: bool = False,
+        fourier_feature_transform: Optional[torch.nn.Module] = None,
+    ):
         super().__init__()
         self.model = model
         self.autoencoder = autoencoder
@@ -82,6 +86,7 @@ class LatentDiffusion(ComposerModel):
         self.fsdp = fsdp
         self.encode_latents_in_fp16 = encode_latents_in_fp16
         self.use_quasirandom_timesteps = use_quasirandom_timesteps
+        self.fourier_feature_transform = fourier_feature_transform
 
         # Set up randomness
         if self.use_quasirandom_timesteps:
@@ -237,6 +242,10 @@ class LatentDiffusion(ComposerModel):
 
         # Diffusion forward process
         noised_latents, targets, timesteps = self.diffusion_forward_process(latents)
+
+        # Optionally add fourier features
+        if self.fourier_feature_transform is not None:
+            noised_latents = self.fourier_feature_transform(noised_latents)
 
         # Optional additional conditioning
         added_cond_kwargs = {}
@@ -411,6 +420,9 @@ class LatentDiffusion(ComposerModel):
         for i, t in enumerate(tqdm(timesteps, disable=not progress_bar)):
             # Need to duplicate latents for CFG
             latent_model_input = torch.cat([latents] * 2)
+            # Optionally add fourier features
+            if self.fourier_feature_transform is not None:
+                latent_model_input = self.fourier_feature_transform(latent_model_input)
             # Model prediction
             outputs = self.model(latent_model_input,
                                  t,
