@@ -207,9 +207,9 @@ class StableDiffusion(ComposerModel):
 
         # Zero dropped captions if needed
         if 'drop_caption_mask' in batch.keys():
-            conditioning *= batch['drop_caption_mask'][0]
+            conditioning *= batch['drop_caption_mask'].view(-1, 1, 1)
             if pooled_conditioning is not None:
-                pooled_conditioning *= batch['drop_caption_mask'][0]
+                pooled_conditioning *= batch['drop_caption_mask'].view(-1, 1)
 
         # Attention mask if needed
         if self.mask_pad_tokens and 'attention_mask' in batch.keys():
