@@ -4,7 +4,7 @@
 """Constructors for diffusion models."""
 
 import logging
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple
 
 import torch
 from composer.devices import DeviceGPU
@@ -16,8 +16,7 @@ from transformers import CLIPTextModel, CLIPTextModelWithProjection, CLIPTokeniz
 
 from diffusion.models.autoencoder import (AutoEncoder, AutoEncoderLoss, ComposerAutoEncoder,
                                           ComposerDiffusersAutoEncoder, load_autoencoder)
-from diffusion.models.latent_diffusion import LatentDiffusion
-from diffusion.models.layers import ClippedAttnProcessor2_0, ClippedXFormersAttnProcessor, FourierFeatures, zero_module
+from diffusion.models.layers import ClippedAttnProcessor2_0, ClippedXFormersAttnProcessor, zero_module
 from diffusion.models.pixel_diffusion import PixelDiffusion
 from diffusion.models.stable_diffusion import StableDiffusion
 from diffusion.schedulers.schedulers import ContinuousTimeScheduler
@@ -367,71 +366,6 @@ def stable_diffusion_xl(
         log.info('Using %s with clip_val %.1f' % (attn_processor.__class__, clip_qkv))
         model.unet.set_attn_processor(attn_processor)
 
-    return model
-
-
-def latent_diffusion(
-    autoencoder_path: str,
-    autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
-    latent_means: Optional[Union[Tuple[float, ...], List[float]]] = None,
-    latent_stds: Optional[Union[Tuple[float, ...], List[float]]] = None,
-    encode_latents_in_fp16=True,
-    prediction_type: str = 'epsilon',
-    use_quasirandom_timesteps: bool = False,
-    fourier_features: Optional[int] = None,
-):
-    """Setup for generic latent diffusion model.
-
-    Args:
-        autoencoder_path (str): Path to autoencoder weights.
-        autoencoder_local_path (str): Path to autoencoder weights. Default: `/tmp/autoencoder_weights.pt`.
-        latent_means (tuple): Tuple of latent means. Default: `None`.
-        latent_stds (tuple): Tuple of latent standard deviations. Default: `None`.
-        encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
-        prediction_type (str): The type of prediction to use. Must be one of 'epsilon' or 'v_prediction'. Default: `epsilon`.
-        use_quasirandom_timesteps (bool): Whether to use quasirandom timesteps. Defaults to False.
-        fourier_features (int): Number of fourier features to use. Defaults to None.
-    """
-    # Download the autoencoder weights
-    autoencoder, latent_statistics = load_autoencoder(autoencoder_path, autoencoder_local_path)
-    if latent_statistics is not None and latent_means is None:
-        latent_means = latent_statistics['latent_means']
-    if latent_statistics is not None and latent_stds is None:
-        latent_stds = latent_statistics['latent_stds']
-
-    model_name = 'stabilityai/stable-diffusion-2-base'
-    if encode_latents_in_fp16:
-        autoencoder = autoencoder.half()
-        text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder', torch_dtype=torch.float16)
-    else:
-        text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder')
-
-    config = PretrainedConfig.get_config_dict(model_name, subfolder='unet')
-    new_config = config[0]
-    new_config['in_channels'] = autoencoder.latent_channels
-    # Optionally include fourier features
-    if fourier_features is not None:
-        # Each fourier feature is two dimensional.
-        new_config['in_channels'] += 2 * fourier_features
-        fourier_feature_transform = FourierFeatures(autoencoder.latent_channels, fourier_features)
-    else:
-        fourier_feature_transform = None
-    new_config['out_channels'] = autoencoder.latent_channels
-
-    unet = UNet2DConditionModel(**new_config)
-
-    tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer')
-
-    model = LatentDiffusion(model=unet,
-                            autoencoder=autoencoder,
-                            text_encoder=text_encoder,
-                            tokenizer=tokenizer,
-                            prediction_type=prediction_type,
-                            latent_means=tuple(latent_means) if latent_means is not None else None,
-                            latent_stds=tuple(latent_stds) if latent_stds is not None else None,
-                            encode_latents_in_fp16=encode_latents_in_fp16,
-                            use_quasirandom_timesteps=use_quasirandom_timesteps,
-                            fourier_feature_transform=fourier_feature_transform)
     return model
 
 

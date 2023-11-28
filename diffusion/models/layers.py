@@ -225,37 +225,6 @@ class ClippedXFormersAttnProcessor:
         return hidden_states
 
 
-class FourierFeatures(nn.Module):
-    """Fourier features layer. Adds Fourier features to the input tensor along the channel dimension."""
-
-    def __init__(self, input_channels: int, num_features: int):
-        super().__init__()
-        self.num_features = num_features
-        self.input_channels = input_channels
-        self.feature_transform = nn.Conv2d(self.input_channels,
-                                           self.num_features,
-                                           kernel_size=1,
-                                           stride=1,
-                                           padding=0,
-                                           bias=False)
-        # Init the weights to standard normals according to https://arxiv.org/abs/2006.10739
-        self.feature_transform.weight.data[:, :, 0, 0] = torch.randn(self.num_features, self.input_channels)
-        # Turn off gradients for the feature transform
-        for p in self.feature_transform.parameters():
-            p.requires_grad = False
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        features = self.feature_transform(x)
-        # Compute the sin/cos features
-        cos_features = torch.cos(2 * torch.pi * features)
-        sin_features = torch.sin(2 * torch.pi * features)
-        # Concatenate the sin/cos features
-        features = torch.cat([cos_features, sin_features], dim=1)
-        # Concatenate with the input to form the output features
-        out_features = torch.cat([x, features], dim=1)
-        return out_features
-
-
 class ResNetBlock(nn.Module):
     """Basic ResNet block.
 
