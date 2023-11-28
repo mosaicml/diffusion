@@ -6,6 +6,7 @@
 Based on the implementation from https://github.com/CompVis/stable-diffusion
 """
 
+import os
 from typing import Dict, Tuple
 
 import lpips
@@ -13,6 +14,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from composer.models import ComposerModel
+from composer.utils.file_helpers import get_file
 from diffusers import AutoencoderKL
 from torchmetrics import MeanMetric, MeanSquaredError, Metric
 from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
@@ -236,7 +238,7 @@ class GaussianDistribution:
 
     def __getitem__(self, key):
         if key == 'latent_dist':
-            return GaussianDistribution(self.mean[key], self.log_var[key])
+            return GaussianDistribution(self.mean, self.log_var)
         elif key == 'mean':
             return self.mean[key]
         elif key == 'log_var':
@@ -694,3 +696,48 @@ class ComposerDiffusersAutoEncoder(ComposerAutoEncoder):
         mean, log_var = latent_dist.mean, latent_dist.logvar
         recon = self.model.decode(latents).sample
         return {'x_recon': recon, 'latents': latents, 'mean': mean, 'log_var': log_var}
+
+
+def load_autoencoder(load_path: str, local_path: str = '/tmp/autoencoder_weights.pt'):
+    """Function to load an AutoEncoder from a composer checkpoint without the loss weights.
+
+    Will also load the latent statistics if the statistics tracking callback was used.
+
+    Args:
+        load_path (str): Path to the composer checkpoint. Can be a local folder, URL, or composer object store.
+        local_path (str): Local path to save the autoencoder weights to. Default: `/tmp/autoencoder_weights.pt`.
+
+    Returns:
+        autoencoder (AutoEncoder): AutoEncoder model with weights loaded from the checkpoint.
+        latent_statistics (Dict[str, Union[list, float]]): Dictionary of latent statistics if present, else `None`.
+    """
+    # Download the autoencoder weights and init them
+    if not os.path.exists(local_path):
+        get_file(path=load_path, destination=local_path)
+    # Load the autoencoder weights from the state dict
+    state_dict = torch.load(local_path, map_location='cpu')
+    # Get the config from the state dict and init the model using it
+    autoencoder_config = state_dict['state']['model']['model._extra_state']['config']
+    autoencoder = AutoEncoder(**autoencoder_config)
+    # Need to clean up the state dict to remove loss and metrics.
+    cleaned_state_dict = {}
+    for key in list(state_dict['state']['model'].keys()):
+        if key.split('.')[0] == 'model':
+            cleaned_key = '.'.join(key.split('.')[1:])
+            cleaned_state_dict[cleaned_key] = state_dict['state']['model'][key]
+    # Load the cleaned state dict into the model
+    autoencoder.load_state_dict(cleaned_state_dict, strict=True)
+    # If present, extract the channel means and standard deviations from the state dict
+    if 'LogLatentStatistics' in state_dict['state']['callbacks']:
+        latent_statistics = {'latent_means': [], 'latent_stds': []}
+        logged_latent_stats = state_dict['state']['callbacks']['LogLatentStatistics']
+        # Extract the channelwise latent means and stds
+        for i in range(autoencoder_config['latent_channels']):
+            latent_statistics['latent_means'].append(logged_latent_stats[f'channel_mean_{i}'])
+            latent_statistics['latent_stds'].append(logged_latent_stats[f'channel_std_{i}'])
+        # Extract the global latent means and second moment
+        latent_statistics['global_mean'] = logged_latent_stats['global_mean']
+        latent_statistics['global_std'] = logged_latent_stats['global_std']
+    else:
+        latent_statistics = None
+    return autoencoder, latent_statistics

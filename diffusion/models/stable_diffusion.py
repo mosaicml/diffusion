@@ -39,6 +39,7 @@ class StableDiffusion(ComposerModel):
         loss_fn (torch.nn.Module): torch loss function. Default: `F.mse_loss`.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
+        latent_scale: (float): The scale of the latents. Defaults to `0.18215`, for the SD1/SD2 autoencoder.
         offset_noise (float, optional): The scale of the offset noise. If not specified, offset noise will not
             be used. Default `None`.
         train_metrics (list): List of torchmetrics to calculate during training.
@@ -78,6 +79,7 @@ class StableDiffusion(ComposerModel):
                  inference_noise_scheduler,
                  loss_fn=F.mse_loss,
                  prediction_type: str = 'epsilon',
+                 latent_scale: Optional[float] = None,
                  offset_noise: Optional[float] = None,
                  train_metrics: Optional[List] = None,
                  val_metrics: Optional[List] = None,
@@ -108,10 +110,12 @@ class StableDiffusion(ComposerModel):
         self.precomputed_latents = precomputed_latents
         self.mask_pad_tokens = mask_pad_tokens
         self.sdxl = sdxl
-        if self.sdxl:
+        if self.sdxl and latent_scale is None:
             self.latent_scale = 0.13025
-        else:
+        elif latent_scale is None:
             self.latent_scale = 0.18215
+        else:
+            self.latent_scale = latent_scale
 
         # setup metrics
         if train_metrics is None:

@@ -4,19 +4,18 @@
 """Constructors for diffusion models."""
 
 import logging
-import os
 from typing import List, Optional, Tuple, Union
 
 import torch
 from composer.devices import DeviceGPU
-from composer.utils.file_helpers import get_file
 from diffusers import AutoencoderKL, DDIMScheduler, DDPMScheduler, EulerDiscreteScheduler, UNet2DConditionModel
 from torchmetrics import MeanSquaredError
 from torchmetrics.image.fid import FrechetInceptionDistance
 from torchmetrics.multimodal.clip_score import CLIPScore
 from transformers import CLIPTextModel, CLIPTextModelWithProjection, CLIPTokenizer, PretrainedConfig
 
-from diffusion.models.autoencoder import AutoEncoder, AutoEncoderLoss, ComposerAutoEncoder, ComposerDiffusersAutoEncoder
+from diffusion.models.autoencoder import (AutoEncoder, AutoEncoderLoss, ComposerAutoEncoder,
+                                          ComposerDiffusersAutoEncoder, load_autoencoder)
 from diffusion.models.latent_diffusion import LatentDiffusion
 from diffusion.models.layers import ClippedAttnProcessor2_0, ClippedXFormersAttnProcessor, FourierFeatures, zero_module
 from diffusion.models.pixel_diffusion import PixelDiffusion
@@ -36,7 +35,10 @@ log = logging.getLogger(__name__)
 def stable_diffusion_2(
     model_name: str = 'stabilityai/stable-diffusion-2-base',
     pretrained: bool = True,
+    autoencoder_path: Optional[str] = None,
+    autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
     prediction_type: str = 'epsilon',
+    latent_scale: Optional[float] = None,
     offset_noise: Optional[float] = None,
     train_metrics: Optional[List] = None,
     val_metrics: Optional[List] = None,
@@ -58,8 +60,12 @@ def stable_diffusion_2(
     Args:
         model_name (str): Name of the model to load. Defaults to 'stabilityai/stable-diffusion-2-base'.
         pretrained (bool): Whether to load pretrained weights. Defaults to True.
+        autoencoder_path (optional, str): Path to autoencoder weights if using custom autoencoder. If not specified,
+            will use the vae from `model_name`. Default `None`.
+        autoencoder_local_path (optional, str): Path to autoencoder weights. Default: `/tmp/autoencoder_weights.pt`.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
+        latent_scale (float, optional): The scale of the latent noise. If not specified, will use `0.18215` for SD1/SD2.
         train_metrics (list, optional): List of metrics to compute during training. If None, defaults to
             [MeanSquaredError()].
         val_metrics (list, optional): List of metrics to compute during validation. If None, defaults to
@@ -91,20 +97,49 @@ def stable_diffusion_2(
         if isinstance(metric, CLIPScore):
             metric.requires_grad_(False)
 
-    if pretrained:
-        unet = UNet2DConditionModel.from_pretrained(model_name, subfolder='unet')
-    else:
-        config = PretrainedConfig.get_config_dict(model_name, subfolder='unet')
-        unet = UNet2DConditionModel(**config[0])
-
+    # Make the text encoder
     if encode_latents_in_fp16:
-        vae = AutoencoderKL.from_pretrained(model_name, subfolder='vae', torch_dtype=torch.float16)
         text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder', torch_dtype=torch.float16)
     else:
-        vae = AutoencoderKL.from_pretrained(model_name, subfolder='vae')
         text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder')
-
     tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer')
+
+    # Make the autoencoder
+    if autoencoder_path is None:
+        # Use the pretrained vae
+        if encode_latents_in_fp16:
+            vae = AutoencoderKL.from_pretrained(model_name, subfolder='vae', torch_dtype=torch.float16)
+        else:
+            vae = AutoencoderKL.from_pretrained(model_name, subfolder='vae')
+        if latent_scale is None:
+            # Default to the SD1/SD2 latent scale
+            latent_scale = 0.18215
+    else:
+        # Use a custom autoencoder
+        vae, latent_statistics = load_autoencoder(autoencoder_path, autoencoder_local_path)
+        if latent_statistics is not None and latent_scale is None:
+            assert isinstance(latent_statistics['global_std'], float)
+            latent_scale = 1 / latent_statistics['global_std']
+        if latent_scale is None:
+            # Default to the SD1/SD2 latent scale
+            latent_scale = 0.18215
+        print('Using latent scale of: ', latent_scale)
+
+    # Make the unet
+    if pretrained:
+        unet = UNet2DConditionModel.from_pretrained(model_name, subfolder='unet')
+        if autoencoder_path is not None and vae.latent_channels != 4:
+            raise ValueError(f'Pretrained unet has 4 latent channels but the vae has {vae.latent_channels}.')
+    else:
+        unet_config = PretrainedConfig.get_config_dict(model_name, subfolder='unet')[0]
+        if autoencoder_path is not None:
+            # Adapt the unet config to account for differing number of latent channels if necessary
+            unet_config['in_channels'] = vae.latent_channels
+            unet_config['out_channels'] = vae.latent_channels
+        # Init the unet from the config
+        unet = UNet2DConditionModel(**unet_config)
+
+    # Make the noise schedulers
     noise_scheduler = DDPMScheduler.from_pretrained(model_name, subfolder='scheduler')
     inference_noise_scheduler = DDIMScheduler(num_train_timesteps=noise_scheduler.config.num_train_timesteps,
                                               beta_start=noise_scheduler.config.beta_start,
@@ -115,6 +150,7 @@ def stable_diffusion_2(
                                               set_alpha_to_one=noise_scheduler.config.set_alpha_to_one,
                                               prediction_type=prediction_type)
 
+    # Make the composer model
     model = StableDiffusion(
         unet=unet,
         vae=vae,
@@ -123,6 +159,7 @@ def stable_diffusion_2(
         noise_scheduler=noise_scheduler,
         inference_noise_scheduler=inference_noise_scheduler,
         prediction_type=prediction_type,
+        latent_scale=latent_scale,
         offset_noise=offset_noise,
         train_metrics=train_metrics,
         val_metrics=val_metrics,
@@ -138,7 +175,8 @@ def stable_diffusion_2(
         model = DeviceGPU().module_to_device(model)
         if is_xformers_installed and use_xformers:
             model.unet.enable_xformers_memory_efficient_attention()
-            model.vae.enable_xformers_memory_efficient_attention()
+            if autoencoder_path is None:
+                model.vae.enable_xformers_memory_efficient_attention()
 
     if clip_qkv is not None:
         if is_xformers_installed and use_xformers:
@@ -156,7 +194,10 @@ def stable_diffusion_xl(
     unet_model_name: str = 'stabilityai/stable-diffusion-xl-base-1.0',
     vae_model_name: str = 'madebyollin/sdxl-vae-fp16-fix',
     pretrained: bool = True,
+    autoencoder_path: Optional[str] = None,
+    autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
     prediction_type: str = 'epsilon',
+    latent_scale: Optional[float] = None,
     offset_noise: Optional[float] = None,
     train_metrics: Optional[List] = None,
     val_metrics: Optional[List] = None,
@@ -184,8 +225,12 @@ def stable_diffusion_xl(
             'madebyollin/sdxl-vae-fp16-fix' as the official VAE checkpoint (from
             'stabilityai/stable-diffusion-xl-base-1.0') is not compatible with fp16.
         pretrained (bool): Whether to load pretrained weights. Defaults to True.
+        autoencoder_path (optional, str): Path to autoencoder weights if using custom autoencoder. If not specified,
+            will use the vae from `model_name`. Default `None`.
+        autoencoder_local_path (optional, str): Path to autoencoder weights. Default: `/tmp/autoencoder_weights.pt`.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
+        latent_scale (float, optional): The scale of the latent noise. If not specified, will use `0.13025` for SDXL.
         offset_noise (float, optional): The scale of the offset noise. If not specified, offset noise will not
             be used. Default `None`.
         train_metrics (list, optional): List of metrics to compute during training. If None, defaults to
@@ -218,11 +263,44 @@ def stable_diffusion_xl(
         if isinstance(metric, CLIPScore):
             metric.requires_grad_(False)
 
+    # Make the text encoder
+    tokenizer = SDXLTokenizer(model_name)
+    text_encoder = SDXLTextEncoder(model_name, encode_latents_in_fp16)
+
+    # Make the autoencoder
+    if autoencoder_path is None:
+        # Use the pretrained vae
+        torch_dtype = torch.float16 if encode_latents_in_fp16 else None
+        try:
+            vae = AutoencoderKL.from_pretrained(vae_model_name, subfolder='vae', torch_dtype=torch_dtype)
+        except:  # for handling SDXL vae fp16 fixed checkpoint
+            vae = AutoencoderKL.from_pretrained(vae_model_name, torch_dtype=torch_dtype)
+        if latent_scale is None:
+            latent_scale = 0.13025
+    else:
+        # Use a custom autoencoder
+        vae, latent_statistics = load_autoencoder(autoencoder_path, autoencoder_local_path)
+        if latent_statistics is not None and latent_scale is None:
+            assert isinstance(latent_statistics['global_std'], float)
+            latent_scale = 1 / latent_statistics['global_std']
+        if latent_scale is None:
+            # Default to the SDXL latent scale
+            latent_scale = 0.13025
+        print('Using latent scale of: ', latent_scale)
+
+    # Make the unet
     if pretrained:
         unet = UNet2DConditionModel.from_pretrained(unet_model_name, subfolder='unet')
+        if autoencoder_path is not None and vae.latent_channels != 4:
+            raise ValueError(f'Pretrained unet has 4 latent channels but the vae has {vae.latent_channels}.')
     else:
-        config = PretrainedConfig.get_config_dict(unet_model_name, subfolder='unet')
-        unet = UNet2DConditionModel(**config[0])
+        unet_config = PretrainedConfig.get_config_dict(unet_model_name, subfolder='unet')[0]
+        if autoencoder_path is not None:
+            # Adapt the unet config to account for differing number of latent channels if necessary
+            unet_config['in_channels'] = vae.latent_channels
+            unet_config['out_channels'] = vae.latent_channels
+        # Init the unet from the config
+        unet = UNet2DConditionModel(**unet_config)
 
         # Zero initialization trick
         for name, layer in unet.named_modules():
@@ -235,15 +313,7 @@ def stable_diffusion_xl(
         # Last conv block out projection
         unet.conv_out = zero_module(unet.conv_out)
 
-    torch_dtype = torch.float16 if encode_latents_in_fp16 else None
-    try:
-        vae = AutoencoderKL.from_pretrained(vae_model_name, subfolder='vae', torch_dtype=torch_dtype)
-    except:  # for handling SDXL vae fp16 fixed checkpoint
-        vae = AutoencoderKL.from_pretrained(vae_model_name, torch_dtype=torch_dtype)
-
-    tokenizer = SDXLTokenizer(model_name)
-    text_encoder = SDXLTextEncoder(model_name, encode_latents_in_fp16)
-
+    # Make the noise schedulers
     noise_scheduler = DDPMScheduler.from_pretrained(model_name, subfolder='scheduler')
     inference_noise_scheduler = EulerDiscreteScheduler(num_train_timesteps=1000,
                                                        beta_start=0.00085,
@@ -256,6 +326,7 @@ def stable_diffusion_xl(
                                                        timestep_spacing='leading',
                                                        steps_offset=1)
 
+    # Make the composer model
     model = StableDiffusion(
         unet=unet,
         vae=vae,
@@ -280,7 +351,8 @@ def stable_diffusion_xl(
         model = DeviceGPU().module_to_device(model)
         if is_xformers_installed and use_xformers:
             model.unet.enable_xformers_memory_efficient_attention()
-            model.vae.enable_xformers_memory_efficient_attention()
+            if autoencoder_path is None:
+                model.vae.enable_xformers_memory_efficient_attention()
 
     if clip_qkv is not None:
         if is_xformers_installed and use_xformers:
@@ -315,35 +387,12 @@ def latent_diffusion(
         use_quasirandom_timesteps (bool): Whether to use quasirandom timesteps. Defaults to False.
         fourier_features (int): Number of fourier features to use. Defaults to None.
     """
-    # Download the autoencoder weights and init them
-    if not os.path.exists(autoencoder_local_path):
-        get_file(path=autoencoder_path, destination=autoencoder_local_path)
-    # Load the autoencoder weights from the state dict
-    state_dict = torch.load(autoencoder_local_path, map_location='cpu')
-    # Get the config from the state dict and init the model using it
-    autoencoder_config = state_dict['state']['model']['model._extra_state']['config']
-    autoencoder = AutoEncoder(**autoencoder_config)
-    # Need to clean up the state dict to remove loss and metrics.
-    cleaned_state_dict = {}
-    for key in list(state_dict['state']['model'].keys()):
-        if key.split('.')[0] == 'model':
-            cleaned_key = '.'.join(key.split('.')[1:])
-            cleaned_state_dict[cleaned_key] = state_dict['state']['model'][key]
-    autoencoder.load_state_dict(cleaned_state_dict, strict=True)
-    # If present, extract the channel means and standard deviations from the state dict
-    latent_statistics = state_dict['state']['callbacks']['LogLatentStatistics']
-
-    if latent_means is None:
-        latent_means = []
-        for i in range(autoencoder_config['latent_channels']):
-            latent_means.append(latent_statistics[f'channel_mean_{i}'])
-    if latent_stds is None:
-        latent_stds = []
-        for i in range(autoencoder_config['latent_channels']):
-            latent_stds.append(latent_statistics[f'channel_std_{i}'])
-
-    print(f'Latent means: {latent_means}')
-    print(f'Latent stds: {latent_stds}')
+    # Download the autoencoder weights
+    autoencoder, latent_statistics = load_autoencoder(autoencoder_path, autoencoder_local_path)
+    if latent_statistics is not None and latent_means is None:
+        latent_means = latent_statistics['latent_means']
+    if latent_statistics is not None and latent_stds is None:
+        latent_stds = latent_statistics['latent_stds']
 
     model_name = 'stabilityai/stable-diffusion-2-base'
     if encode_latents_in_fp16:
@@ -354,15 +403,15 @@ def latent_diffusion(
 
     config = PretrainedConfig.get_config_dict(model_name, subfolder='unet')
     new_config = config[0]
-    new_config['in_channels'] = autoencoder_config['latent_channels']
+    new_config['in_channels'] = autoencoder.latent_channels
     # Optionally include fourier features
     if fourier_features is not None:
         # Each fourier feature is two dimensional.
         new_config['in_channels'] += 2 * fourier_features
-        fourier_feature_transform = FourierFeatures(autoencoder_config['latent_channels'], fourier_features)
+        fourier_feature_transform = FourierFeatures(autoencoder.latent_channels, fourier_features)
     else:
         fourier_feature_transform = None
-    new_config['out_channels'] = autoencoder_config['latent_channels']
+    new_config['out_channels'] = autoencoder.latent_channels
 
     unet = UNet2DConditionModel(**new_config)
 
