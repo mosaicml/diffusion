@@ -40,6 +40,8 @@ class StableDiffusion(ComposerModel):
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
         latent_scale: (float): The scale of the latents. Defaults to `0.18215`, for the SD1/SD2 autoencoder.
+            If `sdxl` is True, defaults to `0.13025`, for the SDXL autoencoder.
+        downsample_factor (int): The factor by which the image is downsampled by the autoencoder. Default `8`.
         offset_noise (float, optional): The scale of the offset noise. If not specified, offset noise will not
             be used. Default `None`.
         train_metrics (list): List of torchmetrics to calculate during training.
@@ -80,6 +82,7 @@ class StableDiffusion(ComposerModel):
                  loss_fn=F.mse_loss,
                  prediction_type: str = 'epsilon',
                  latent_scale: Optional[float] = None,
+                 downsample_factor: int = 8,
                  offset_noise: Optional[float] = None,
                  train_metrics: Optional[List] = None,
                  val_metrics: Optional[List] = None,
@@ -103,6 +106,7 @@ class StableDiffusion(ComposerModel):
         self.prediction_type = prediction_type.lower()
         if self.prediction_type not in ['sample', 'epsilon', 'v_prediction']:
             raise ValueError(f'prediction type must be one of sample, epsilon, or v_prediction. Got {prediction_type}')
+        self.downsample_factor = downsample_factor
         self.offset_noise = offset_noise
         self.val_seed = val_seed
         self.image_key = image_key
@@ -446,9 +450,8 @@ class StableDiffusion(ComposerModel):
         if seed:
             rng_generator = rng_generator.manual_seed(seed)  # type: ignore
 
-        vae_scale_factor = 8
-        height = height or self.unet.config.sample_size * vae_scale_factor
-        width = width or self.unet.config.sample_size * vae_scale_factor
+        height = height or self.unet.config.sample_size * self.downsample_factor
+        width = width or self.unet.config.sample_size * self.downsample_factor
         assert height is not None  # for type checking
         assert width is not None  # for type checking
 
@@ -485,7 +488,8 @@ class StableDiffusion(ComposerModel):
 
         # prepare for diffusion generation process
         latents = torch.randn(
-            (batch_size, self.unet.config.in_channels, height // vae_scale_factor, width // vae_scale_factor),
+            (batch_size, self.unet.config.in_channels, height // self.downsample_factor,
+             width // self.downsample_factor),
             device=device,
             generator=rng_generator,
         )

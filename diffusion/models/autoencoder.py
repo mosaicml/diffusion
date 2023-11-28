@@ -6,7 +6,6 @@
 Based on the implementation from https://github.com/CompVis/stable-diffusion
 """
 
-import os
 from typing import Dict, Tuple
 
 import lpips
@@ -712,8 +711,7 @@ def load_autoencoder(load_path: str, local_path: str = '/tmp/autoencoder_weights
         latent_statistics (Dict[str, Union[list, float]]): Dictionary of latent statistics if present, else `None`.
     """
     # Download the autoencoder weights and init them
-    if not os.path.exists(local_path):
-        get_file(path=load_path, destination=local_path)
+    get_file(path=load_path, destination=local_path)
     # Load the autoencoder weights from the state dict
     state_dict = torch.load(local_path, map_location='cpu')
     # Get the config from the state dict and init the model using it

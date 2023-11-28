@@ -37,6 +37,7 @@ class LatentDiffusion(ComposerModel):
             set to zero. Default `None`.
         latent_stds (tuple[float], optional): The standard deviations of the latents. If not specified, the
             standard deviations will be set to one. Default `None`.
+        downsample_factor (int): The downsample factor of the autoencoder. Default: `8`.
         T_max (int): The maximum time for the forward diffusion process. Default: `1000`.
         image_key (str): The name of the image inputs in the dataloader batch.
             Default: `image_tensor`.
@@ -59,6 +60,7 @@ class LatentDiffusion(ComposerModel):
         offset_noise: Optional[float] = None,
         latent_means: Optional[tuple[float]] = None,
         latent_stds: Optional[tuple[float]] = None,
+        downsample_factor: int = 8,
         T_max: int = 1000,
         image_key: str = 'image',
         text_key: str = 'captions',
@@ -79,6 +81,7 @@ class LatentDiffusion(ComposerModel):
         self.offset_noise = offset_noise
         self.latent_means = latent_means
         self.latent_stds = latent_stds
+        self.downsample_factor = downsample_factor
         self.T_max = T_max
         self.image_key = image_key
         self.text_key = text_key
@@ -309,8 +312,8 @@ class LatentDiffusion(ComposerModel):
         self,
         prompt: Union[str, List[str]],
         negative_prompt: Optional[Union[str, List[str]]] = None,
-        height: int = 64,
-        width: int = 64,
+        height: int = 256,
+        width: int = 256,
         num_inference_steps: int = 50,
         guidance_scale: float = 3.0,
         rescaled_guidance: Optional[float] = None,
@@ -332,9 +335,9 @@ class LatentDiffusion(ComposerModel):
                 (i.e., ignored if guidance_scale is less than 1).
                 Must be the same length as list of prompts. Default: `None`.
             height (int, optional): The height in pixels of the generated image.
-                Default: `self.unet.config.sample_size * 8)`.
+                Default: `256`.
             width (int, optional): The width in pixels of the generated image.
-                Default: `self.unet.config.sample_size * 8)`.
+                Default: `256`.
             num_inference_steps (int): The number of denoising steps.
                 More denoising steps usually lead to a higher quality image at the expense
                 of slower inference. Default: `50`.
@@ -396,7 +399,9 @@ class LatentDiffusion(ComposerModel):
 
         # Generate initial randomness for the diffusion process
         batch_size = len(prompt)
-        latents = torch.randn((batch_size, self.autoencoder.latent_channels, height, width),
+        latent_height = height // self.downsample_factor
+        latent_width = width // self.downsample_factor
+        latents = torch.randn((batch_size, self.autoencoder.latent_channels, latent_height, latent_width),
                               device=device,
                               generator=rng_generator)
 

@@ -107,6 +107,7 @@ def stable_diffusion_2(
     # Make the autoencoder
     if autoencoder_path is None:
         # Use the pretrained vae
+        downsample_factor = 8
         if encode_latents_in_fp16:
             vae = AutoencoderKL.from_pretrained(model_name, subfolder='vae', torch_dtype=torch.float16)
         else:
@@ -123,7 +124,7 @@ def stable_diffusion_2(
         if latent_scale is None:
             # Default to the SD1/SD2 latent scale
             latent_scale = 0.18215
-        print('Using latent scale of: ', latent_scale)
+        downsample_factor = 2**(len(vae.channel_multipliers) - 1)
 
     # Make the unet
     if pretrained:
@@ -160,6 +161,7 @@ def stable_diffusion_2(
         inference_noise_scheduler=inference_noise_scheduler,
         prediction_type=prediction_type,
         latent_scale=latent_scale,
+        downsample_factor=downsample_factor,
         offset_noise=offset_noise,
         train_metrics=train_metrics,
         val_metrics=val_metrics,
@@ -269,6 +271,7 @@ def stable_diffusion_xl(
 
     # Make the autoencoder
     if autoencoder_path is None:
+        downsample_factor = 8
         # Use the pretrained vae
         torch_dtype = torch.float16 if encode_latents_in_fp16 else None
         try:
@@ -286,7 +289,7 @@ def stable_diffusion_xl(
         if latent_scale is None:
             # Default to the SDXL latent scale
             latent_scale = 0.13025
-        print('Using latent scale of: ', latent_scale)
+        downsample_factor = 2**(len(vae.channel_multipliers) - 1)
 
     # Make the unet
     if pretrained:
@@ -335,6 +338,8 @@ def stable_diffusion_xl(
         noise_scheduler=noise_scheduler,
         inference_noise_scheduler=inference_noise_scheduler,
         prediction_type=prediction_type,
+        latent_scale=latent_scale,
+        downsample_factor=downsample_factor,
         offset_noise=offset_noise,
         train_metrics=train_metrics,
         val_metrics=val_metrics,
