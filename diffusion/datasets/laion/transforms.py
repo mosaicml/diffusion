@@ -59,7 +59,7 @@ class RandomCropAspectRatioTransorm:
             512
         ])
         # torch.round is a temporarily needed due to an artifact in our first batch of bucketing
-        self.aspect_ratio_buckets = torch.round(self.height_buckets / self.width_buckets, decimals=2)
+        self.aspect_ratio_buckets = self.height_buckets / self.width_buckets
 
     def __call__(self, img):
         orig_w, orig_h = img.size
