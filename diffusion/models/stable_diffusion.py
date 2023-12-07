@@ -478,8 +478,6 @@ class StableDiffusion(ComposerModel):
         else:
             if self.sdxl:
                 pooled_embeddings = pooled_text_embeddings
-            if pad_attn_mask is not None:
-                encoder_attn_mask = pad_attn_mask
 
         # prepare for diffusion generation process
         latents = torch.randn(
