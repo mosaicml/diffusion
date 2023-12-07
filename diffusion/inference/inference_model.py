@@ -34,12 +34,14 @@ class StableDiffusionInference():
         pretrained (bool): Whether to load pretrained weights. Default: True.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
+        **kwargs: Additional keyword arguments to pass to the model.
     """
 
     def __init__(self,
                  model_name: str = 'stabilityai/stable-diffusion-2-base',
                  pretrained: bool = False,
-                 prediction_type: str = 'epsilon'):
+                 prediction_type: str = 'epsilon',
+                 **kwargs):
         self.device = torch.cuda.current_device()
 
         model = stable_diffusion_2(
@@ -48,6 +50,7 @@ class StableDiffusionInference():
             prediction_type=prediction_type,
             encode_latents_in_fp16=True,
             fsdp=False,
+            **kwargs,
         )
 
         if not pretrained:
@@ -124,6 +127,7 @@ class StableDiffusionXLInference():
         pretrained (bool): Whether to load pretrained weights. Default: True.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
+        **kwargs: Additional keyword arguments to pass to the model.
     """
 
     def __init__(self,
@@ -132,7 +136,8 @@ class StableDiffusionXLInference():
                  vae_model_name: str = 'madebyollin/sdxl-vae-fp16-fix',
                  clip_qkv: Optional[float] = None,
                  pretrained: bool = False,
-                 prediction_type: str = 'epsilon'):
+                 prediction_type: str = 'epsilon',
+                 **kwargs):
         self.device = torch.cuda.current_device()
 
         model = stable_diffusion_xl(
@@ -144,6 +149,7 @@ class StableDiffusionXLInference():
             prediction_type=prediction_type,
             encode_latents_in_fp16=True,
             fsdp=False,
+            **kwargs,
         )
 
         if not pretrained:
