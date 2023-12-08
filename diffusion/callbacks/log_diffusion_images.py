@@ -3,7 +3,7 @@
 
 """Logger for generated images."""
 
-from typing import List, Optional
+from typing import List, Optional, Tuple, Union
 
 import torch
 from composer import Callback, Logger, State
@@ -19,7 +19,8 @@ class LogDiffusionImages(Callback):
 
     Args:
         prompts (List[str]): List of prompts to use for evaluation.
-        size (int, optional): Image size to use during generation. Default: ``256``.
+        size (int, Tuple[int, int], optional): Image size to use during generation.
+            If using a tuple, specify as (height, width).  Default: ``256``.
         num_inference_steps (int, optional): Number of inference steps to use during generation. Default: ``50``.
         guidance_scale (float, optional): guidance_scale is defined as w of equation 2
             of the Imagen Paper. Guidance scale is enabled by setting guidance_scale > 1.
@@ -28,7 +29,6 @@ class LogDiffusionImages(Callback):
             Default: ``0.0``.
         rescaled_guidance (float, optional): Rescaled guidance scale. If not specified, rescaled guidance
             will not be used. Default: ``None``.
-        text_key (str, optional): Key in the batch to use for text prompts. Default: ``'captions'``.
         tokenized_prompts (torch.LongTensor or List[torch.LongTensor], optional): Batch of pre-tokenized prompts
             to use for evaluation. If SDXL, this will be a list of two pre-tokenized prompts Default: ``None``.
         seed (int, optional): Random seed to use for generation. Set a seed for reproducible generation.
@@ -38,62 +38,65 @@ class LogDiffusionImages(Callback):
 
     def __init__(self,
                  prompts: List[str],
-                 size: Optional[int] = 256,
+                 size: Optional[Union[Tuple[int, int], int]] = 256,
+                 batch_size: Optional[int] = None,
                  num_inference_steps=50,
                  guidance_scale: Optional[float] = 0.0,
                  rescaled_guidance: Optional[float] = None,
-                 text_key: Optional[str] = 'captions',
                  tokenized_prompts: Optional[torch.LongTensor] = None,
                  seed: Optional[int] = 1138,
                  use_table: bool = False):
         self.prompts = prompts
-        self.size = size
+        self.size = (size, size) if isinstance(size, int) else size
+        self.batch_size = len(prompts) if batch_size is None else batch_size
         self.num_inference_steps = num_inference_steps
         self.guidance_scale = guidance_scale
         self.rescaled_guidance = rescaled_guidance
-        self.text_key = text_key
         self.seed = seed
         self.tokenized_prompts = tokenized_prompts
         self.use_table = use_table
 
-    def eval_batch_end(self, state: State, logger: Logger):
-        # Only log once per eval epoch
-        if state.eval_timestamp.get(TimeUnit.BATCH).value == 1:
-            # Get the model object if it has been wrapped by DDP
-            # We need this to access the text keys, tokenizer, and image generation function.
-            if isinstance(state.model, DistributedDataParallel):
-                model = state.model.module
+    def eval_start(self, state: State, logger: Logger):
+        # Get the model object if it has been wrapped by DDP
+        # We need this to access the text keys, tokenizer, and image generation function.
+        if isinstance(state.model, DistributedDataParallel):
+            model = state.model.module
+        else:
+            model = state.model
+
+        if self.tokenized_prompts is None:
+            self.tokenized_prompts = [
+                model.tokenizer(p, padding='max_length', truncation=True,
+                                return_tensors='pt')['input_ids']  # type: ignore
+                for p in self.prompts
+            ]
+            if model.sdxl:
+                self.tokenized_prompts = torch.stack([torch.cat(tp) for tp in self.tokenized_prompts
+                                                        ])  # [B, 2, max_length]
             else:
-                model = state.model
+                self.tokenized_prompts = torch.cat(self.tokenized_prompts)  # type: ignore
 
-            if self.tokenized_prompts is None:
-                self.tokenized_prompts = [
-                    model.tokenizer(p, padding='max_length', truncation=True,
-                                    return_tensors='pt')['input_ids']  # type: ignore
-                    for p in self.prompts
-                ]
-                if model.sdxl:
-                    self.tokenized_prompts = torch.stack([torch.cat(tp) for tp in self.tokenized_prompts
-                                                         ])  # [B, 2, max_length]
-                else:
-                    self.tokenized_prompts = torch.cat(self.tokenized_prompts)  # type: ignore
-            self.tokenized_prompts = self.tokenized_prompts.to(state.batch[self.text_key].device)  # type: ignore
+        # Batch tokenized prompts
+        if not isinstance(self.tokenized_prompts, tuple):
+            self.tokenized_prompts = torch.split(self.tokenized_prompts, self.batch_size)
 
-            # Generate images
-            with get_precision_context(state.precision):
+
+        # Generate images
+        with get_precision_context(state.precision):
+            for tokenized_prompt_batch in self.tokenized_prompts:
                 gen_images = model.generate(
-                    tokenized_prompts=self.tokenized_prompts,  # type: ignore
-                    height=self.size,
-                    width=self.size,
+                    tokenized_prompts=tokenized_prompt_batch,  # type: ignore
+                    height=self.size[0],
+                    width=self.size[1],
                     guidance_scale=self.guidance_scale,
                     rescaled_guidance=self.rescaled_guidance,
                     progress_bar=False,
                     num_inference_steps=self.num_inference_steps,
                     seed=self.seed)
 
-            # Log images to wandb
-            for prompt, image in zip(self.prompts, gen_images):
-                logger.log_images(images=image, name=prompt, step=state.timestamp.batch.value, use_table=self.use_table)
+        # Log images to wandb
+        for prompt, image in zip(self.prompts, gen_images):
+            logger.log_images(images=image, name=prompt, step=state.timestamp.batch.value, use_table=self.use_table)
 
 
 class LogAutoencoderImages(Callback):
