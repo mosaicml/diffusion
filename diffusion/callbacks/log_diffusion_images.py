@@ -21,6 +21,8 @@ class LogDiffusionImages(Callback):
         prompts (List[str]): List of prompts to use for evaluation.
         size (int, Tuple[int, int], optional): Image size to use during generation.
             If using a tuple, specify as (height, width).  Default: ``256``.
+        batch_size (int, optional): The batch size of the prompts passed to the generate function. If not specified,
+            batch_size is set to the number of prompts. Default: ``None``.
         num_inference_steps (int, optional): Number of inference steps to use during generation. Default: ``50``.
         guidance_scale (float, optional): guidance_scale is defined as w of equation 2
             of the Imagen Paper. Guidance scale is enabled by setting guidance_scale > 1.
@@ -47,7 +49,7 @@ class LogDiffusionImages(Callback):
                  seed: Optional[int] = 1138,
                  use_table: bool = False):
         self.prompts = prompts
-        self.size = (size, size) if isinstance(size, int) else size
+        self.size = size if isinstance(size, tuple) else (size, size)
         self.batch_size = len(prompts) if batch_size is None else batch_size
         self.num_inference_steps = num_inference_steps
         self.guidance_scale = guidance_scale
@@ -72,17 +74,17 @@ class LogDiffusionImages(Callback):
             ]
             if model.sdxl:
                 self.tokenized_prompts = torch.stack([torch.cat(tp) for tp in self.tokenized_prompts
-                                                        ])  # [B, 2, max_length]
+                                                     ])  # [B, 2, max_length]
             else:
-                self.tokenized_prompts = torch.cat(self.tokenized_prompts)  # type: ignore
+                self.tokenized_prompts = torch.cat(self.tokenized_prompts)
 
         # Batch tokenized prompts
         if not isinstance(self.tokenized_prompts, tuple):
-            self.tokenized_prompts = torch.split(self.tokenized_prompts, self.batch_size)
-
+            self.tokenized_prompts = torch.split(self.tokenized_prompts, self.batch_size)  # type: ignore
 
         # Generate images
         with get_precision_context(state.precision):
+            all_gen_images = []
             for tokenized_prompt_batch in self.tokenized_prompts:
                 gen_images = model.generate(
                     tokenized_prompts=tokenized_prompt_batch,  # type: ignore
@@ -93,6 +95,8 @@ class LogDiffusionImages(Callback):
                     progress_bar=False,
                     num_inference_steps=self.num_inference_steps,
                     seed=self.seed)
+                all_gen_images.append(gen_images)
+            gen_images = torch.cat(all_gen_images)
 
         # Log images to wandb
         for prompt, image in zip(self.prompts, gen_images):
