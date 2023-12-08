@@ -290,6 +290,133 @@ def stable_diffusion_xl(
     return model
 
 
+def common_canvas(
+    model_variant: str = 'large-nc',
+    prediction_type: str = 'epsilon',
+    offset_noise: Optional[float] = None,
+    train_metrics: Optional[List] = None,
+    val_metrics: Optional[List] = None,
+    val_guidance_scales: Optional[List] = None,
+    val_seed: int = 1138,
+    loss_bins: Optional[List] = None,
+    precomputed_latents: bool = False,
+    encode_latents_in_fp16: bool = True,
+    mask_pad_tokens: bool = False,
+    fsdp: bool = True,
+    clip_qkv: Optional[float] = 6.0,
+    use_xformers: bool = True,
+):
+    """Common Canvas model setup.
+
+    Args:
+        model_variant (str): Name of the model to load. Defaults to 'large-nc'. Must be one of 'small-c', 'small-nc', or 'large-nc'.
+        prediction_type (str): The type of prediction to use. Must be one of 'sample',
+            'epsilon', or 'v_prediction'. Default: `epsilon`.
+        train_metrics (list, optional): List of metrics to compute during training. If None, defaults to
+            [MeanSquaredError()].
+        val_metrics (list, optional): List of metrics to compute during validation. If None, defaults to
+            [MeanSquaredError(), FrechetInceptionDistance(normalize=True)].
+        val_guidance_scales (list, optional): List of scales to use for validation guidance. If None, defaults to
+            [1.0, 3.0, 7.0].
+        val_seed (int): Seed to use for generating evaluation images. Defaults to 1138.
+        loss_bins (list, optional): List of tuples of (min, max) values to use for loss binning. If None, defaults to
+            [(0, 1)].
+        precomputed_latents (bool): Whether to use precomputed latents. Defaults to False.
+        offset_noise (float, optional): The scale of the offset noise. If not specified, offset noise will not
+            be used. Default `None`.
+        encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
+        mask_pad_tokens (bool): Whether to mask pad tokens in cross attention. Defaults to False.
+        fsdp (bool): Whether to use FSDP. Defaults to True.
+        clip_qkv (float, optional): If not None, clip the qkv values to this value. Defaults to 6.0.
+        use_xformers (bool): Whether to use xformers for attention. Defaults to True.
+    """
+    if train_metrics is None:
+        train_metrics = [MeanSquaredError()]
+    if val_metrics is None:
+        val_metrics = [MeanSquaredError(), FrechetInceptionDistance(normalize=True)]
+    if val_guidance_scales is None:
+        val_guidance_scales = [1.0, 3.0, 7.0]
+    if loss_bins is None:
+        loss_bins = [(0, 1)]
+    # Fix a bug where CLIPScore requires grad
+    for metric in val_metrics:
+        if isinstance(metric, CLIPScore):
+            metric.requires_grad_(False)
+
+    text_encoder_name = 'stabilityai/stable-diffusion-2-base'
+    if model_variant == 'small-c' or model_variant == 'small-nc':
+        vae_name = 'stabilityai/stable-diffusion-2-base'
+        unet_name = 'stabilityai/stable-diffusion-2-base'
+    elif model_variant == 'large-nc':
+        vae_name = 'madebyollin/sdxl-vae-fp16-fix'
+        unet_name = 'stabilityai/stable-diffusion-xl-base-1.0'
+    else:
+        raise ValueError(f'Unknown model variant: {model_variant}')
+
+    # Get appropriate unet config
+    config = PretrainedConfig.get_config_dict(unet_name, subfolder='unet')
+    if model_variant == 'large-nc':
+        # Large-NC doesn't use micro-conditioning, so set config appropriately
+        config[0]['addition_embed_type'] = None
+        config[0]['cross_attention_dim'] = 1024
+    unet = UNet2DConditionModel(**config[0])
+
+    if encode_latents_in_fp16:
+        vae = AutoencoderKL.from_pretrained(vae_name, subfolder='vae', torch_dtype=torch.float16)
+        text_encoder = CLIPTextModel.from_pretrained(text_encoder_name,
+                                                     subfolder='text_encoder',
+                                                     torch_dtype=torch.float16)
+    else:
+        vae = AutoencoderKL.from_pretrained(vae_name, subfolder='vae')
+        text_encoder = CLIPTextModel.from_pretrained(text_encoder_name, subfolder='text_encoder')
+
+    tokenizer = CLIPTokenizer.from_pretrained(text_encoder_name, subfolder='tokenizer')
+    noise_scheduler = DDPMScheduler.from_pretrained(text_encoder_name, subfolder='scheduler')
+    inference_noise_scheduler = DDIMScheduler(num_train_timesteps=noise_scheduler.config.num_train_timesteps,
+                                              beta_start=noise_scheduler.config.beta_start,
+                                              beta_end=noise_scheduler.config.beta_end,
+                                              beta_schedule=noise_scheduler.config.beta_schedule,
+                                              trained_betas=noise_scheduler.config.trained_betas,
+                                              clip_sample=noise_scheduler.config.clip_sample,
+                                              set_alpha_to_one=noise_scheduler.config.set_alpha_to_one,
+                                              prediction_type=prediction_type)
+
+    model = StableDiffusion(
+        unet=unet,
+        vae=vae,
+        text_encoder=text_encoder,
+        tokenizer=tokenizer,
+        noise_scheduler=noise_scheduler,
+        inference_noise_scheduler=inference_noise_scheduler,
+        prediction_type=prediction_type,
+        offset_noise=offset_noise,
+        train_metrics=train_metrics,
+        val_metrics=val_metrics,
+        val_guidance_scales=val_guidance_scales,
+        val_seed=val_seed,
+        loss_bins=loss_bins,
+        precomputed_latents=precomputed_latents,
+        encode_latents_in_fp16=encode_latents_in_fp16,
+        mask_pad_tokens=mask_pad_tokens,
+        fsdp=fsdp,
+    )
+    if torch.cuda.is_available():
+        model = DeviceGPU().module_to_device(model)
+        if is_xformers_installed and use_xformers:
+            model.unet.enable_xformers_memory_efficient_attention()
+            model.vae.enable_xformers_memory_efficient_attention()
+
+    if clip_qkv is not None:
+        if is_xformers_installed and use_xformers:
+            attn_processor = ClippedXFormersAttnProcessor(clip_val=clip_qkv)
+        else:
+            attn_processor = ClippedAttnProcessor2_0(clip_val=clip_qkv)
+        log.info('Using %s with clip_val %.1f' % (attn_processor.__class__, clip_qkv))
+        model.unet.set_attn_processor(attn_processor)
+
+    return model
+
+
 def build_autoencoder(input_channels: int = 3,
                       output_channels: int = 3,
                       hidden_channels: int = 128,
