@@ -45,6 +45,7 @@ def stable_diffusion_2(
     mask_pad_tokens: bool = False,
     fsdp: bool = True,
     clip_qkv: Optional[float] = None,
+    use_xformers: bool = True,
 ):
     """Stable diffusion v2 training setup.
 
@@ -72,6 +73,7 @@ def stable_diffusion_2(
         mask_pad_tokens (bool): Whether to mask pad tokens in cross attention. Defaults to False.
         fsdp (bool): Whether to use FSDP. Defaults to True.
         clip_qkv (float, optional): If not None, clip the qkv values to this value. Defaults to None.
+        use_xformers (bool): Whether to use xformers for attention. Defaults to True.
     """
     if train_metrics is None:
         train_metrics = [MeanSquaredError()]
@@ -131,12 +133,12 @@ def stable_diffusion_2(
     )
     if torch.cuda.is_available():
         model = DeviceGPU().module_to_device(model)
-        if is_xformers_installed:
+        if is_xformers_installed and use_xformers:
             model.unet.enable_xformers_memory_efficient_attention()
             model.vae.enable_xformers_memory_efficient_attention()
 
     if clip_qkv is not None:
-        if is_xformers_installed:
+        if is_xformers_installed and use_xformers:
             attn_processor = ClippedXFormersAttnProcessor(clip_val=clip_qkv)
         else:
             attn_processor = ClippedAttnProcessor2_0(clip_val=clip_qkv)
@@ -163,6 +165,7 @@ def stable_diffusion_xl(
     mask_pad_tokens: bool = False,
     fsdp: bool = True,
     clip_qkv: Optional[float] = 6.0,
+    use_xformers: bool = True,
 ):
     """Stable diffusion 2 training setup + SDXL UNet and VAE.
 
@@ -197,6 +200,7 @@ def stable_diffusion_xl(
         fsdp (bool): Whether to use FSDP. Defaults to True.
         clip_qkv (float, optional): If not None, clip the qkv values to this value. Defaults to 6.0. Improves stability
             of training.
+        use_xformers (bool): Whether to use xformers for attention. Defaults to True.
     """
     if train_metrics is None:
         train_metrics = [MeanSquaredError()]
@@ -271,12 +275,12 @@ def stable_diffusion_xl(
     )
     if torch.cuda.is_available():
         model = DeviceGPU().module_to_device(model)
-        if is_xformers_installed:
+        if is_xformers_installed and use_xformers:
             model.unet.enable_xformers_memory_efficient_attention()
             model.vae.enable_xformers_memory_efficient_attention()
 
     if clip_qkv is not None:
-        if is_xformers_installed:
+        if is_xformers_installed and use_xformers:
             attn_processor = ClippedXFormersAttnProcessor(clip_val=clip_qkv)
         else:
             attn_processor = ClippedAttnProcessor2_0(clip_val=clip_qkv)
