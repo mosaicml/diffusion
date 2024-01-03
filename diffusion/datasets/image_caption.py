@@ -43,7 +43,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
         image_key (str): Key associated with the image in the streaming dataset. Default: ``'image'``.
         caption_key (str): Key associated with the caption in the streaming dataset. Default: ``'caption'``.
         sdxl (bool): Whether or not we're training SDXL. Default: `False`.
-        use_e5 (bool): Whether to use e5-large-v2 tokenizer instead of openai CLIP. 
+        use_e5 (bool): Whether to use e5-large-v2 tokenizer instead of openai CLIP.
             Enable if using e5 text encoder. Defaults to False.
         zero_dropped_captions (bool): If True, zero out text embeddings for dropped captions. Default: ``False``.
 
@@ -202,6 +202,8 @@ def build_streaming_image_caption_dataloader(
         local (str, Sequence[str]): One or more local filesystem directories where dataset is cached during operation.
         batch_size (int): The batch size to use for both the ``StreamingDataset`` and ``DataLoader``.
         tokenizer_name_or_path (str): The name or path of the tokenizer to use. Default: ``'stabilityai/stable-diffusion-2-base'``.
+        use_e5 (bool): Whether to use e5-large-v2 tokenizer instead of openai CLIP.
+            Enable if using e5 text encoder. Defaults to False.
         caption_drop_prob (float): The probability of dropping a caption. Default: ``0.0``.
         microcond_drop_prob (float): The probability of dropping microconditioning. Only relevant for SDXL. Default: ``0.0``.
         resize_size (int): The size to resize the image to. Default: ``256``.

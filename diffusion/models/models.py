@@ -12,7 +12,8 @@ from diffusers import AutoencoderKL, DDIMScheduler, DDPMScheduler, EulerDiscrete
 from torchmetrics import MeanSquaredError
 from torchmetrics.image.fid import FrechetInceptionDistance
 from torchmetrics.multimodal.clip_score import CLIPScore
-from transformers import AutoModel, AutoTokenizer, CLIPTextModel, CLIPTextModelWithProjection, CLIPTokenizer, PretrainedConfig
+from transformers import (AutoModel, AutoTokenizer, CLIPTextModel, CLIPTextModelWithProjection, CLIPTokenizer,
+                          PretrainedConfig)
 
 from diffusion.models.autoencoder import AutoEncoder, AutoEncoderLoss, ComposerAutoEncoder, ComposerDiffusersAutoEncoder
 from diffusion.models.layers import ClippedAttnProcessor2_0, ClippedXFormersAttnProcessor, zero_module
@@ -222,11 +223,9 @@ def stable_diffusion_xl(
     else:
         config = PretrainedConfig.get_config_dict(unet_model_name, subfolder='unet')
         if use_e5:
-            # config[0]['projection_class_embeddings_input_dim'] = 2048
+            # e5 + clip embedding dims + micro conditioning
             config[0]['cross_attention_dim'] = 2304
         unet = UNet2DConditionModel(**config[0])
-        print('projection_class_embeddings_input_dim:', unet.config['projection_class_embeddings_input_dim'])
-
         # Zero initialization trick
         for name, layer in unet.named_modules():
             # Final conv in ResNet blocks
@@ -557,13 +556,18 @@ class SDXLTextEncoder(torch.nn.Module):
         use_e5 (bool): Whether to use e5-large-v2 text encoder instead of openai CLIP. Defaults to False.
     """
 
-    def __init__(self, model_name='stabilityai/stable-diffusion-xl-base-1.0', encode_latents_in_fp16=True, use_e5=False):
+    def __init__(self,
+                 model_name='stabilityai/stable-diffusion-xl-base-1.0',
+                 encode_latents_in_fp16=True,
+                 use_e5=False):
         super().__init__()
         torch_dtype = torch.float16 if encode_latents_in_fp16 else None
         if use_e5:
             self.text_encoder = AutoModel.from_pretrained('intfloat/e5-large-v2', torch_dtype=torch_dtype)
         else:
-            self.text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder', torch_dtype=torch_dtype)
+            self.text_encoder = CLIPTextModel.from_pretrained(model_name,
+                                                              subfolder='text_encoder',
+                                                              torch_dtype=torch_dtype)
         self.text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(model_name,
                                                                           subfolder='text_encoder_2',
                                                                           torch_dtype=torch_dtype)
@@ -591,6 +595,8 @@ class SDXLTokenizer:
 
     Args:
         model_name (str): Name of the model's text encoders to load. Defaults to 'stabilityai/stable-diffusion-xl-base-1.0'.
+        use_e5 (bool): Whether to use e5-large-v2 tokenizer instead of openai CLIP.
+            Enable if using e5 text encoder. Defaults to False.
     """
 
     def __init__(self, model_name='stabilityai/stable-diffusion-xl-base-1.0', use_e5=False):
@@ -599,7 +605,6 @@ class SDXLTokenizer:
         else:
             self.tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer')
         self.tokenizer_2 = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer_2')
-
 
     def __call__(self, prompt, padding, truncation, return_tensors, max_length=None):
         tokenized_output = self.tokenizer(
