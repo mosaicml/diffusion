@@ -62,14 +62,16 @@ def test_model_forward_sdxl(use_e5):
         batch_size,
         77,
     ), dtype=torch.long)
-    randfloat = torch.randn(batch_size, 1)
     caption = torch.stack([caption, caption], dim=1)
+    micro_conditioning = torch.randint(1, H, (batch_size, 2))
+    
+
     batch = {
         'image': image,
         'captions': caption,
-        'cond_original_size': randfloat,
-        'cond_crops_coords_top_left': randfloat,
-        'cond_target_size': randfloat
+        'cond_original_size': micro_conditioning,
+        'cond_crops_coords_top_left': micro_conditioning,
+        'cond_target_size': micro_conditioning
     }
     output, target, _ = model(batch)  # model.forward generates the unet output noise or v_pred target.
     assert output.shape == latent.shape
