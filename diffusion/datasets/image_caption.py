@@ -43,6 +43,8 @@ class StreamingImageCaptionDataset(StreamingDataset):
         image_key (str): Key associated with the image in the streaming dataset. Default: ``'image'``.
         caption_key (str): Key associated with the caption in the streaming dataset. Default: ``'caption'``.
         sdxl (bool): Whether or not we're training SDXL. Default: `False`.
+        use_e5 (bool): Whether to use e5-large-v2 tokenizer instead of openai CLIP. 
+            Enable if using e5 text encoder. Defaults to False.
         zero_dropped_captions (bool): If True, zero out text embeddings for dropped captions. Default: ``False``.
 
         **streaming_kwargs: Additional arguments to pass in the construction of the StreamingDataloader

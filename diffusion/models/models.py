@@ -181,6 +181,7 @@ def stable_diffusion_xl(
         vae_model_name (str): Name of the VAE model to load. Defaults to
             'madebyollin/sdxl-vae-fp16-fix' as the official VAE checkpoint (from
             'stabilityai/stable-diffusion-xl-base-1.0') is not compatible with fp16.
+        use_e5 (bool): Whether to use e5-large-v2 text encoder instead of openai CLIP. Defaults to False.
         pretrained (bool): Whether to load pretrained weights. Defaults to True.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
@@ -553,6 +554,7 @@ class SDXLTextEncoder(torch.nn.Module):
     Args:
         model_name (str): Name of the model's text encoders to load. Defaults to 'stabilityai/stable-diffusion-xl-base-1.0'.
         encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
+        use_e5 (bool): Whether to use e5-large-v2 text encoder instead of openai CLIP. Defaults to False.
     """
 
     def __init__(self, model_name='stabilityai/stable-diffusion-xl-base-1.0', encode_latents_in_fp16=True, use_e5=False):
