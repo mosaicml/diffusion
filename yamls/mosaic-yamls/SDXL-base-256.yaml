@@ -69,7 +69,7 @@ parameters:
         pin_memory: true
         prefetch_factor: 2
       streaming_kwargs:
-        cache_limit: 5tb 
+        cache_limit: 5tb
         download_timeout: 12000
         num_canonical_nodes: 8
         shuffle: true
