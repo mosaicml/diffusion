@@ -123,7 +123,7 @@ def stable_diffusion_2(
         if latent_scale is None:
             # Default to the SD1/SD2 latent scale
             latent_scale = 0.18215
-        downsample_factor = 2**(len(vae.channel_multipliers) - 1)
+        downsample_factor = 2**(len(vae.config['channel_multipliers']) - 1)
 
     # Make the unet
     if pretrained:
@@ -176,7 +176,7 @@ def stable_diffusion_2(
         model = DeviceGPU().module_to_device(model)
         if is_xformers_installed and use_xformers:
             model.unet.enable_xformers_memory_efficient_attention()
-            if autoencoder_path is None:
+            if hasattr(model.vae, 'enable_xformers_memory_efficient_attention'):
                 model.vae.enable_xformers_memory_efficient_attention()
 
     if clip_qkv is not None:
@@ -288,7 +288,7 @@ def stable_diffusion_xl(
         if latent_scale is None:
             # Default to the SDXL latent scale
             latent_scale = 0.13025
-        downsample_factor = 2**(len(vae.channel_multipliers) - 1)
+        downsample_factor = 2**(len(vae.config['channel_multipliers']) - 1)
 
     # Make the unet
     if pretrained:
@@ -355,7 +355,7 @@ def stable_diffusion_xl(
         model = DeviceGPU().module_to_device(model)
         if is_xformers_installed and use_xformers:
             model.unet.enable_xformers_memory_efficient_attention()
-            if autoencoder_path is None:
+            if hasattr(model.vae, 'enable_xformers_memory_efficient_attention'):
                 model.vae.enable_xformers_memory_efficient_attention()
 
     if clip_qkv is not None:

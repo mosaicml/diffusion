@@ -304,34 +304,35 @@ class AutoEncoder(nn.Module):
                  zero_init_last: bool = False,
                  use_attention: bool = True):
         super().__init__()
-        self.input_channels = input_channels
-        self.output_channels = output_channels
-        self.hidden_channels = hidden_channels
-        self.latent_channels = latent_channels
-        self.double_latent_channels = double_latent_channels
-        self.channel_multipliers = channel_multipliers
-        self.num_residual_blocks = num_residual_blocks
-        self.use_conv_shortcut = use_conv_shortcut
-        self.dropout_probability = dropout_probability
-        self.resample_with_conv = resample_with_conv
-        self.zero_init_last = zero_init_last
-        self.use_attention = use_attention
         self.config = {}
+        self.config['input_channels'] = input_channels
+        self.config['output_channels'] = output_channels
+        self.config['hidden_channels'] = hidden_channels
+        self.config['latent_channels'] = latent_channels
+        self.config['double_latent_channels'] = double_latent_channels
+        self.config['channel_multipliers'] = channel_multipliers
+        self.config['num_residual_blocks'] = num_residual_blocks
+        self.config['use_conv_shortcut'] = use_conv_shortcut
+        self.config['dropout_probability'] = dropout_probability
+        self.config['resample_with_conv'] = resample_with_conv
+        self.config['use_attention'] = use_attention
+        self.config['zero_init_last'] = zero_init_last
         self.set_extra_state(None)
 
-        self.encoder = Encoder(input_channels=self.input_channels,
-                               hidden_channels=self.hidden_channels,
-                               latent_channels=self.latent_channels,
-                               double_latent_channels=self.double_latent_channels,
-                               channel_multipliers=self.channel_multipliers,
-                               num_residual_blocks=self.num_residual_blocks,
-                               use_conv_shortcut=self.use_conv_shortcut,
-                               dropout_probability=self.dropout_probability,
-                               resample_with_conv=self.resample_with_conv,
-                               zero_init_last=self.zero_init_last,
-                               use_attention=self.use_attention)
+        self.encoder = Encoder(input_channels=self.config['input_channels'],
+                               hidden_channels=self.config['hidden_channels'],
+                               latent_channels=self.config['latent_channels'],
+                               double_latent_channels=self.config['double_latent_channels'],
+                               channel_multipliers=self.config['channel_multipliers'],
+                               num_residual_blocks=self.config['num_residual_blocks'],
+                               use_conv_shortcut=self.config['use_conv_shortcut'],
+                               dropout_probability=self.config['dropout_probability'],
+                               resample_with_conv=self.config['resample_with_conv'],
+                               zero_init_last=self.config['zero_init_last'],
+                               use_attention=self.config['use_attention'])
 
-        channels = 2 * self.latent_channels if self.double_latent_channels else self.latent_channels
+        channels = 2 * self.config['latent_channels'] if self.config['double_latent_channels'] else self.config[
+            'latent_channels']
         self.quant_conv = nn.Conv2d(channels, channels, kernel_size=1, stride=1, padding=0)
         nn.init.kaiming_normal_(self.quant_conv.weight, nonlinearity='linear')
         # KL divergence is minimized when mean is 0.0 and log variance is 0.0
@@ -342,18 +343,22 @@ class AutoEncoder(nn.Module):
         if self.quant_conv.bias is not None:
             self.quant_conv.bias.data[channels // 2:].fill_(-0.9431)
 
-        self.decoder = Decoder(latent_channels=self.latent_channels,
-                               output_channels=self.output_channels,
-                               hidden_channels=self.hidden_channels,
-                               channel_multipliers=self.channel_multipliers,
-                               num_residual_blocks=self.num_residual_blocks,
-                               use_conv_shortcut=self.use_conv_shortcut,
-                               dropout_probability=self.dropout_probability,
-                               resample_with_conv=self.resample_with_conv,
-                               zero_init_last=self.zero_init_last,
-                               use_attention=self.use_attention)
+        self.decoder = Decoder(latent_channels=self.config['latent_channels'],
+                               output_channels=self.config['output_channels'],
+                               hidden_channels=self.config['hidden_channels'],
+                               channel_multipliers=self.config['channel_multipliers'],
+                               num_residual_blocks=self.config['num_residual_blocks'],
+                               use_conv_shortcut=self.config['use_conv_shortcut'],
+                               dropout_probability=self.config['dropout_probability'],
+                               resample_with_conv=self.config['resample_with_conv'],
+                               zero_init_last=self.config['zero_init_last'],
+                               use_attention=self.config['use_attention'])
 
-        self.post_quant_conv = nn.Conv2d(self.latent_channels, self.latent_channels, kernel_size=1, stride=1, padding=0)
+        self.post_quant_conv = nn.Conv2d(self.config['latent_channels'],
+                                         self.config['latent_channels'],
+                                         kernel_size=1,
+                                         stride=1,
+                                         padding=0)
         nn.init.kaiming_normal_(self.post_quant_conv.weight, nonlinearity='linear')
 
     @property
@@ -364,21 +369,7 @@ class AutoEncoder(nn.Module):
         return {'config': self.config}
 
     def set_extra_state(self, state):
-        # Save the autoencoder config
-        config = {}
-        config['input_channels'] = self.input_channels
-        config['output_channels'] = self.output_channels
-        config['hidden_channels'] = self.hidden_channels
-        config['latent_channels'] = self.latent_channels
-        config['double_latent_channels'] = self.double_latent_channels
-        config['channel_multipliers'] = self.channel_multipliers
-        config['num_residual_blocks'] = self.num_residual_blocks
-        config['use_conv_shortcut'] = self.use_conv_shortcut
-        config['dropout_probability'] = self.dropout_probability
-        config['resample_with_conv'] = self.resample_with_conv
-        config['use_attention'] = self.use_attention
-        config['zero_init_last'] = self.zero_init_last
-        self.config = config
+        pass
 
     def get_last_layer_weight(self) -> torch.Tensor:
         """Get the weight of the last layer of the decoder."""
@@ -389,7 +380,7 @@ class AutoEncoder(nn.Module):
         h = self.encoder(x)
         moments = self.quant_conv(h)
         # Split the moments into mean and log variance
-        mean, log_var = moments[:, :self.latent_channels], moments[:, self.latent_channels:]
+        mean, log_var = moments[:, :self.config['latent_channels']], moments[:, self.config['latent_channels']:]
         return GaussianDistribution(mean, log_var)
 
     def decode(self, z: torch.Tensor) -> AutoEncoderOutput:
