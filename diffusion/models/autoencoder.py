@@ -237,11 +237,11 @@ class GaussianDistribution:
 
     def __getitem__(self, key):
         if key == 'latent_dist':
-            return GaussianDistribution(self.mean, self.log_var)
+            return self
         elif key == 'mean':
-            return self.mean[key]
+            return self.mean
         elif key == 'log_var':
-            return self.log_var[key]
+            return self.log_var
         else:
             raise KeyError(key)
 
