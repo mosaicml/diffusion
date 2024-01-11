@@ -718,12 +718,12 @@ def load_autoencoder(load_path: str, local_path: str = '/tmp/autoencoder_weights
     autoencoder.load_state_dict(cleaned_state_dict, strict=True)
     # If present, extract the channel means and standard deviations from the state dict
     if 'LogLatentStatistics' in state_dict['state']['callbacks']:
-        latent_statistics = {'latent_means': [], 'latent_stds': []}
+        latent_statistics = {'latent_channel_means': [], 'latent_channel_stds': []}
         logged_latent_stats = state_dict['state']['callbacks']['LogLatentStatistics']
         # Extract the channelwise latent means and stds
         for i in range(autoencoder_config['latent_channels']):
-            latent_statistics['latent_means'].append(logged_latent_stats[f'channel_mean_{i}'])
-            latent_statistics['latent_stds'].append(logged_latent_stats[f'channel_std_{i}'])
+            latent_statistics['latent_channel_means'].append(logged_latent_stats[f'channel_mean_{i}'])
+            latent_statistics['latent_channel_stds'].append(logged_latent_stats[f'channel_std_{i}'])
         # Extract the global latent means and second moment
         latent_statistics['global_mean'] = logged_latent_stats['global_mean']
         latent_statistics['global_std'] = logged_latent_stats['global_std']
