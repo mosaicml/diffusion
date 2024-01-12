@@ -13,6 +13,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from composer.models import ComposerModel
+from composer.utils import dist
 from composer.utils.file_helpers import get_file
 from diffusers import AutoencoderKL
 from torchmetrics import MeanMetric, MeanSquaredError, Metric
@@ -702,9 +703,11 @@ def load_autoencoder(load_path: str, local_path: str = '/tmp/autoencoder_weights
         latent_statistics (Dict[str, Union[list, float]]): Dictionary of latent statistics if present, else `None`.
     """
     # Download the autoencoder weights and init them
-    get_file(path=load_path, destination=local_path)
-    # Load the autoencoder weights from the state dict
-    state_dict = torch.load(local_path, map_location='cpu')
+    if dist.get_local_rank() == 0:
+        get_file(path=load_path, destination=local_path)
+    with dist.local_rank_zero_download_and_wait(local_path):
+        # Load the autoencoder weights from the state dict
+        state_dict = torch.load(local_path, map_location='cpu')
     # Get the config from the state dict and init the model using it
     autoencoder_config = state_dict['state']['model']['model._extra_state']['config']
     autoencoder = AutoEncoder(**autoencoder_config)
