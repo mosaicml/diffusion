@@ -128,14 +128,14 @@ def stable_diffusion_2(
     # Make the unet
     if pretrained:
         unet = UNet2DConditionModel.from_pretrained(model_name, subfolder='unet')
-        if autoencoder_path is not None and vae.latent_channels != 4:
+        if autoencoder_path is not None and vae.config['latent_channels'] != 4:
             raise ValueError(f'Pretrained unet has 4 latent channels but the vae has {vae.latent_channels}.')
     else:
         unet_config = PretrainedConfig.get_config_dict(model_name, subfolder='unet')[0]
         if autoencoder_path is not None:
             # Adapt the unet config to account for differing number of latent channels if necessary
-            unet_config['in_channels'] = vae.latent_channels
-            unet_config['out_channels'] = vae.latent_channels
+            unet_config['in_channels'] = vae.config['latent_channels']
+            unet_config['out_channels'] = vae.config['latent_channels']
         # Init the unet from the config
         unet = UNet2DConditionModel(**unet_config)
 
@@ -293,14 +293,14 @@ def stable_diffusion_xl(
     # Make the unet
     if pretrained:
         unet = UNet2DConditionModel.from_pretrained(unet_model_name, subfolder='unet')
-        if autoencoder_path is not None and vae.latent_channels != 4:
+        if autoencoder_path is not None and vae.config['latent_channels'] != 4:
             raise ValueError(f'Pretrained unet has 4 latent channels but the vae has {vae.latent_channels}.')
     else:
         unet_config = PretrainedConfig.get_config_dict(unet_model_name, subfolder='unet')[0]
         if autoencoder_path is not None:
             # Adapt the unet config to account for differing number of latent channels if necessary
-            unet_config['in_channels'] = vae.latent_channels
-            unet_config['out_channels'] = vae.latent_channels
+            unet_config['in_channels'] = vae.config['latent_channels']
+            unet_config['out_channels'] = vae.config['latent_channels']
         # Init the unet from the config
         unet = UNet2DConditionModel(**unet_config)
 
