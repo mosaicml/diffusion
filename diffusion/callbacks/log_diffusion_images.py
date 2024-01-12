@@ -49,7 +49,7 @@ class LogDiffusionImages(Callback):
                  seed: Optional[int] = 1138,
                  use_table: bool = False):
         self.prompts = prompts
-        self.size = size if isinstance(size, tuple) else (size, size)
+        self.size = (size, size) if isinstance(size, int) else size
         self.batch_size = len(prompts) if batch_size is None else batch_size
         self.num_inference_steps = num_inference_steps
         self.guidance_scale = guidance_scale
