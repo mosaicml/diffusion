@@ -116,7 +116,12 @@ def stable_diffusion_2(
             latent_scale = 0.18215
     else:
         # Use a custom autoencoder
-        vae, latent_statistics = load_autoencoder(autoencoder_path, autoencoder_local_path)
+        if encode_latents_in_fp16:
+            vae, latent_statistics = load_autoencoder(autoencoder_path,
+                                                      autoencoder_local_path,
+                                                      torch_dtype=torch.float16)
+        else:
+            vae, latent_statistics = load_autoencoder(autoencoder_path, autoencoder_local_path)
         if latent_statistics is not None and latent_scale is None:
             assert isinstance(latent_statistics['global_std'], float)
             latent_scale = 1 / latent_statistics['global_std']
@@ -281,7 +286,12 @@ def stable_diffusion_xl(
             latent_scale = 0.13025
     else:
         # Use a custom autoencoder
-        vae, latent_statistics = load_autoencoder(autoencoder_path, autoencoder_local_path)
+        if encode_latents_in_fp16:
+            vae, latent_statistics = load_autoencoder(autoencoder_path,
+                                                      autoencoder_local_path,
+                                                      torch_dtype=torch.float16)
+        else:
+            vae, latent_statistics = load_autoencoder(autoencoder_path, autoencoder_local_path)
         if latent_statistics is not None and latent_scale is None:
             assert isinstance(latent_statistics['global_std'], float)
             latent_scale = 1 / latent_statistics['global_std']

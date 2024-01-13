@@ -689,7 +689,7 @@ class ComposerDiffusersAutoEncoder(ComposerAutoEncoder):
         return {'x_recon': recon, 'latents': latents, 'mean': mean, 'log_var': log_var}
 
 
-def load_autoencoder(load_path: str, local_path: str = '/tmp/autoencoder_weights.pt'):
+def load_autoencoder(load_path: str, local_path: str = '/tmp/autoencoder_weights.pt', torch_dtype=None):
     """Function to load an AutoEncoder from a composer checkpoint without the loss weights.
 
     Will also load the latent statistics if the statistics tracking callback was used.
@@ -697,6 +697,7 @@ def load_autoencoder(load_path: str, local_path: str = '/tmp/autoencoder_weights
     Args:
         load_path (str): Path to the composer checkpoint. Can be a local folder, URL, or composer object store.
         local_path (str): Local path to save the autoencoder weights to. Default: `/tmp/autoencoder_weights.pt`.
+        torch_dtype (torch.dtype): Torch dtype to cast the weights to. Default: `None`.
 
     Returns:
         autoencoder (AutoEncoder): AutoEncoder model with weights loaded from the checkpoint.
@@ -719,6 +720,8 @@ def load_autoencoder(load_path: str, local_path: str = '/tmp/autoencoder_weights
             cleaned_state_dict[cleaned_key] = state_dict['state']['model'][key]
     # Load the cleaned state dict into the model
     autoencoder.load_state_dict(cleaned_state_dict, strict=True)
+    if torch_dtype is not None:
+        autoencoder = autoencoder.to(dtype=torch_dtype)
     # If present, extract the channel means and standard deviations from the state dict
     if 'LogLatentStatistics' in state_dict['state']['callbacks']:
         latent_statistics = {'latent_channel_means': [], 'latent_channel_stds': []}
