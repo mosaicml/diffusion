@@ -649,7 +649,7 @@ class ComposerAutoEncoder(ComposerModel):
     def update_metric(self, batch, outputs, metric):
         clamped_imgs = outputs['x_recon'].clamp(-1, 1)
         if isinstance(metric, MeanMetric):
-            metric.update(torch.sqrt(torch.square(outputs['latents'])))
+            metric.update(torch.square(outputs['latents']))
         elif isinstance(metric, LearnedPerceptualImagePatchSimilarity):
             metric.update(clamped_imgs, batch[self.input_key])
         elif isinstance(metric, PeakSignalNoiseRatio):
