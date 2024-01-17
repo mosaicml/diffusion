@@ -40,10 +40,10 @@ class LogDiffusionImages(Callback):
 
     def __init__(self,
                  prompts: List[str],
-                 size: Optional[Union[Tuple[int, int], int]] = 256,
+                 size: Union[Tuple[int, int], int] = 256,
                  batch_size: Optional[int] = None,
-                 num_inference_steps=50,
-                 guidance_scale: Optional[float] = 0.0,
+                 num_inference_steps: int = 50,
+                 guidance_scale: float = 0.0,
                  rescaled_guidance: Optional[float] = None,
                  tokenized_prompts: Optional[torch.LongTensor] = None,
                  seed: Optional[int] = 1138,
