@@ -3,6 +3,7 @@
 
 """Logger for generated images."""
 
+from math import ceil
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -31,8 +32,6 @@ class LogDiffusionImages(Callback):
             Default: ``0.0``.
         rescaled_guidance (float, optional): Rescaled guidance scale. If not specified, rescaled guidance
             will not be used. Default: ``None``.
-        tokenized_prompts (torch.LongTensor or List[torch.LongTensor], optional): Batch of pre-tokenized prompts
-            to use for evaluation. If SDXL, this will be a list of two pre-tokenized prompts Default: ``None``.
         seed (int, optional): Random seed to use for generation. Set a seed for reproducible generation.
             Default: ``1138``.
         use_table (bool): Whether to make a table of the images or not. Default: ``False``.
@@ -45,7 +44,6 @@ class LogDiffusionImages(Callback):
                  num_inference_steps: int = 50,
                  guidance_scale: float = 0.0,
                  rescaled_guidance: Optional[float] = None,
-                 tokenized_prompts: Optional[torch.LongTensor] = None,
                  seed: Optional[int] = 1138,
                  use_table: bool = False):
         self.prompts = prompts
@@ -55,39 +53,28 @@ class LogDiffusionImages(Callback):
         self.guidance_scale = guidance_scale
         self.rescaled_guidance = rescaled_guidance
         self.seed = seed
-        self.tokenized_prompts = tokenized_prompts
         self.use_table = use_table
 
+        # Batch prompts
+        num_batches = ceil(len(prompts) / batch_size)
+        self.batched_prompts = []
+        for i in range(num_batches):
+            start, end = i * batch_size, (i + 1) * batch_size
+            self.batched_prompts.append(prompts[start:end])
+
     def eval_start(self, state: State, logger: Logger):
-        # Get the model object if it has been wrapped by DDP
-        # We need this to access the text keys, tokenizer, and image generation function.
+        # Get the model object if it has been wrapped by DDP to access the image generation function.
         if isinstance(state.model, DistributedDataParallel):
             model = state.model.module
         else:
             model = state.model
 
-        if self.tokenized_prompts is None:
-            self.tokenized_prompts = [
-                model.tokenizer(p, padding='max_length', truncation=True,
-                                return_tensors='pt')['input_ids']  # type: ignore
-                for p in self.prompts
-            ]
-            if model.sdxl:
-                self.tokenized_prompts = torch.stack([torch.cat(tp) for tp in self.tokenized_prompts
-                                                     ])  # [B, 2, max_length]
-            else:
-                self.tokenized_prompts = torch.cat(self.tokenized_prompts)
-
-        # Batch tokenized prompts
-        if not isinstance(self.tokenized_prompts, tuple):
-            self.tokenized_prompts = torch.split(self.tokenized_prompts, self.batch_size)  # type: ignore
-
         # Generate images
         with get_precision_context(state.precision):
             all_gen_images = []
-            for tokenized_prompt_batch in self.tokenized_prompts:
+            for batch in self.batched_prompts:
                 gen_images = model.generate(
-                    tokenized_prompts=tokenized_prompt_batch,  # type: ignore
+                    prompt=batch,  # type: ignore
                     height=self.size[0],
                     width=self.size[1],
                     guidance_scale=self.guidance_scale,
