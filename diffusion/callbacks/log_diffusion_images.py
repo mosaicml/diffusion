@@ -21,8 +21,8 @@ class LogDiffusionImages(Callback):
         prompts (List[str]): List of prompts to use for evaluation.
         size (int, Tuple[int, int], optional): Image size to use during generation.
             If using a tuple, specify as (height, width).  Default: ``256``.
-        batch_size (int, optional): The batch size of the prompts passed to the generate function. If not specified,
-            batch_size is set to the number of prompts. Default: ``None``.
+        batch_size (int, optional): The batch size of the prompts passed to the generate function. If set to ``None``,
+            batch_size is equal to the number of prompts. Default: ``1``.
         num_inference_steps (int, optional): Number of inference steps to use during generation. Default: ``50``.
         guidance_scale (float, optional): guidance_scale is defined as w of equation 2
             of the Imagen Paper. Guidance scale is enabled by setting guidance_scale > 1.
@@ -41,7 +41,7 @@ class LogDiffusionImages(Callback):
     def __init__(self,
                  prompts: List[str],
                  size: Union[Tuple[int, int], int] = 256,
-                 batch_size: Optional[int] = None,
+                 batch_size: Optional[int] = 1,
                  num_inference_steps: int = 50,
                  guidance_scale: float = 0.0,
                  rescaled_guidance: Optional[float] = None,
