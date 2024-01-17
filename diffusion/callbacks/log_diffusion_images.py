@@ -48,7 +48,6 @@ class LogDiffusionImages(Callback):
                  use_table: bool = False):
         self.prompts = prompts
         self.size = (size, size) if isinstance(size, int) else size
-        self.batch_size = len(prompts) if batch_size is None else batch_size
         self.num_inference_steps = num_inference_steps
         self.guidance_scale = guidance_scale
         self.rescaled_guidance = rescaled_guidance
@@ -56,6 +55,7 @@ class LogDiffusionImages(Callback):
         self.use_table = use_table
 
         # Batch prompts
+        batch_size = len(prompts) if batch_size is None else batch_size
         num_batches = ceil(len(prompts) / batch_size)
         self.batched_prompts = []
         for i in range(num_batches):
