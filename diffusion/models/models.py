@@ -4,6 +4,7 @@
 """Constructors for diffusion models."""
 
 import logging
+import math
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -118,8 +119,10 @@ def stable_diffusion_2(
         # Use a custom autoencoder
         vae, latent_statistics = load_autoencoder(autoencoder_path, autoencoder_local_path, torch_dtype=precision)
         if latent_statistics is not None and latent_scale == 'latent_statistics':
+            assert isinstance(latent_statistics['global_mean'], float)
             assert isinstance(latent_statistics['global_std'], float)
-            latent_scale = 1 / latent_statistics['global_std']
+            second_moment = latent_statistics['global_mean']**2 + latent_statistics['global_std']**2
+            latent_scale = 1 / math.sqrt(second_moment)
         else:
             raise ValueError(
                 'Must specify latent scale when using a custom autoencoder without tracking latent statistics.')
@@ -288,8 +291,10 @@ def stable_diffusion_xl(
         # Use a custom autoencoder
         vae, latent_statistics = load_autoencoder(autoencoder_path, autoencoder_local_path, torch_dtype=precision)
         if latent_statistics is not None and latent_scale == 'latent_statistics':
+            assert isinstance(latent_statistics['global_mean'], float)
             assert isinstance(latent_statistics['global_std'], float)
-            latent_scale = 1 / latent_statistics['global_std']
+            second_moment = latent_statistics['global_mean']**2 + latent_statistics['global_std']**2
+            latent_scale = 1 / math.sqrt(second_moment)
         else:
             raise ValueError(
                 'Must specify latent scale when using a custom autoencoder without tracking latent statistics.')
