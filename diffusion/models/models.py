@@ -4,7 +4,7 @@
 """Constructors for diffusion models."""
 
 import logging
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 import torch
 from composer.devices import DeviceGPU
@@ -37,7 +37,7 @@ def stable_diffusion_2(
     autoencoder_path: Optional[str] = None,
     autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
     prediction_type: str = 'epsilon',
-    latent_scale: Optional[float] = None,
+    latent_scale: Union[float, str] = 0.18215,
     offset_noise: Optional[float] = None,
     train_metrics: Optional[List] = None,
     val_metrics: Optional[List] = None,
@@ -64,7 +64,8 @@ def stable_diffusion_2(
         autoencoder_local_path (optional, str): Path to autoencoder weights. Default: `/tmp/autoencoder_weights.pt`.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
-        latent_scale (float, optional): The scale of the latent noise. If not specified, will use `0.18215` for SD1/SD2.
+        latent_scale (float, str): The scale of the autoencoder latents. Either a float for the scaling value,
+            or `'latent_statistics'` to try to use the value from the autoencoder checkpoint. Defaults to `0.18215`.
         train_metrics (list, optional): List of metrics to compute during training. If None, defaults to
             [MeanSquaredError()].
         val_metrics (list, optional): List of metrics to compute during validation. If None, defaults to
@@ -83,6 +84,11 @@ def stable_diffusion_2(
         clip_qkv (float, optional): If not None, clip the qkv values to this value. Defaults to None.
         use_xformers (bool): Whether to use xformers for attention. Defaults to True.
     """
+    if isinstance(latent_scale, str):
+        latent_scale = latent_scale.lower()
+        if latent_scale != 'latent_statistics':
+            raise ValueError(f'Invalid latent scale {latent_scale}. Must be a float or "latent_statistics".')
+
     if train_metrics is None:
         train_metrics = [MeanSquaredError()]
     if val_metrics is None:
@@ -96,38 +102,27 @@ def stable_diffusion_2(
         if isinstance(metric, CLIPScore):
             metric.requires_grad_(False)
 
+    precision = torch.float16 if encode_latents_in_fp16 else None
     # Make the text encoder
-    if encode_latents_in_fp16:
-        text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder', torch_dtype=torch.float16)
-    else:
-        text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder')
+    text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder', torch_dtype=precision)
     tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer')
 
     # Make the autoencoder
     if autoencoder_path is None:
+        if latent_scale == 'latent_statistics':
+            raise ValueError('Cannot use tracked latent_statistics when using the pretrained vae.')
         # Use the pretrained vae
         downsample_factor = 8
-        if encode_latents_in_fp16:
-            vae = AutoencoderKL.from_pretrained(model_name, subfolder='vae', torch_dtype=torch.float16)
-        else:
-            vae = AutoencoderKL.from_pretrained(model_name, subfolder='vae')
-        if latent_scale is None:
-            # Default to the SD1/SD2 latent scale
-            latent_scale = 0.18215
+        vae = AutoencoderKL.from_pretrained(model_name, subfolder='vae', torch_dtype=precision)
     else:
         # Use a custom autoencoder
-        if encode_latents_in_fp16:
-            vae, latent_statistics = load_autoencoder(autoencoder_path,
-                                                      autoencoder_local_path,
-                                                      torch_dtype=torch.float16)
-        else:
-            vae, latent_statistics = load_autoencoder(autoencoder_path, autoencoder_local_path)
-        if latent_statistics is not None and latent_scale is None:
+        vae, latent_statistics = load_autoencoder(autoencoder_path, autoencoder_local_path, torch_dtype=precision)
+        if latent_statistics is not None and latent_scale == 'latent_statistics':
             assert isinstance(latent_statistics['global_std'], float)
             latent_scale = 1 / latent_statistics['global_std']
-        if latent_scale is None:
-            # Default to the SD1/SD2 latent scale
-            latent_scale = 0.18215
+        else:
+            raise ValueError(
+                'Must specify latent scale when using a custom autoencoder without tracking latent statistics.')
         downsample_factor = 2**(len(vae.config['channel_multipliers']) - 1)
 
     # Make the unet
@@ -203,7 +198,7 @@ def stable_diffusion_xl(
     autoencoder_path: Optional[str] = None,
     autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
     prediction_type: str = 'epsilon',
-    latent_scale: Optional[float] = None,
+    latent_scale: Union[float, str] = 0.13025,
     offset_noise: Optional[float] = None,
     train_metrics: Optional[List] = None,
     val_metrics: Optional[List] = None,
@@ -236,7 +231,8 @@ def stable_diffusion_xl(
         autoencoder_local_path (optional, str): Path to autoencoder weights. Default: `/tmp/autoencoder_weights.pt`.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
-        latent_scale (float, optional): The scale of the latent noise. If not specified, will use `0.13025` for SDXL.
+        latent_scale (float, str): The scale of the autoencoder latents. Either a float for the scaling value,
+            or `'latent_statistics'` to try to use the value from the autoencoder checkpoint. Defaults to `0.13025`.
         offset_noise (float, optional): The scale of the offset noise. If not specified, offset noise will not
             be used. Default `None`.
         train_metrics (list, optional): List of metrics to compute during training. If None, defaults to
@@ -256,6 +252,10 @@ def stable_diffusion_xl(
             of training.
         use_xformers (bool): Whether to use xformers for attention. Defaults to True.
     """
+    if isinstance(latent_scale, str):
+        latent_scale = latent_scale.lower()
+        if latent_scale != 'latent_statistics':
+            raise ValueError(f'Invalid latent scale {latent_scale}. Must be a float or "latent_statistics".')
     if train_metrics is None:
         train_metrics = [MeanSquaredError()]
     if val_metrics is None:
@@ -273,31 +273,26 @@ def stable_diffusion_xl(
     tokenizer = SDXLTokenizer(model_name)
     text_encoder = SDXLTextEncoder(model_name, encode_latents_in_fp16)
 
+    precision = torch.float16 if encode_latents_in_fp16 else None
     # Make the autoencoder
     if autoencoder_path is None:
+        if latent_scale == 'latent_statistics':
+            raise ValueError('Cannot use tracked latent_statistics when using the pretrained vae.')
         downsample_factor = 8
         # Use the pretrained vae
-        torch_dtype = torch.float16 if encode_latents_in_fp16 else None
         try:
-            vae = AutoencoderKL.from_pretrained(vae_model_name, subfolder='vae', torch_dtype=torch_dtype)
+            vae = AutoencoderKL.from_pretrained(vae_model_name, subfolder='vae', torch_dtype=precision)
         except:  # for handling SDXL vae fp16 fixed checkpoint
-            vae = AutoencoderKL.from_pretrained(vae_model_name, torch_dtype=torch_dtype)
-        if latent_scale is None:
-            latent_scale = 0.13025
+            vae = AutoencoderKL.from_pretrained(vae_model_name, torch_dtype=precision)
     else:
         # Use a custom autoencoder
-        if encode_latents_in_fp16:
-            vae, latent_statistics = load_autoencoder(autoencoder_path,
-                                                      autoencoder_local_path,
-                                                      torch_dtype=torch.float16)
-        else:
-            vae, latent_statistics = load_autoencoder(autoencoder_path, autoencoder_local_path)
-        if latent_statistics is not None and latent_scale is None:
+        vae, latent_statistics = load_autoencoder(autoencoder_path, autoencoder_local_path, torch_dtype=precision)
+        if latent_statistics is not None and latent_scale == 'latent_statistics':
             assert isinstance(latent_statistics['global_std'], float)
             latent_scale = 1 / latent_statistics['global_std']
-        if latent_scale is None:
-            # Default to the SDXL latent scale
-            latent_scale = 0.13025
+        else:
+            raise ValueError(
+                'Must specify latent scale when using a custom autoencoder without tracking latent statistics.')
         downsample_factor = 2**(len(vae.config['channel_multipliers']) - 1)
 
     # Make the unet
