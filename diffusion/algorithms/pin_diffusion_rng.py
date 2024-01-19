@@ -48,6 +48,8 @@ class PinDiffusionRNG(Algorithm):
                 self.train_rng_generator.set_state(self.train_rng_state)
             if self.eval_rng_state is not None:
                 self.eval_rng_generator.set_state(self.eval_rng_state)
+            # Set the train rng generator
+            model.set_rng_generator(self.train_rng_generator)
         elif event == Event.EVAL_START:
             # Reset the eval rng generator to ensure the same randomness is used every eval epoch
             self.eval_rng_generator = self.eval_rng_generator.manual_seed(self.seed)
