@@ -177,6 +177,13 @@ class StableDiffusion(ComposerModel):
             self.vae._fsdp_wrap = False
             self.unet._fsdp_wrap = True
 
+        # Optional rng generator
+        self.rng_generator: Optional[torch.Generator] = None
+
+    def set_rng_generator(self, rng_generator: torch.Generator):
+        """Sets the rng generator for the model."""
+        self.rng_generator = rng_generator
+
     def forward(self, batch):
         latents, conditioning, conditioning_2, pooled_conditioning = None, None, None, None
         # Use latents if specified and available. When specified, they might not exist during eval
@@ -226,11 +233,19 @@ class StableDiffusion(ComposerModel):
             encoder_attention_mask = None
 
         # Sample the diffusion timesteps
-        timesteps = torch.randint(0, len(self.noise_scheduler), (latents.shape[0],), device=latents.device)
+        timesteps = torch.randint(0,
+                                  len(self.noise_scheduler), (latents.shape[0],),
+                                  device=latents.device,
+                                  generator=self.rng_generator)
         # Add noise to the inputs (forward diffusion)
-        noise = torch.randn_like(latents)
+        noise = torch.randn(*latents.shape, device=latents.device, generator=self.rng_generator)
         if self.offset_noise is not None:
-            offset_noise = torch.randn(latents.shape[0], latents.shape[1], 1, 1, device=noise.device)
+            offset_noise = torch.randn(latents.shape[0],
+                                       latents.shape[1],
+                                       1,
+                                       1,
+                                       device=noise.device,
+                                       generator=self.rng_generator)
             noise += self.offset_noise * offset_noise
         noised_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
         # Generate the targets
