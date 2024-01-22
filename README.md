@@ -141,6 +141,20 @@ composer scripts/fid-clip-evaluation.py --guidance_scale 3.0 --remote YOUR_DATAS
 ```
 This will compute FID and CLIP score at a guidance scale of 3.0 using the image+prompts pairs. One can also set the seed used for image generation via `--seed 42` and the resolution to use for images via `--size 512`. Results can also be logged to Weights and Biases by setting the `--wandb` flag and specifying the `--project` and `--name`.
 
+# Training an SDXL model
+We support training SDXL architectures and provide sample yamls for each stage of training. Once the sample configurations have been updated for your own data and use case, start training at 256x256 resolution by running:
+```
+composer run.py --config-path yamls/hydra-yamls --config-name SDXL-base-256.yaml
+```
+Next, start training at 512x512 resolution by running:
+```
+composer run.py --config-path yamls/hydra-yamls --config-name SDXL-base-512.yaml
+```
+Finally, train with aspect ratio bucketing at 1024x1024 by running the following. The sample config assumes data is split into separate directories corresponding to different aspect ratio buckets.
+```
+composer run.py --config-path yamls/hydra-yamls --config-name SDXL-base-1024.yaml
+```
+
 # Contact Us
 If you run into any problems with the code, please file Github issues directly to this repo.
 If you want to work with us directly, please reach out to us at demo@mosaicml.com!
