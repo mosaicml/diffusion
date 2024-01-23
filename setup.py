@@ -13,7 +13,7 @@ install_requires = [
     'diffusers[torch]==0.25.0',
     'transformers[torch]==4.36.2',
     'wandb==0.16.2',
-    'xformers==0.0.23.post1',
+    'xformers==0.0.23',
     'triton==2.1.0',
     'torchmetrics[image]==1.0.3',
     'lpips==0.1.4',
