@@ -40,7 +40,7 @@ class StableDiffusionInference():
 
     def __init__(self,
                  model_name: str = 'stabilityai/stable-diffusion-2-base',
-                 pretrained: bool = False,
+                 pretrained: bool = True,
                  prediction_type: str = 'epsilon',
                  local_checkpoint_path: str = LOCAL_CHECKPOINT_PATH,
                  **kwargs):
@@ -73,11 +73,13 @@ class StableDiffusionInference():
         for req in model_requests:
             if 'input' not in req:
                 raise RuntimeError('"input" must be provided to generate call')
-            inputs = req['input']
+            inputs = req['input']['processed_input']
 
             # Prompts and negative prompts if available
             if isinstance(inputs, str):
                 prompts.append(inputs)
+            elif isinstance(inputs, List):
+                prompts.extend(inputs)
             elif isinstance(inputs, Dict):
                 if 'prompt' not in inputs:
                     raise RuntimeError('"prompt" must be provided to generate call if using a dict as input')
@@ -137,7 +139,7 @@ class StableDiffusionXLInference():
                  unet_model_name: str = 'stabilityai/stable-diffusion-xl-base-1.0',
                  vae_model_name: str = 'madebyollin/sdxl-vae-fp16-fix',
                  clip_qkv: Optional[float] = None,
-                 pretrained: bool = False,
+                 pretrained: bool = True,
                  prediction_type: str = 'epsilon',
                  local_checkpoint_path: str = LOCAL_CHECKPOINT_PATH,
                  **kwargs):
@@ -173,11 +175,13 @@ class StableDiffusionXLInference():
         for req in model_requests:
             if 'input' not in req:
                 raise RuntimeError('"input" must be provided to generate call')
-            inputs = req['input']
+            inputs = req['input']['processed_input']
 
             # Prompts and negative prompts if available
             if isinstance(inputs, str):
                 prompts.append(inputs)
+            elif isinstance(inputs, List):
+                prompts.extend(inputs)
             elif isinstance(inputs, Dict):
                 if 'prompt' not in inputs:
                     raise RuntimeError('"prompt" must be provided to generate call if using a dict as input')
