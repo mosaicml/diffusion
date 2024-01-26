@@ -12,16 +12,17 @@ from diffusion.models.models import stable_diffusion_2
 
 def test_model_forward():
     # fp16 vae does not run on cpu
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     model = stable_diffusion_2(pretrained=False, fsdp=False, encode_latents_in_fp16=False)
     batch_size = 1
     H = 8
     W = 8
-    image = torch.randn(batch_size, 3, H, W)
+    image = torch.randn(batch_size, 3, H, W, device=device)
     latent = torch.randn(batch_size, 4, H // 8, W // 8)
     caption = torch.randint(low=0, high=128, size=(
         batch_size,
         77,
-    ), dtype=torch.long)
+    ), dtype=torch.long, device=device)
     batch = {'image': image, 'captions': caption}
     output, target, _ = model(batch)  # model.forward generates the unet output noise or v_pred target.
     assert output.shape == latent.shape
