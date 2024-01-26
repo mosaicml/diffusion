@@ -10,7 +10,6 @@ import torch
 from composer.devices import DeviceGPU
 from diffusers import AutoencoderKL, DDIMScheduler, DDPMScheduler, EulerDiscreteScheduler, UNet2DConditionModel
 from torchmetrics import MeanSquaredError
-from torchmetrics.image.fid import FrechetInceptionDistance
 from torchmetrics.multimodal.clip_score import CLIPScore
 from transformers import CLIPTextModel, CLIPTextModelWithProjection, CLIPTokenizer, PretrainedConfig
 
@@ -60,7 +59,7 @@ def stable_diffusion_2(
         train_metrics (list, optional): List of metrics to compute during training. If None, defaults to
             [MeanSquaredError()].
         val_metrics (list, optional): List of metrics to compute during validation. If None, defaults to
-            [MeanSquaredError(), FrechetInceptionDistance(normalize=True)].
+            [MeanSquaredError()].
         val_guidance_scales (list, optional): List of scales to use for validation guidance. If None, defaults to
             [1.0, 3.0, 7.0].
         val_seed (int): Seed to use for generating evaluation images. Defaults to 1138.
@@ -78,7 +77,7 @@ def stable_diffusion_2(
     if train_metrics is None:
         train_metrics = [MeanSquaredError()]
     if val_metrics is None:
-        val_metrics = [MeanSquaredError(), FrechetInceptionDistance(normalize=True)]
+        val_metrics = [MeanSquaredError()]
     if val_guidance_scales is None:
         val_guidance_scales = [1.0, 3.0, 7.0]
     if loss_bins is None:
@@ -188,7 +187,7 @@ def stable_diffusion_xl(
         train_metrics (list, optional): List of metrics to compute during training. If None, defaults to
             [MeanSquaredError()].
         val_metrics (list, optional): List of metrics to compute during validation. If None, defaults to
-            [MeanSquaredError(), FrechetInceptionDistance(normalize=True)].
+            [MeanSquaredError()].
         val_guidance_scales (list, optional): List of scales to use for validation guidance. If None, defaults to
             [1.0, 3.0, 7.0].
         val_seed (int): Seed to use for generating evaluation images. Defaults to 1138.
@@ -205,7 +204,7 @@ def stable_diffusion_xl(
     if train_metrics is None:
         train_metrics = [MeanSquaredError()]
     if val_metrics is None:
-        val_metrics = [MeanSquaredError(), FrechetInceptionDistance(normalize=True)]
+        val_metrics = [MeanSquaredError()]
     if val_guidance_scales is None:
         val_guidance_scales = [1.0, 3.0, 7.0]
     if loss_bins is None:
