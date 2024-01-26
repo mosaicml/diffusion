@@ -116,6 +116,8 @@ class StableDiffusionInference():
             png_images.append(base64_encoded_image)
         return png_images
 
+    def get_token_count(self, input):
+        return 0
 
 class StableDiffusionXLInference():
     """Inference endpoint class for Stable Diffusion XL.
@@ -217,3 +219,6 @@ class StableDiffusionXLInference():
             base64_encoded_image = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
             png_images.append(base64_encoded_image)
         return png_images
+    
+    def get_token_count(self, input):
+        return 0
