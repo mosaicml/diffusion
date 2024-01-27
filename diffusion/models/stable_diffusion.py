@@ -221,7 +221,7 @@ class StableDiffusion(ComposerModel):
             metrics = self.train_metrics
         else:
             metrics = self.val_metrics
-        metrics_dict = {metrics.__class__.__name__: metric for metric in metrics}
+        metrics_dict = {metric.__class__.__name__: metric for metric in metrics}
         return metrics_dict
 
     def update_metric(self, batch, outputs, metric):

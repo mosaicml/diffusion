@@ -599,7 +599,7 @@ class ComposerAutoEncoder(ComposerModel):
             metric.update(outputs['x_recon'], batch[self.input_key])
 
 
-class ComposerDiffusersAutoEncoder(ComposerAutoEncoder):
+class ComposerDiffusersAutoEncoder(ComposerModel):
     """Composer wrapper for the Huggingface Diffusers Autoencoder.
 
     Args:
@@ -609,10 +609,20 @@ class ComposerDiffusersAutoEncoder(ComposerAutoEncoder):
     """
 
     def __init__(self, model: AutoencoderKL, autoencoder_loss: AutoEncoderLoss, input_key: str = 'image'):
-        super().__init__(model, autoencoder_loss, input_key)
+        super().__init__()
         self.model = model
         self.autoencoder_loss = autoencoder_loss
         self.input_key = input_key
+
+        # Set up train metrics
+        train_metrics = [MeanSquaredError()]
+        self.train_metrics = {metric.__class__.__name__: metric for metric in train_metrics}
+        # Set up val metrics
+        psnr_metric = PeakSignalNoiseRatio(data_range=2.0)
+        ssim_metric = StructuralSimilarityIndexMeasure(data_range=2.0)
+        lpips_metric = LearnedPerceptualImagePatchSimilarity(net_type='vgg')
+        val_metrics = [MeanSquaredError(), MeanMetric(), lpips_metric, psnr_metric, ssim_metric]
+        self.val_metrics = {metric.__class__.__name__: metric for metric in val_metrics}
 
     def get_last_layer_weight(self) -> torch.Tensor:
         """Get the weight of the last layer of the decoder."""
@@ -624,3 +634,34 @@ class ComposerDiffusersAutoEncoder(ComposerAutoEncoder):
         mean, log_var = latent_dist.mean, latent_dist.logvar
         recon = self.model.decode(latents).sample
         return {'x_recon': recon, 'latents': latents, 'mean': mean, 'log_var': log_var}
+
+    def loss(self, outputs, batch):
+        last_layer = self.get_last_layer_weight()
+        return self.autoencoder_loss(outputs, batch, last_layer)
+
+    def eval_forward(self, batch, outputs=None):
+        if outputs is not None:
+            return outputs
+        return self.forward(batch)
+
+    def get_metrics(self, is_train: bool = False):
+        if is_train:
+            metrics = self.train_metrics
+        else:
+            metrics = self.val_metrics
+        return metrics
+
+    def update_metric(self, batch, outputs, metric):
+        clamped_imgs = outputs['x_recon'].clamp(-1, 1)
+        if isinstance(metric, MeanMetric):
+            metric.update(torch.square(outputs['latents']))
+        elif isinstance(metric, LearnedPerceptualImagePatchSimilarity):
+            metric.update(clamped_imgs, batch[self.input_key])
+        elif isinstance(metric, PeakSignalNoiseRatio):
+            metric.update(clamped_imgs, batch[self.input_key])
+        elif isinstance(metric, StructuralSimilarityIndexMeasure):
+            metric.update(clamped_imgs, batch[self.input_key])
+        elif isinstance(metric, MeanSquaredError):
+            metric.update(outputs['x_recon'], batch[self.input_key])
+        else:
+            metric.update(outputs['x_recon'], batch[self.input_key])
