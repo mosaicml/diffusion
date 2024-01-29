@@ -10,6 +10,8 @@ from typing import List, Optional, Tuple, Union
 import torch
 from composer.devices import DeviceGPU
 from diffusers import AutoencoderKL, DDIMScheduler, DDPMScheduler, EulerDiscreteScheduler, UNet2DConditionModel
+from diffusers.loaders import AttnProcsLayers
+from diffusers.models.attention_processor import LoRAAttnProcessor
 from torchmetrics import MeanSquaredError
 from torchmetrics.image.fid import FrechetInceptionDistance
 from torchmetrics.multimodal.clip_score import CLIPScore
@@ -40,6 +42,7 @@ def stable_diffusion_2(
     prediction_type: str = 'epsilon',
     latent_scale: Union[float, str] = 0.18215,
     offset_noise: Optional[float] = None,
+    lora_rank: Optional[int] = None,
     train_metrics: Optional[List] = None,
     val_metrics: Optional[List] = None,
     val_guidance_scales: Optional[List] = None,
@@ -79,6 +82,7 @@ def stable_diffusion_2(
         precomputed_latents (bool): Whether to use precomputed latents. Defaults to False.
         offset_noise (float, optional): The scale of the offset noise. If not specified, offset noise will not
             be used. Default `None`.
+        lora_rank (int, optional): The rank of the LoRA matrix. If not specified, LoRA will not be used. Default `None`.
         encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
         mask_pad_tokens (bool): Whether to mask pad tokens in cross attention. Defaults to False.
         fsdp (bool): Whether to use FSDP. Defaults to True.
@@ -190,7 +194,12 @@ def stable_diffusion_2(
         log.info('Using %s with clip_val %.1f' % (attn_processor.__class__, clip_qkv))
         model.unet.set_attn_processor(attn_processor)
 
-    return model
+    if lora_rank is not None:
+        lora_layers = make_lora_layers(unet, lora_rank)
+        trainable_params = lora_layers.parameters()
+    else:
+        trainable_params = model.parameters()
+    return model, trainable_params
 
 
 def stable_diffusion_xl(
@@ -203,6 +212,7 @@ def stable_diffusion_xl(
     prediction_type: str = 'epsilon',
     latent_scale: Union[float, str] = 0.13025,
     offset_noise: Optional[float] = None,
+    lora_rank: Optional[int] = None,
     train_metrics: Optional[List] = None,
     val_metrics: Optional[List] = None,
     val_guidance_scales: Optional[List] = None,
@@ -238,6 +248,7 @@ def stable_diffusion_xl(
             or `'latent_statistics'` to try to use the value from the autoencoder checkpoint. Defaults to `0.13025`.
         offset_noise (float, optional): The scale of the offset noise. If not specified, offset noise will not
             be used. Default `None`.
+        lora_rank (int, optional): The rank of the LoRA matrix. If not specified, LoRA will not be used. Default `None`.
         train_metrics (list, optional): List of metrics to compute during training. If None, defaults to
             [MeanSquaredError()].
         val_metrics (list, optional): List of metrics to compute during validation. If None, defaults to
@@ -376,7 +387,12 @@ def stable_diffusion_xl(
         log.info('Using %s with clip_val %.1f' % (attn_processor.__class__, clip_qkv))
         model.unet.set_attn_processor(attn_processor)
 
-    return model
+    if lora_rank is not None:
+        lora_layers = make_lora_layers(unet, lora_rank)
+        trainable_params = lora_layers.parameters()
+    else:
+        trainable_params = model.parameters()
+    return model, trainable_params
 
 
 def build_autoencoder(input_channels: int = 3,
@@ -694,3 +710,29 @@ class SDXLTokenizer:
         for key in tokenized_output.keys():
             tokenized_output[key] = [tokenized_output[key], tokenized_output_2[key]]
         return tokenized_output
+
+
+def make_lora_layers(unet, rank):
+    """From https://huggingface.co/docs/diffusers/training/lora."""
+    lora_attn_procs = {}
+    for name in unet.attn_processors.keys():
+        cross_attention_dim = None if name.endswith('attn1.processor') else unet.config.cross_attention_dim
+        if name.startswith('mid_block'):
+            hidden_size = unet.config.block_out_channels[-1]
+        elif name.startswith('up_blocks'):
+            block_id = int(name[len('up_blocks.')])
+            hidden_size = list(reversed(unet.config.block_out_channels))[block_id]
+        elif name.startswith('down_blocks'):
+            block_id = int(name[len('down_blocks.')])
+            hidden_size = unet.config.block_out_channels[block_id]
+        else:
+            raise ValueError(f'Unknown attention processor name: {name}')
+
+        lora_attn_procs[name] = LoRAAttnProcessor(
+            hidden_size=hidden_size,
+            cross_attention_dim=cross_attention_dim,
+            rank=rank,
+        )
+    unet.set_attn_processor(lora_attn_procs)
+    lora_layers = AttnProcsLayers(unet.attn_processors)
+    return lora_layers
