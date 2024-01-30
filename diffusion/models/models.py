@@ -594,13 +594,14 @@ class SDXLTokenizer:
     Tokenizes prompt with two tokenizers and returns the joined output.
 
     Args:
-        model_name (str): Name of the model's text encoders to load. Defaults to 'stabilityai/stable-diffusion-xl-base-1.0'.
-        use_e5 (bool): Whether to use e5-large-v2 tokenizer instead of openai CLIP.
-            Enable if using e5 text encoder. Defaults to False.
+        model_name (str): Name of the model's text encoders to load. 
+            'sdxl-e5' or 'stabilityai/stable-diffusion-xl-base-1.0'.
+            Default: 'stabilityai/stable-diffusion-xl-base-1.0'.
     """
 
-    def __init__(self, model_name='stabilityai/stable-diffusion-xl-base-1.0', use_e5=False):
-        if use_e5:
+    def __init__(self, model_name='stabilityai/stable-diffusion-xl-base-1.0'):
+        _validate_model_name(model_name)
+        if model_name=='sdxl-e5':
             self.tokenizer = AutoTokenizer.from_pretrained('intfloat/e5-large-v2')
         else:
             self.tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer')
@@ -624,3 +625,9 @@ class SDXLTokenizer:
         for key in tokenized_output_2.keys():
             tokenized_output[key] = [tokenized_output[key], tokenized_output_2[key]]
         return tokenized_output
+
+def _validate_model_name(model_name):
+    valid_model_names = {'sdxl-e5', 'stabilityai/stable-diffusion-xl-base-1.0'}
+    if model_name not in valid_model_names:
+        raise ValueError(f'model_name must be one of {valid_model_names}.')
+

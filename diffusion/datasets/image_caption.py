@@ -32,7 +32,9 @@ class StreamingImageCaptionDataset(StreamingDataset):
             ``StreamingImageCaptionDataset`` uses either ``streams`` or ``remote``/``local``. Default:``None``.
         remote (str, optional): Remote directory (S3 or local filesystem) where dataset is stored. Default: ``None``.
         local (str, optional): Local filesystem directory where dataset is cached during operation. Default: ``None``.
-        tokenizer_name_or_path (str): The name or path of the tokenizer to use. Default: ``'stabilityai/stable-diffusion-2-base'``.
+        tokenizer_name_or_path (str): The name or path of the tokenizer to use.
+          ``'stabilityai/stable-diffusion-2-base'``, ``'stabilityai/stable-diffusion-xl-base-1.0'`` or ``'sdxl-e5'``. 
+            Default: ``'stabilityai/stable-diffusion-2-base'``.
         caption_drop_prob (float): The probability of dropping a caption. Default: ``0.0``.
         microcond_drop_prob (float): The probability of dropping microconditioning. Only relevant for SDXL. Default: ``0.0``.
         caption_selection (str): If there are multiple captions, specifies how to select a single caption.
@@ -42,9 +44,6 @@ class StreamingImageCaptionDataset(StreamingDataset):
         transform (Callable, optional): The transforms to apply to the image. Default: ``None``.
         image_key (str): Key associated with the image in the streaming dataset. Default: ``'image'``.
         caption_key (str): Key associated with the caption in the streaming dataset. Default: ``'caption'``.
-        sdxl (bool): Whether or not we're training SDXL. Default: `False`.
-        use_e5 (bool): Whether to use e5-large-v2 tokenizer instead of openai CLIP.
-            Enable if using e5 text encoder. Defaults to False.
         zero_dropped_captions (bool): If True, zero out text embeddings for dropped captions. Default: ``False``.
 
         **streaming_kwargs: Additional arguments to pass in the construction of the StreamingDataloader
@@ -63,8 +62,6 @@ class StreamingImageCaptionDataset(StreamingDataset):
         transform: Optional[Callable] = None,
         image_key: str = 'image',
         caption_key: str = 'caption',
-        sdxl: bool = False,
-        use_e5: bool = False,
         zero_dropped_captions: bool = False,
         **streaming_kwargs,
     ) -> None:
@@ -85,7 +82,6 @@ class StreamingImageCaptionDataset(StreamingDataset):
 
         self.crop = crop
         self.transform = transform
-        self.sdxl = sdxl
         self.caption_drop_prob = caption_drop_prob
         self.microcond_drop_prob = microcond_drop_prob
         self.caption_selection = caption_selection
@@ -93,8 +89,8 @@ class StreamingImageCaptionDataset(StreamingDataset):
         self.caption_key = caption_key
         self.zero_dropped_captions = zero_dropped_captions
 
-        if self.sdxl:
-            self.tokenizer = SDXLTokenizer(tokenizer_name_or_path, use_e5=use_e5)
+        if _is_sdxl(tokenizer_name_or_path):
+            self.tokenizer = SDXLTokenizer(tokenizer_name_or_path)
         else:
             self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, subfolder='tokenizer')
 
@@ -182,7 +178,6 @@ def build_streaming_image_caption_dataloader(
     local: Union[str, List],
     batch_size: int,
     tokenizer_name_or_path: str = 'stabilityai/stable-diffusion-2-base',
-    use_e5: bool = False,
     caption_drop_prob: float = 0.0,
     microcond_drop_prob: float = 0.0,
     resize_size: int = 256,
@@ -201,9 +196,9 @@ def build_streaming_image_caption_dataloader(
         remote (str, Sequence[str]): One or more remote directories (S3 or local filesystem) where dataset is stored.
         local (str, Sequence[str]): One or more local filesystem directories where dataset is cached during operation.
         batch_size (int): The batch size to use for both the ``StreamingDataset`` and ``DataLoader``.
-        tokenizer_name_or_path (str): The name or path of the tokenizer to use. Default: ``'stabilityai/stable-diffusion-2-base'``.
-        use_e5 (bool): Whether to use e5-large-v2 tokenizer instead of openai CLIP.
-            Enable if using e5 text encoder. Defaults to False.
+        tokenizer_name_or_path (str): The name or path of the tokenizer to use.
+          ``'stabilityai/stable-diffusion-2-base'``, ``'stabilityai/stable-diffusion-xl-base-1.0'`` or ``'sdxl-e5'``. 
+            Default: ``'stabilityai/stable-diffusion-2-base'``.        
         caption_drop_prob (float): The probability of dropping a caption. Default: ``0.0``.
         microcond_drop_prob (float): The probability of dropping microconditioning. Only relevant for SDXL. Default: ``0.0``.
         resize_size (int): The size to resize the image to. Default: ``256``.
@@ -247,10 +242,10 @@ def build_streaming_image_caption_dataloader(
         streams.append(Stream(remote=r, local=l))
 
     # Infer SDXL from tokenizer path
-    sdxl = (tokenizer_name_or_path == 'stabilityai/stable-diffusion-xl-base-1.0')
+    sdxl = _is_sdxl(tokenizer_name_or_path)
     if sdxl:
         log.info('Detected SDXL tokenizer, using SDXL crop transform and tokenizers.')
-        if use_e5:
+        if tokenizer_name_or_path == 'sdxl-e5':
             log.info('Using E5 text encoder')
 
     # Set the crop to apply
@@ -279,8 +274,6 @@ def build_streaming_image_caption_dataloader(
         image_key=image_key,
         caption_key=caption_key,
         batch_size=batch_size,
-        sdxl=sdxl,
-        use_e5=use_e5,
         zero_dropped_captions=zero_dropped_captions,
         **streaming_kwargs,
     )
@@ -293,3 +286,9 @@ def build_streaming_image_caption_dataloader(
     )
 
     return dataloader
+
+
+def _is_sdxl(tokenizer_name_or_path):
+    """Infer SDXL from tokenizer path"""
+    return (tokenizer_name_or_path == 'stabilityai/stable-diffusion-xl-base-1.0' or 
+            tokenizer_name_or_path == 'sdxl-e5')
