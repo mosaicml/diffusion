@@ -46,9 +46,9 @@ def test_model_generate(guidance_scale, negative_prompt):
     assert output.shape == (1, 3, 8, 8)
 
 
-@pytest.mark.parametrize('use_e5', [True, False])
-def test_model_forward_sdxl(use_e5):
-    model = stable_diffusion_xl(use_e5=use_e5,
+@pytest.mark.parametrize(model_name, ['stabilityai/stable-diffusion-xl-base-1.0', 'sdxl-e5'])
+def test_model_forward_sdxl(model_name):
+    model = stable_diffusion_xl(model_name=model_name,
                                 pretrained=False,
                                 fsdp=False,
                                 encode_latents_in_fp16=False,
@@ -64,7 +64,7 @@ def test_model_forward_sdxl(use_e5):
     ), dtype=torch.long)
     caption = torch.stack([caption, caption], dim=1)
     micro_conditioning = torch.randint(1, H, (batch_size, 2))
-
+    
     batch = {
         'image': image,
         'captions': caption,
