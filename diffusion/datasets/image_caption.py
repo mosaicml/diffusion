@@ -89,7 +89,8 @@ class StreamingImageCaptionDataset(StreamingDataset):
         self.caption_key = caption_key
         self.zero_dropped_captions = zero_dropped_captions
 
-        if _is_sdxl(tokenizer_name_or_path):
+        self.sdxl = _is_sdxl(tokenizer_name_or_path)
+        if self.sdxl:
             self.tokenizer = SDXLTokenizer(tokenizer_name_or_path)
         else:
             self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, subfolder='tokenizer')
