@@ -57,7 +57,7 @@ val_guidance_scales = [args.guidance_scale]
 # If a checkpoint is specified, evaluate it. Otherwise evaluate the pretrained SD2.0 model.
 if args.load_path is not None:
     name = args.name
-    model = stable_diffusion_2(
+    model, _ = stable_diffusion_2(
         model_name='stabilityai/stable-diffusion-2-base',
         val_metrics=[fid, clip],
         val_guidance_scales=val_guidance_scales,
@@ -68,7 +68,7 @@ if args.load_path is not None:
     )
 else:
     name = args.name + '-pretrained'
-    model = stable_diffusion_2(
+    model, _ = stable_diffusion_2(
         model_name='stabilityai/stable-diffusion-2-base',
         val_metrics=[fid, clip],
         val_guidance_scales=val_guidance_scales,
