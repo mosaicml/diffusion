@@ -467,7 +467,7 @@ def build_autoencoder(input_channels: int = 3,
                                        discriminator_num_layers=discriminator_num_layers)
 
     composer_model = ComposerAutoEncoder(model=autoencoder, autoencoder_loss=autoencoder_loss, input_key=input_key)
-    return composer_model
+    return composer_model, composer_model.parameters()
 
 
 def build_diffusers_autoencoder(model_name: str = 'stabilityai/stable-diffusion-2-base',
@@ -526,7 +526,7 @@ def build_diffusers_autoencoder(model_name: str = 'stabilityai/stable-diffusion-
 
     # Make the composer model
     composer_model = ComposerDiffusersAutoEncoder(model=model, autoencoder_loss=autoencoder_loss, input_key=input_key)
-    return composer_model
+    return composer_model, composer_model.parameters()
 
 
 def discrete_pixel_diffusion(clip_model_name: str = 'openai/clip-vit-large-patch14', prediction_type='epsilon'):
@@ -588,7 +588,7 @@ def discrete_pixel_diffusion(clip_model_name: str = 'openai/clip-vit-large-patch
         model = DeviceGPU().module_to_device(model)
         if is_xformers_installed:
             model.model.enable_xformers_memory_efficient_attention()
-    return model
+    return model, model.parameters()
 
 
 def continuous_pixel_diffusion(clip_model_name: str = 'openai/clip-vit-large-patch14',
@@ -642,7 +642,7 @@ def continuous_pixel_diffusion(clip_model_name: str = 'openai/clip-vit-large-pat
         model = DeviceGPU().module_to_device(model)
         if is_xformers_installed:
             model.model.enable_xformers_memory_efficient_attention()
-    return model
+    return model, model.parameters()
 
 
 class SDXLTextEncoder(torch.nn.Module):
