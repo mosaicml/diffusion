@@ -64,7 +64,7 @@ def test_model_forward_sdxl(model_name):
     ), dtype=torch.long)
     caption = torch.stack([caption, caption], dim=1)
     micro_conditioning = torch.randint(1, H, (batch_size, 2))
-    
+
     batch = {
         'image': image,
         'captions': caption,

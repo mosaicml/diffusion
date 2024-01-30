@@ -33,7 +33,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
         remote (str, optional): Remote directory (S3 or local filesystem) where dataset is stored. Default: ``None``.
         local (str, optional): Local filesystem directory where dataset is cached during operation. Default: ``None``.
         tokenizer_name_or_path (str): The name or path of the tokenizer to use.
-          ``'stabilityai/stable-diffusion-2-base'``, ``'stabilityai/stable-diffusion-xl-base-1.0'`` or ``'sdxl-e5'``. 
+          ``'stabilityai/stable-diffusion-2-base'``, ``'stabilityai/stable-diffusion-xl-base-1.0'`` or ``'sdxl-e5'``.
             Default: ``'stabilityai/stable-diffusion-2-base'``.
         caption_drop_prob (float): The probability of dropping a caption. Default: ``0.0``.
         microcond_drop_prob (float): The probability of dropping microconditioning. Only relevant for SDXL. Default: ``0.0``.
@@ -198,8 +198,8 @@ def build_streaming_image_caption_dataloader(
         local (str, Sequence[str]): One or more local filesystem directories where dataset is cached during operation.
         batch_size (int): The batch size to use for both the ``StreamingDataset`` and ``DataLoader``.
         tokenizer_name_or_path (str): The name or path of the tokenizer to use.
-          ``'stabilityai/stable-diffusion-2-base'``, ``'stabilityai/stable-diffusion-xl-base-1.0'`` or ``'sdxl-e5'``. 
-            Default: ``'stabilityai/stable-diffusion-2-base'``.        
+          ``'stabilityai/stable-diffusion-2-base'``, ``'stabilityai/stable-diffusion-xl-base-1.0'`` or ``'sdxl-e5'``.
+            Default: ``'stabilityai/stable-diffusion-2-base'``.
         caption_drop_prob (float): The probability of dropping a caption. Default: ``0.0``.
         microcond_drop_prob (float): The probability of dropping microconditioning. Only relevant for SDXL. Default: ``0.0``.
         resize_size (int): The size to resize the image to. Default: ``256``.
@@ -290,6 +290,5 @@ def build_streaming_image_caption_dataloader(
 
 
 def _is_sdxl(tokenizer_name_or_path):
-    """Infer SDXL from tokenizer path"""
-    return (tokenizer_name_or_path == 'stabilityai/stable-diffusion-xl-base-1.0' or 
-            tokenizer_name_or_path == 'sdxl-e5')
+    """Infer SDXL from tokenizer path."""
+    return (tokenizer_name_or_path == 'stabilityai/stable-diffusion-xl-base-1.0' or tokenizer_name_or_path == 'sdxl-e5')

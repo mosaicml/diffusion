@@ -221,7 +221,7 @@ def stable_diffusion_xl(
         unet = UNet2DConditionModel.from_pretrained(unet_model_name, subfolder='unet')
     else:
         config = PretrainedConfig.get_config_dict(unet_model_name, subfolder='unet')
-        if model_name=='sdxl-e5':   # e5 + clip embedding dims + micro conditioning
+        if model_name == 'sdxl-e5':  # e5 + clip embedding dims + micro conditioning
             config[0]['cross_attention_dim'] = 2304
         unet = UNet2DConditionModel(**config[0])
         # Zero initialization trick
@@ -244,7 +244,7 @@ def stable_diffusion_xl(
     tokenizer = SDXLTokenizer(model_name)
     text_encoder = SDXLTextEncoder(model_name, encode_latents_in_fp16)
 
-    scheduler_model_name = 'stabilityai/stable-diffusion-xl-base-1.0' if  model_name=='sdxl-e5' else model_name
+    scheduler_model_name = 'stabilityai/stable-diffusion-xl-base-1.0' if model_name == 'sdxl-e5' else model_name
     noise_scheduler = DDPMScheduler.from_pretrained(scheduler_model_name, subfolder='scheduler')
     inference_noise_scheduler = EulerDiscreteScheduler(num_train_timesteps=1000,
                                                        beta_start=0.00085,
@@ -550,21 +550,19 @@ class SDXLTextEncoder(torch.nn.Module):
     Creates two text encoders (a CLIPTextModel and CLIPTextModelWithProjection) that behave like one.
 
     Args:
-        model_name (str): Name of the model's text encoders to load. 
+        model_name (str): Name of the model's text encoders to load.
             'sdxl-e5' or 'stabilityai/stable-diffusion-xl-base-1.0'.
-            Default: 'stabilityai/stable-diffusion-xl-base-1.0'.        
+            Default: 'stabilityai/stable-diffusion-xl-base-1.0'.
         encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
     """
 
-    def __init__(self,
-                 model_name='stabilityai/stable-diffusion-xl-base-1.0',
-                 encode_latents_in_fp16=True):
+    def __init__(self, model_name='stabilityai/stable-diffusion-xl-base-1.0', encode_latents_in_fp16=True):
         super().__init__()
         _validate_model_name(model_name)
         torch_dtype = torch.float16 if encode_latents_in_fp16 else None
-        if model_name=='sdxl-e5':
+        if model_name == 'sdxl-e5':
             self.text_encoder = AutoModel.from_pretrained('intfloat/e5-large-v2', torch_dtype=torch_dtype)
-            model_name = 'stabilityai/stable-diffusion-xl-base-1.0' # set model name to sdxl to pull other encoder
+            model_name = 'stabilityai/stable-diffusion-xl-base-1.0'  # set model name to sdxl to pull other encoder
         else:
             self.text_encoder = CLIPTextModel.from_pretrained(model_name,
                                                               subfolder='text_encoder',
@@ -595,14 +593,14 @@ class SDXLTokenizer:
     Tokenizes prompt with two tokenizers and returns the joined output.
 
     Args:
-        model_name (str): Name of the model's tokenizers to load. 
+        model_name (str): Name of the model's tokenizers to load.
             'sdxl-e5' or 'stabilityai/stable-diffusion-xl-base-1.0'.
             Default: 'stabilityai/stable-diffusion-xl-base-1.0'.
     """
 
     def __init__(self, model_name='stabilityai/stable-diffusion-xl-base-1.0'):
         _validate_model_name(model_name)
-        if model_name=='sdxl-e5':
+        if model_name == 'sdxl-e5':
             self.tokenizer = AutoTokenizer.from_pretrained('intfloat/e5-large-v2')
             model_name = 'stabilityai/stable-diffusion-xl-base-1.0'
         else:
@@ -628,8 +626,8 @@ class SDXLTokenizer:
             tokenized_output[key] = [tokenized_output[key], tokenized_output_2[key]]
         return tokenized_output
 
+
 def _validate_model_name(model_name):
     valid_model_names = {'sdxl-e5', 'stabilityai/stable-diffusion-xl-base-1.0'}
     if model_name not in valid_model_names:
         raise ValueError(f'model_name must be one of {valid_model_names}.')
-
