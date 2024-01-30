@@ -12,7 +12,7 @@ from diffusion.models.models import stable_diffusion_2
 
 def test_model_forward():
     # fp16 vae does not run on cpu
-    model = stable_diffusion_2(pretrained=False, fsdp=False, encode_latents_in_fp16=False)
+    model, trainable_params = stable_diffusion_2(pretrained=False, fsdp=False, encode_latents_in_fp16=False)
     batch_size = 1
     H = 8
     W = 8
@@ -32,7 +32,7 @@ def test_model_forward():
 @pytest.mark.parametrize('negative_prompt', [None, 'so cool'])
 def test_model_generate(guidance_scale, negative_prompt):
     # fp16 vae does not run on cpu
-    model = stable_diffusion_2(pretrained=False, fsdp=False, encode_latents_in_fp16=False)
+    model, trainable_params = stable_diffusion_2(pretrained=False, fsdp=False, encode_latents_in_fp16=False)
     output = model.generate(
         prompt='a cool doge',
         negative_prompt=negative_prompt,
