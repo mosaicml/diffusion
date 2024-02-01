@@ -28,6 +28,10 @@ class StreamingImageDataset(StreamingDataset):
         local (str, optional): Local filesystem directory where dataset is cached during operation. Default: ``None``.
         transform (Callable, optional): The transforms to apply to the image. Default: ``None``.
         image_key (str): Key associated with the image in the streaming dataset. Default: ``'image'``.
+        image_output_key (optional, str): Optional output key for the image. If none, the value of `image_key` will
+            be used. Default: ``None``.
+        return_all_fields (bool, optional): If ``True``, return all fields in the sample. If ``False``, only return
+            the image. Default: ``False``.
 
         **streaming_kwargs: Additional arguments to pass in the construction of the StreamingDataloader
     """
@@ -39,6 +43,8 @@ class StreamingImageDataset(StreamingDataset):
         local: Optional[str] = None,
         transform: Optional[Callable] = None,
         image_key: str = 'image',
+        image_output_key: Optional[str] = None,
+        return_all_fields: bool = False,
         **streaming_kwargs,
     ) -> None:
 
@@ -55,19 +61,29 @@ class StreamingImageDataset(StreamingDataset):
 
         self.transform = transform
         self.image_key = image_key
+        self.image_output_key = image_output_key if image_output_key is not None else image_key
+        self.return_all_fields = return_all_fields
 
     def __getitem__(self, index):
         sample = super().__getitem__(index)
         # Image
-        img = sample[self.image_key]
-        if not isinstance(img, Image.Image):
-            img = Image.open(BytesIO(sample[self.image_key]))
+        if not isinstance(sample[self.image_key], Image.Image):
+            img = Image.open(BytesIO(sample[self.image_key])).copy()
+        else:
+            img = sample[self.image_key].copy()
         if img.mode != 'RGB':
             img = img.convert('RGB')
         # Image transforms
         if self.transform is not None:
             img = self.transform(img)
-        return {self.image_key: img}
+        # Make the output
+        if self.image_output_key != self.image_key and self.image_output_key in sample:
+            raise ValueError(f'Output key {self.image_output_key} already exists in the sample.')
+        if self.return_all_fields:
+            output = {**sample, self.image_output_key: img}
+        else:
+            output = {self.image_output_key: img}
+        return output
 
 
 def build_streaming_image_dataloader(
