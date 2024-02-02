@@ -30,8 +30,8 @@ from streaming.base import MDSWriter
 from diffusion.datasets.image import StreamingImageDataset
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--remotes', nargs='+', help='List of remotes to use for the dataset.')
-parser.add_argument('--locals', nargs='+', help='List of local directories to use for the dataset.')
+parser.add_argument('--remote', type=str, help='Remote to use for the dataset.')
+parser.add_argument('--local', type=str, help='Local directory to use for the dataset.')
 parser.add_argument('--output', help='Output path for the filtered dataset.')
 parser.add_argument('--output_caption_key', type=str, default='llava_caption', help='Dataset output caption key.')
 parser.add_argument('--image_key', type=str, default='image', help='Dataset image key.')
