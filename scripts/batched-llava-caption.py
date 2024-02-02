@@ -216,6 +216,6 @@ if __name__ == '__main__':
             if sample_id >= args.batch_size:
                 current_time = time.time()
                 print('-' * 120)
-                print('Sample ID:', sample_id)
+                print('Sample ID:', sample_id, "of", dataset_len)
                 print('Time per image:', (current_time - start) / (sample_id))
                 print('-' * 120)
