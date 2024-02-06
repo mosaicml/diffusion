@@ -232,19 +232,20 @@ def stable_diffusion_xl(
         # Last conv block out projection
         unet.conv_out = zero_module(unet.conv_out)
 
-    # unet.up_blocks._fsdp_wrap = False
-    # unet.down_blocks._fsdp_wrap = False
     if hasattr(unet.mid_block, 'attentions'):
         for attention in unet.mid_block.attentions:
             attention._fsdp_wrap = True
+            attention._activation_checkpointing = True
     for block in unet.up_blocks:
         if hasattr(block, 'attentions'):
             for attention in block.attentions:
                 attention._fsdp_wrap = True
+                attention._activation_checkpointing = True
     for block in unet.down_blocks:
         if hasattr(block, 'attentions'):
             for attention in block.attentions:
                 attention._fsdp_wrap = True
+                attention._activation_checkpointing = True
 
     torch_dtype = torch.float16 if encode_latents_in_fp16 else None
     try:
