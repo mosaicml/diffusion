@@ -236,16 +236,25 @@ def stable_diffusion_xl(
         for attention in unet.mid_block.attentions:
             attention._fsdp_wrap = True
             attention._activation_checkpointing = True
+    if hasattr(unet.mid_block, 'resnets'):
+        for resnet in unet.mid_block.resnets:
+            resnet._fsdp_wrap = True
     for block in unet.up_blocks:
         if hasattr(block, 'attentions'):
             for attention in block.attentions:
                 attention._fsdp_wrap = True
                 attention._activation_checkpointing = True
+        if hasattr(block, 'resnets'):
+            for resnet in block.resnets:
+                resnet._fsdp_wrap = True
     for block in unet.down_blocks:
         if hasattr(block, 'attentions'):
             for attention in block.attentions:
                 attention._fsdp_wrap = True
                 attention._activation_checkpointing = True
+        if hasattr(block, 'resnets'):
+            for resnet in block.resnets:
+                resnet._fsdp_wrap = True
 
     torch_dtype = torch.float16 if encode_latents_in_fp16 else None
     try:
