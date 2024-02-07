@@ -10,6 +10,7 @@ import time
 import torch
 from huggingface_hub import snapshot_download
 from torchvision import transforms
+from tqdm.auto import tqdm
 
 try:
     from llava.constants import DEFAULT_IMAGE_TOKEN  # type: ignore
@@ -49,28 +50,13 @@ parser.add_argument('--compile', action='store_true', help='Compile the model.')
 args = parser.parse_args()
 
 
-def make_dataset(remote: str, local: str, image_key: str = 'image', image_output_key: str = 'image_output'):
-    """Make a streaming image dataset."""
-    streams = []
-    for r, l in zip([remote], [local]):
-        streams.append(Stream(remote=r, local=l))
-
-    transform = transforms.Compose([])
-    dataset = StreamingImageDataset(
-        streams=streams,
-        image_key=image_key,
-        image_output_key=image_output_key,
-        transform=transform,
-        shuffle=False,
-        return_all_fields=True,
-    )
-    return dataset
-
-
 class LLaVACaptioner:
     """LLaVA captioner class."""
 
-    def __init__(self, model_name: str = 'liuhaotian/llava-v1.5-13b', max_tokens: int = 512, compile: bool = False):
+    def __init__(self,
+                 model_name: str = 'liuhaotian/llava-v1.6-vicuna-13b',
+                 max_tokens: int = 1024,
+                 compile: bool = False):
         self.model_name = model_name
         self.tokenizer, self.model, self.image_processor, self.context_len = self.load_llava()
         if compile:
@@ -140,6 +126,24 @@ class LLaVACaptioner:
         return outputs
 
 
+def make_dataset(remote: str, local: str, image_key: str = 'image', image_output_key: str = 'image_output'):
+    """Make a streaming image dataset."""
+    streams = []
+    for r, l in zip([remote], [local]):
+        streams.append(Stream(remote=r, local=l))
+
+    transform = transforms.Compose([])
+    dataset = StreamingImageDataset(
+        streams=streams,
+        image_key=image_key,
+        image_output_key=image_output_key,
+        transform=transform,
+        shuffle=False,
+        return_all_fields=True,
+    )
+    return dataset
+
+
 def resize_and_pad(image, target_width, target_height):
     """Resize and pad an image to the target size while maintaining aspect ratio.
 
@@ -183,26 +187,30 @@ def resize_and_pad(image, target_width, target_height):
     return padded_image
 
 
+def batch_images(images: list, width: int, height: int) -> torch.Tensor:
+    """Combine a list of images into a batch tensor."""
+    image_batch = [resize_and_pad(image, width, height) for image in images]
+    image_batch = [transforms.functional.to_tensor(image) for image in image_batch]
+    image_batch = torch.stack(image_batch)
+    return image_batch
+
+
 if __name__ == '__main__':
     dataset = make_dataset(args.remote, args.local, image_key=args.image_key, image_output_key=args.image_output_key)
     dataset_len = len(dataset)
-    to_tensor = transforms.ToTensor()
-
     # Device should be first gpu if available, else cpu
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     captioner = LLaVACaptioner(model_name=args.model_name, max_tokens=args.max_tokens, compile=args.compile).to(device)
-
+    # Need to grab the column names and types from the first shard in the dataset.
+    # Assumes all shards have the same columns and types.
     reader = dataset.shards[0]
     columns = dict(zip(reader.column_names, reader.column_encodings))
     columns[args.output_caption_key] = 'str'
 
-    start = 0
     with MDSWriter(out=args.output, columns=columns) as out:
-        for sample_id in range(0, len(dataset), args.batch_size):
+        for sample_id in tqdm(range(0, dataset_len, args.batch_size)):
             images = [dataset[i][args.image_output_key] for i in range(sample_id, sample_id + args.batch_size)]
-            image_batch = [resize_and_pad(image, args.width, args.height) for image in images]
-            image_batch = [to_tensor(image) for image in image_batch]
-            image_batch = torch.stack(image_batch)
+            image_batch = batch_images(images, width=args.width, height=args.height)
             if sample_id == args.batch_size:
                 start = time.time()
             outputs = captioner.get_outputs(image_batch, args.llava_prompt)
@@ -210,12 +218,3 @@ if __name__ == '__main__':
                 new_sample = dataset[sample_id + output_id]
                 new_sample[args.output_caption_key] = output
                 out.write(new_sample)
-                print('*' * 120)
-                print(output)
-                print('*' * 120)
-            if sample_id >= args.batch_size:
-                current_time = time.time()
-                print('-' * 120)
-                print('Sample ID:', sample_id, "of", dataset_len)
-                print('Time per image:', (current_time - start) / (sample_id))
-                print('-' * 120)
