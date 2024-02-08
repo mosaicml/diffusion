@@ -207,6 +207,7 @@ if __name__ == '__main__':
     columns = dict(zip(reader.column_names, reader.column_encodings))
     columns[args.output_caption_key] = 'str'
 
+    start = time.time()
     with MDSWriter(out=args.output, columns=columns) as out:
         for sample_id in tqdm(range(0, dataset_len, args.batch_size)):
             images = [dataset[i][args.image_output_key] for i in range(sample_id, sample_id + args.batch_size)]
@@ -218,3 +219,12 @@ if __name__ == '__main__':
                 new_sample = dataset[sample_id + output_id]
                 new_sample[args.output_caption_key] = output
                 out.write(new_sample)
+            print('*' * 80)
+            print(f'Processed {sample_id + args.batch_size} samples in {time.time() - start:.2f} seconds.')
+            print(f'Average time per sample: {(time.time() - start) / (sample_id + args.batch_size):.2f} seconds.')
+            print(
+                f'Est. time remaining: {((dataset_len - sample_id) * (time.time() - start) / (sample_id + args.batch_size)) / 60:.2f} minutes'
+            )
+            print('Output:')
+            print(outputs[0])
+            print('*' * 80)
