@@ -47,6 +47,8 @@ parser.add_argument('--llava_prompt',
                     help='Prompt to use for LLaVA.')
 parser.add_argument('--max_tokens', type=int, default=1024, help='Maximum tokens to generate.')
 parser.add_argument('--compile', action='store_true', help='Compile the model.')
+parser.add_argument('--start', type=int, default=0, help='Start index for the dataset.')
+parser.add_argument('--end', type=int, default=None, help='Optional end index for the dataset.')
 args = parser.parse_args()
 
 
@@ -208,8 +210,9 @@ if __name__ == '__main__':
     columns[args.output_caption_key] = 'str'
 
     start = time.time()
+    end = args.end if args.end is not None else dataset_len
     with MDSWriter(out=args.output, columns=columns) as out:
-        for sample_id in tqdm(range(0, dataset_len, args.batch_size)):
+        for sample_id in tqdm(range(args.start, end, args.batch_size)):
             images = [dataset[i][args.image_output_key] for i in range(sample_id, sample_id + args.batch_size)]
             image_batch = batch_images(images, width=args.width, height=args.height)
             if sample_id == args.batch_size:
