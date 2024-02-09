@@ -3,11 +3,14 @@
 
 """Script to LLaVA caption an image dataset."""
 
-import argparse
 import os
 import time
+from argparse import ArgumentParser, Namespace
+from typing import Optional
 
 import torch
+import wandb
+from composer.utils import dist
 from huggingface_hub import snapshot_download
 from torchvision import transforms
 from tqdm.auto import tqdm
@@ -30,27 +33,6 @@ from streaming.base import MDSWriter
 
 from diffusion.datasets.image import StreamingImageDataset
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--remote', type=str, help='Remote to use for the dataset.')
-parser.add_argument('--local', type=str, help='Local directory to use for the dataset.')
-parser.add_argument('--output', help='Output path for the filtered dataset.')
-parser.add_argument('--output_caption_key', type=str, default='llava_caption', help='Dataset output caption key.')
-parser.add_argument('--image_key', type=str, default='image', help='Dataset image key.')
-parser.add_argument('--image_output_key', type=str, default='image_output', help='Dataset image output key.')
-parser.add_argument('--batch_size', type=int, default=1, help='Batch size for the LLaVA model.')
-parser.add_argument('--height', type=int, default=512, help='Height of the image.')
-parser.add_argument('--width', type=int, default=512, help='Width of the image.')
-parser.add_argument('--model_name', type=str, default='liuhaotian/llava-v1.6-vicuna-13b', help='LLaVA model to use.')
-parser.add_argument('--llava_prompt',
-                    type=str,
-                    default='Describe this image and its style in a very detailed manner.',
-                    help='Prompt to use for LLaVA.')
-parser.add_argument('--max_tokens', type=int, default=1024, help='Maximum tokens to generate.')
-parser.add_argument('--compile', action='store_true', help='Compile the model.')
-parser.add_argument('--start', type=int, default=0, help='Start index for the dataset.')
-parser.add_argument('--end', type=int, default=None, help='Optional end index for the dataset.')
-args = parser.parse_args()
-
 
 class LLaVACaptioner:
     """LLaVA captioner class."""
@@ -58,18 +40,20 @@ class LLaVACaptioner:
     def __init__(self,
                  model_name: str = 'liuhaotian/llava-v1.6-vicuna-13b',
                  max_tokens: int = 1024,
-                 compile: bool = False):
+                 compile: bool = False,
+                 device: Optional[torch.device] = None):
         self.model_name = model_name
+        self.conv_mode = 'llava_v1'
+        self.max_tokens = max_tokens
+        self.device = torch.device('cuda') if device is None else device
+
         self.tokenizer, self.model, self.image_processor, self.context_len = self.load_llava()
         if compile:
             self.model = torch.compile(self.model)
-        self.conv_mode = 'llava_v1'
-        self.max_tokens = max_tokens
-        self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
     def to(self, device: torch.device):
         self.device = device
-        self.model.to(device)
+        self.model = self.model.to(device)
         return self
 
     def load_llava(self):
@@ -83,7 +67,7 @@ class LLaVACaptioner:
         disable_torch_init()
         model_path = os.path.expanduser('/tmp/llava')
         model_name = get_model_name_from_path(model_path)
-        return load_pretrained_model(model_path, None, model_name)
+        return load_pretrained_model(model_path, None, model_name, device_map=self.device)
 
     def add_image_tokens(self, prompt: str) -> str:
         if self.model.config.mm_use_im_start_end:
@@ -94,7 +78,7 @@ class LLaVACaptioner:
 
     def tokenize(self, prompt: str) -> torch.Tensor:
         input_ids = tokenizer_image_token(prompt, self.tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt')
-        return input_ids.unsqueeze(0).to(self.device)
+        return input_ids.unsqueeze(0)
 
     def get_outputs(self, image_batch: torch.Tensor, prompt: str) -> list:
         """Get the output from llava."""
@@ -105,17 +89,17 @@ class LLaVACaptioner:
         conv.append_message(conv.roles[1], None)
         prompt = conv.get_prompt()
         input_ids = self.tokenize(prompt)
-        # Prep the image
-        image_batch = image_batch.to(self.device)  # In range (0, 1)
         # repeat the prompt along the batch dimension for each image
         input_ids = input_ids.repeat(image_batch.shape[0], 1)
+        input_ids = input_ids.to(self.device)
         # Prep the image inputs
         image_tensor = self.image_processor.preprocess(image_batch, do_rescale=False,
                                                        return_tensors='pt')['pixel_values']
+        image_tensor = image_tensor.to(self.device)
         # Forward through the model
         with torch.inference_mode():
             output_ids = self.model.generate(input_ids,
-                                             images=image_tensor.half().to(device),
+                                             images=image_tensor.half(),
                                              do_sample=True,
                                              temperature=0.2,
                                              top_p=None,
@@ -126,6 +110,42 @@ class LLaVACaptioner:
         decoded_output = self.tokenizer.batch_decode(output_ids, skip_special_tokens=True)
         outputs = [o.strip() for o in decoded_output]
         return outputs
+
+
+def parse_args():
+    """Parse command-line arguments.
+
+    Returns:
+        Namespace: Command-line arguments.
+    """
+    parser = ArgumentParser()
+    parser.add_argument('--remote', type=str, help='Remote to use for the dataset.')
+    parser.add_argument('--local', type=str, help='Local directory to use for the dataset.')
+    parser.add_argument('--output', help='Output path for the filtered dataset.')
+    parser.add_argument('--output_caption_key', type=str, default='llava_caption', help='Dataset output caption key.')
+    parser.add_argument('--image_key', type=str, default='image', help='Dataset image key.')
+    parser.add_argument('--image_output_key', type=str, default='image_output', help='Dataset image output key.')
+    parser.add_argument('--batch_size', type=int, default=1, help='Batch size for the LLaVA model.')
+    parser.add_argument('--height', type=int, default=336, help='Height of the image.')
+    parser.add_argument('--width', type=int, default=336, help='Width of the image.')
+    parser.add_argument('--model_name',
+                        type=str,
+                        default='liuhaotian/llava-v1.6-vicuna-13b',
+                        help='LLaVA model to use.')
+    parser.add_argument('--llava_prompt',
+                        type=str,
+                        default='Describe this image and its style in a very detailed manner.',
+                        help='Prompt to use for LLaVA.')
+    parser.add_argument('--max_tokens', type=int, default=1024, help='Maximum tokens to generate.')
+    parser.add_argument('--compile', action='store_true', help='Compile the model.')
+    parser.add_argument('--start', type=int, default=0, help='Start index for the dataset.')
+    parser.add_argument('--end', type=int, default=None, help='Optional end index for the dataset.')
+    # Add wandb arguments
+    parser.add_argument('--wandb_disabled', action='store_true')
+    parser.add_argument('--wandb_name', type=str, default='llava-captions')
+    parser.add_argument('--wandb_project', type=str, default='llava-captions')
+    parser.add_argument('--wandb_entity', type=str, default='mosaic-ml')
+    return parser.parse_args()
 
 
 def make_dataset(remote: str, local: str, image_key: str = 'image', image_output_key: str = 'image_output'):
@@ -197,37 +217,67 @@ def batch_images(images: list, width: int, height: int) -> torch.Tensor:
     return image_batch
 
 
-if __name__ == '__main__':
+def main(args: Namespace) -> None:
+    """Add LLaVA generated captions to the dataset.
+
+    Args:
+        args (Namespace): Command-line arguments.
+    """
+    if not args.wandb_disabled:
+        wandb.init(name=args.wandb_name + f'-rank-{dist.get_global_rank()}',
+                   project=args.wandb_project,
+                   entity=args.wandb_entity)
+
     dataset = make_dataset(args.remote, args.local, image_key=args.image_key, image_output_key=args.image_output_key)
     dataset_len = len(dataset)
     # Device should be first gpu if available, else cpu
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    captioner = LLaVACaptioner(model_name=args.model_name, max_tokens=args.max_tokens, compile=args.compile).to(device)
+    device = torch.device(f'cuda:{dist.get_local_rank()}' if torch.cuda.is_available() else 'cpu')
+    captioner = LLaVACaptioner(model_name=args.model_name,
+                               max_tokens=args.max_tokens,
+                               compile=args.compile,
+                               device=device)
     # Need to grab the column names and types from the first shard in the dataset.
     # Assumes all shards have the same columns and types.
     reader = dataset.shards[0]
     columns = dict(zip(reader.column_names, reader.column_encodings))
     columns[args.output_caption_key] = 'str'
 
-    start = time.time()
+    # Construct the start and end indices for the dataset. We want each rank to process a subset of the dataset.
     end = args.end if args.end is not None else dataset_len
-    with MDSWriter(out=args.output, columns=columns) as out:
-        for sample_id in tqdm(range(args.start, end, args.batch_size)):
+    samples_per_rank = (end - args.start) // dist.get_world_size()
+    start_idx = args.start + dist.get_local_rank() * samples_per_rank
+    end_idx = start_idx + samples_per_rank
+    output_dir = args.output + f'/{dist.get_global_rank()}'
+    # Process each subset
+    start_time = time.time()
+    with MDSWriter(out=output_dir, columns=columns) as out:
+        for sample_id in tqdm(range(start_idx, end_idx, args.batch_size)):
             images = [dataset[i][args.image_output_key] for i in range(sample_id, sample_id + args.batch_size)]
             image_batch = batch_images(images, width=args.width, height=args.height)
-            if sample_id == args.batch_size:
-                start = time.time()
             outputs = captioner.get_outputs(image_batch, args.llava_prompt)
             for output_id, output in enumerate(outputs):
                 new_sample = dataset[sample_id + output_id]
                 new_sample[args.output_caption_key] = output
                 out.write(new_sample)
-            print('*' * 80)
-            print(f'Processed {sample_id + args.batch_size} samples in {time.time() - start:.2f} seconds.')
-            print(f'Average time per sample: {(time.time() - start) / (sample_id + args.batch_size):.2f} seconds.')
-            print(
-                f'Est. time remaining: {((dataset_len - sample_id) * (time.time() - start) / (sample_id + args.batch_size)) / 60:.2f} minutes'
-            )
-            print('Output:')
-            print(outputs[0])
-            print('*' * 80)
+            if not args.wandb_disabled:
+                if sample_id == start_idx:
+                    # On the first batch, log sample images and captions for verification.
+                    columns = ['id', 'image', 'caption']
+                    verification_samples = [[i, wandb.Image(images[i]), outputs[i]] for i in range(len(images))]
+                    wandb.log({'sample outputs': wandb.Table(data=verification_samples, columns=columns)})
+                completed = sample_id + args.batch_size - start_idx
+                progress = completed / (end_idx - start_idx)
+                elapsed_time = time.time() - start_time
+                time_per_sample = elapsed_time / completed
+                est_time_remaining = (end_idx - start_idx - completed) * time_per_sample
+                wandb.log({
+                    'samples': completed,
+                    'progress': progress,
+                    'elapsed time (s)': elapsed_time,
+                    'time per sample (s)': time_per_sample,
+                    'est. time remaining (s)': est_time_remaining
+                })
+
+
+if __name__ == '__main__':
+    main(parse_args())
