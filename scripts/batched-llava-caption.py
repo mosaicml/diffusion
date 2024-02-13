@@ -298,7 +298,7 @@ def main(args: Namespace) -> None:
             outputs = captioner.get_outputs(image_batch, args.llava_prompt)
             sample_time = time.time() - sample_time
             for output_id, output in enumerate(outputs):
-                if sample_id + output_id <= end_idx:
+                if sample_id + output_id < end_idx:
                     new_sample = dataset[sample_id + output_id]
                     new_sample[args.output_caption_key] = output
                     out.write(new_sample)
