@@ -41,22 +41,29 @@ class LLaVACaptioner:
                  model_name: str = 'liuhaotian/llava-v1.6-vicuna-13b',
                  max_tokens: int = 1024,
                  compile: bool = False,
+                 quantize: bool = False,
+                 multi_gpu: bool = False,
                  device: Optional[torch.device] = None):
         self.model_name = model_name
         self.conv_mode = 'llava_v1'
         self.max_tokens = max_tokens
         self.device = torch.device('cuda') if device is None else device
 
-        self.tokenizer, self.model, self.image_processor, self.context_len = self.load_llava()
+        self.tokenizer, self.model, self.image_processor, self.context_len = self.load_llava(quantize=quantize,
+                                                                                             multi_gpu=multi_gpu)
+        self.generate = self.model.generate
         if compile:
             self.model = torch.compile(self.model)
+            self.generate = torch.compile(self.generate)
+
+        self.input_ids: Optional[torch.Tensor] = None
 
     def to(self, device: torch.device):
         self.device = device
         self.model = self.model.to(device)
         return self
 
-    def load_llava(self):
+    def load_llava(self, quantize: bool = False, multi_gpu: bool = False):
         """Loads the llava model."""
         # Download the llava model if it isn't there already.
         snapshot_download(
@@ -67,7 +74,18 @@ class LLaVACaptioner:
         disable_torch_init()
         model_path = os.path.expanduser('/tmp/llava')
         model_name = get_model_name_from_path(model_path)
-        return load_pretrained_model(model_path, None, model_name, device_map=self.device)
+
+        device_map = 'auto' if multi_gpu else self.device
+        if quantize:
+            return load_pretrained_model(model_path,
+                                         None,
+                                         model_name,
+                                         device_map=device_map,
+                                         load_in_4bit=True,
+                                         bnb_4bit_use_double_quant=True,
+                                         bnb_4bit_compute_dtype=torch.float16)
+        else:
+            return load_pretrained_model(model_path, None, model_name, device_map=device_map)
 
     def add_image_tokens(self, prompt: str) -> str:
         if self.model.config.mm_use_im_start_end:
@@ -80,8 +98,7 @@ class LLaVACaptioner:
         input_ids = tokenizer_image_token(prompt, self.tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt')
         return input_ids.unsqueeze(0)
 
-    def get_outputs(self, image_batch: torch.Tensor, prompt: str) -> list:
-        """Get the output from llava."""
+    def format_prompt(self, prompt: str, batch_size: int = 1) -> None:
         # Format the prompt
         prompt = self.add_image_tokens(prompt)
         conv = conv_templates[self.conv_mode].copy()
@@ -90,26 +107,85 @@ class LLaVACaptioner:
         prompt = conv.get_prompt()
         input_ids = self.tokenize(prompt)
         # repeat the prompt along the batch dimension for each image
-        input_ids = input_ids.repeat(image_batch.shape[0], 1)
+        input_ids = input_ids.repeat(batch_size, 1)
         input_ids = input_ids.to(self.device)
+        self.input_ids = input_ids
+
+    def get_outputs(self, image_batch: torch.Tensor, prompt: str) -> list:
+        """Get the output from llava."""
+        if self.input_ids is None:
+            self.format_prompt(prompt, batch_size=image_batch.shape[0])
         # Prep the image inputs
         image_tensor = self.image_processor.preprocess(image_batch, do_rescale=False,
-                                                       return_tensors='pt')['pixel_values']
-        image_tensor = image_tensor.to(self.device)
+                                                       return_tensors='pt')['pixel_values'].half().to(self.device)
         # Forward through the model
-        with torch.inference_mode():
-            output_ids = self.model.generate(input_ids,
-                                             images=image_tensor.half(),
-                                             do_sample=True,
-                                             temperature=0.2,
-                                             top_p=None,
-                                             num_beams=1,
-                                             max_new_tokens=self.max_tokens,
-                                             use_cache=True)
+        with torch.no_grad():
+            output_ids = self.generate(self.input_ids,
+                                       images=image_tensor,
+                                       do_sample=True,
+                                       temperature=0.2,
+                                       top_p=None,
+                                       num_beams=1,
+                                       max_new_tokens=self.max_tokens,
+                                       use_cache=True)
         # Postprocess outputs
         decoded_output = self.tokenizer.batch_decode(output_ids, skip_special_tokens=True)
         outputs = [o.strip() for o in decoded_output]
         return outputs
+
+
+class ResizeAndPad:
+    """Resize and pad an image to a target size.
+
+    Args:
+    - width (int): The target width.
+    - height (int): The target height.
+    """
+
+    def __init__(self, width: int, height: int):
+        self.width = width
+        self.height = height
+
+    def resize_and_pad(self, image: Image.Image) -> Image.Image:
+        """Resize and pad an image to the target size while maintaining aspect ratio.
+
+        Args:
+        - image (PIL Image): The image to be resized and padded.
+
+        Returns:
+        - PIL Image: The resized and padded image.
+        """
+        # Calculate the aspect ratio and find the smaller dimension.
+        original_width, original_height = image.size
+        aspect_ratio = original_width / original_height
+
+        # Resize such that the larger dimension fits the corresponding target dimension.
+        if original_width > original_height:  # Width is larger, match width
+            resize_width = self.width
+            resize_height = round(resize_width / aspect_ratio)
+        elif original_width <= original_height:  # Height is larger or equal, match height
+            resize_height = self.height
+            resize_width = round(resize_height * aspect_ratio)
+        else:
+            raise ValueError('Invalid image dimensions')
+        resized_image = image.resize((resize_width, resize_height), Image.ANTIALIAS)
+
+        # Calculate padding
+        pad_width_left = (self.width - resize_width) // 2
+        pad_width_right = self.width - resize_width - pad_width_left
+
+        pad_height_top = (self.height - resize_height) // 2
+        pad_height_bottom = self.height - resize_height - pad_height_top
+
+        # Apply asymmetric padding if necessary
+        padded_image = ImageOps.expand(resized_image,
+                                       border=(pad_width_left, pad_height_top, pad_width_right, pad_height_bottom),
+                                       fill=0)
+
+        return padded_image
+
+    def __call__(self, image: Image.Image) -> Image.Image:
+        return self.resize_and_pad(image)
 
 
 def parse_args():
@@ -138,6 +214,8 @@ def parse_args():
                         help='Prompt to use for LLaVA.')
     parser.add_argument('--max_tokens', type=int, default=1024, help='Maximum tokens to generate.')
     parser.add_argument('--compile', action='store_true', help='Compile the model.')
+    parser.add_argument('--quantize', action='store_true', help='Quantize the model.')
+    parser.add_argument('--multi_gpu', action='store_true', help='Use multi-gpu.')
     parser.add_argument('--start', type=int, default=0, help='Start index for the dataset.')
     parser.add_argument('--end', type=int, default=None, help='Optional end index for the dataset.')
     # Add wandb arguments
@@ -148,13 +226,18 @@ def parse_args():
     return parser.parse_args()
 
 
-def make_dataset(remote: str, local: str, image_key: str = 'image', image_output_key: str = 'image_output'):
+def make_dataset(remote: str,
+                 local: str,
+                 image_key: str = 'image',
+                 image_output_key: str = 'image_output',
+                 height: int = 336,
+                 width: int = 336):
     """Make a streaming image dataset."""
     streams = []
     for r, l in zip([remote], [local]):
         streams.append(Stream(remote=r, local=l))
 
-    transform = transforms.Compose([])
+    transform = transforms.Compose([ResizeAndPad(width, height), transforms.ToTensor()])
     dataset = StreamingImageDataset(
         streams=streams,
         image_key=image_key,
@@ -164,57 +247,6 @@ def make_dataset(remote: str, local: str, image_key: str = 'image', image_output
         return_all_fields=True,
     )
     return dataset
-
-
-def resize_and_pad(image, target_width, target_height):
-    """Resize and pad an image to the target size while maintaining aspect ratio.
-
-    Args:
-    - image (PIL Image): The image to be resized and padded.
-    - target_width (int): The target width.
-    - target_height (int): The target height.
-
-    Returns:
-    - PIL Image: The resized and padded image.
-    """
-    # Calculate the aspect ratio and find the smaller dimension.
-    original_width, original_height = image.size
-    aspect_ratio = original_width / original_height
-
-    # Resize such that the smaller dimension fits the corresponding target dimension.
-    if original_width < original_height:  # Width is smaller, match width
-        resize_width = target_width
-        resize_height = round(resize_width / aspect_ratio)
-    elif original_width > original_height:  # Height is smaller, match height
-        resize_height = target_height
-        resize_width = round(resize_height * aspect_ratio)
-    else:  # Image is square, match either dimension
-        resize_width = target_width
-        resize_height = target_height
-
-    resized_image = image.resize((resize_width, resize_height), Image.ANTIALIAS)
-
-    # Calculate padding
-    pad_width_left = (target_width - resize_width) // 2
-    pad_width_right = target_width - resize_width - pad_width_left
-
-    pad_height_top = (target_height - resize_height) // 2
-    pad_height_bottom = target_height - resize_height - pad_height_top
-
-    # Apply asymmetric padding if necessary
-    padded_image = ImageOps.expand(resized_image,
-                                   border=(pad_width_left, pad_height_top, pad_width_right, pad_height_bottom),
-                                   fill=0)
-
-    return padded_image
-
-
-def batch_images(images: list, width: int, height: int) -> torch.Tensor:
-    """Combine a list of images into a batch tensor."""
-    image_batch = [resize_and_pad(image, width, height) for image in images]
-    image_batch = [transforms.functional.to_tensor(image) for image in image_batch]
-    image_batch = torch.stack(image_batch)
-    return image_batch
 
 
 def main(args: Namespace) -> None:
@@ -228,13 +260,20 @@ def main(args: Namespace) -> None:
                    project=args.wandb_project,
                    entity=args.wandb_entity)
 
-    dataset = make_dataset(args.remote, args.local, image_key=args.image_key, image_output_key=args.image_output_key)
+    dataset = make_dataset(args.remote,
+                           args.local,
+                           image_key=args.image_key,
+                           image_output_key=args.image_output_key,
+                           height=args.height,
+                           width=args.width)
     dataset_len = len(dataset)
     # Device should be first gpu if available, else cpu
     device = torch.device(f'cuda:{dist.get_local_rank()}' if torch.cuda.is_available() else 'cpu')
     captioner = LLaVACaptioner(model_name=args.model_name,
                                max_tokens=args.max_tokens,
                                compile=args.compile,
+                               quantize=args.quantize,
+                               multi_gpu=args.multi_gpu,
                                device=device)
     # Need to grab the column names and types from the first shard in the dataset.
     # Assumes all shards have the same columns and types.
@@ -250,11 +289,14 @@ def main(args: Namespace) -> None:
     output_dir = args.output + f'/{dist.get_global_rank()}'
     # Process each subset
     start_time = time.time()
+    sample_time = time.time()
     with MDSWriter(out=output_dir, columns=columns) as out:
         for sample_id in tqdm(range(start_idx, end_idx, args.batch_size)):
             images = [dataset[i][args.image_output_key] for i in range(sample_id, sample_id + args.batch_size)]
-            image_batch = batch_images(images, width=args.width, height=args.height)
+            image_batch = torch.stack(images)  # type: ignore
+            sample_time = time.time()
             outputs = captioner.get_outputs(image_batch, args.llava_prompt)
+            sample_time = time.time() - sample_time
             for output_id, output in enumerate(outputs):
                 new_sample = dataset[sample_id + output_id]
                 new_sample[args.output_caption_key] = output
@@ -274,7 +316,8 @@ def main(args: Namespace) -> None:
                     'samples': completed,
                     'progress': progress,
                     'elapsed time (s)': elapsed_time,
-                    'time per sample (s)': time_per_sample,
+                    'current time per sample (s)': sample_time / args.batch_size,
+                    'avg. time per sample (s)': time_per_sample,
                     'est. time remaining (s)': est_time_remaining
                 })
 
