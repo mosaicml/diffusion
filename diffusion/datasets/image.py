@@ -68,7 +68,7 @@ class StreamingImageDataset(StreamingDataset):
         sample = super().__getitem__(index)
         # Image
         if not isinstance(sample[self.image_key], Image.Image):
-            img = Image.open(BytesIO(sample[self.image_key])).copy()
+            img = Image.open(BytesIO(sample[self.image_key]))
         else:
             img = sample[self.image_key].copy()
         if img.mode != 'RGB':
@@ -117,10 +117,11 @@ def build_streaming_image_dataloader(
         remote, local = [remote], [local]
     elif isinstance(remote, Sequence) and isinstance(local, Sequence):
         if len(remote) != len(local):
-            ValueError(
+            raise ValueError(
                 f'remote and local Sequences must be the same length, got lengths {len(remote)} and {len(local)}')
     else:
-        ValueError(f'remote and local must be both Strings or Sequences, got types {type(remote)} and {type(local)}.')
+        raise ValueError(
+            f'remote and local must be both Strings or Sequences, got types {type(remote)} and {type(local)}.')
 
     # Create a Stream for each (remote, local) pair
     streams = []
