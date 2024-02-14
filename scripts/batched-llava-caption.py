@@ -282,33 +282,40 @@ def main(args: Namespace) -> None:
     columns[args.output_caption_key] = 'str'
 
     # Construct the start and end indices for the dataset. We want each rank to process a subset of the dataset.
-    end = args.end if args.end is not None else dataset_len
-    samples_per_rank = (end - args.start) // dist.get_world_size()
-    start_idx = args.start + dist.get_local_rank() * samples_per_rank
-    end_idx = start_idx + samples_per_rank
+    if args.end is not None:
+        # If end has been specified, need each rank to process a subset of the specified interval.
+        end = args.end
+        samples_per_rank = (end - args.start) // dist.get_world_size()
+        start_idx = args.start + dist.get_local_rank() * samples_per_rank
+        end_idx = start_idx + samples_per_rank
+    else:
+        # If end has not been specified, each rank processes all the data it has been given.
+        start_idx = args.start
+        end_idx = dataset_len
+    # Each rank needs it's own output
     output_dir = args.output + f'/{dist.get_global_rank()}'
     # Process each subset
     start_time = time.time()
     sample_time = time.time()
     with MDSWriter(out=output_dir, columns=columns) as out:
         for sample_id in tqdm(range(start_idx, end_idx, args.batch_size)):
-            images = [dataset[i][args.image_output_key] for i in range(sample_id, sample_id + args.batch_size)]
+            batch_end_idx = min(sample_id + args.batch_size, end_idx)
+            images = [dataset[i][args.image_output_key] for i in range(sample_id, batch_end_idx)]
             image_batch = torch.stack(images)  # type: ignore
             sample_time = time.time()
             outputs = captioner.get_outputs(image_batch, args.llava_prompt)
             sample_time = time.time() - sample_time
             for output_id, output in enumerate(outputs):
-                if sample_id + output_id < end_idx:
-                    new_sample = dataset[sample_id + output_id]
-                    new_sample[args.output_caption_key] = output
-                    out.write(new_sample)
+                new_sample = dataset[sample_id + output_id]
+                new_sample[args.output_caption_key] = output
+                out.write(new_sample)
             if not args.wandb_disabled:
                 if sample_id == start_idx:
                     # On the first batch, log sample images and captions for verification.
                     columns = ['id', 'image', 'caption']
                     verification_samples = [[i, wandb.Image(images[i]), outputs[i]] for i in range(len(images))]
                     wandb.log({'sample outputs': wandb.Table(data=verification_samples, columns=columns)})
-                completed = sample_id + args.batch_size - start_idx
+                completed = sample_id + len(images) - start_idx
                 progress = completed / (end_idx - start_idx)
                 elapsed_time = time.time() - start_time
                 time_per_sample = elapsed_time / completed
@@ -317,7 +324,7 @@ def main(args: Namespace) -> None:
                     'samples': completed,
                     'progress': progress,
                     'elapsed time (s)': elapsed_time,
-                    'current time per sample (s)': sample_time / args.batch_size,
+                    'current time per sample (s)': sample_time / len(images),
                     'avg. time per sample (s)': time_per_sample,
                     'est. time remaining (s)': est_time_remaining
                 })
