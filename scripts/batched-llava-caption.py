@@ -292,6 +292,8 @@ def main(args: Namespace) -> None:
         # If end has not been specified, each rank processes all the data it has been given.
         start_idx = args.start
         end_idx = dataset_len
+    if not args.wandb_disabled:
+        wandb.log({'start_idx': start_idx, 'end_idx': end_idx, 'dataset_len': dataset_len})
     # Each rank needs it's own output
     output_dir = args.output + f'/{dist.get_global_rank()}'
     # Process each subset
