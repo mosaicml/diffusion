@@ -330,6 +330,7 @@ def main(args: Namespace) -> None:
                     'avg. time per sample (s)': time_per_sample,
                     'est. time remaining (s)': est_time_remaining
                 })
+            dist.barrier()
 
 
 if __name__ == '__main__':
