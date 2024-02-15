@@ -283,7 +283,7 @@ def main(args: Namespace) -> None:
     end = args.end if args.end is not None else dataset_len
     samples_per_rank, remainder = divmod(end - args.start, dist.get_world_size())
     # Need to distribute the remainder across the ranks. Give each rank up to remainder one extra sample.
-    start_idx = args.start + dist.get_local_rank() * (samples_per_rank + min(remainder, dist.get_local_rank()))
+    start_idx = args.start + dist.get_local_rank() * samples_per_rank + min(remainder, dist.get_local_rank())
     end_idx = start_idx + samples_per_rank
     if dist.get_local_rank() < remainder:
         end_idx += 1
