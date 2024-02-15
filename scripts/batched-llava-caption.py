@@ -4,6 +4,7 @@
 """Script to LLaVA caption an image dataset."""
 
 import os
+import threading
 import time
 from argparse import ArgumentParser, Namespace
 from typing import Optional
@@ -113,7 +114,7 @@ class LLaVACaptioner:
 
     def get_outputs(self, image_batch: torch.Tensor, prompt: str) -> list:
         """Get the output from llava."""
-        if self.input_ids is None:
+        if self.input_ids is None or self.input_ids.shape[0] != image_batch.shape[0]:
             self.format_prompt(prompt, batch_size=image_batch.shape[0])
         # Prep the image inputs
         image_tensor = self.image_processor.preprocess(image_batch, do_rescale=False,
@@ -249,6 +250,12 @@ def make_dataset(remote: str,
     return dataset
 
 
+def prefetch_samples(dataset, start_idx, end_idx):
+    """Walk through the dataset to prefetch samples."""
+    for i in range(start_idx, end_idx):
+        _ = dataset[i]
+
+
 def main(args: Namespace) -> None:
     """Add LLaVA generated captions to the dataset.
 
@@ -266,7 +273,7 @@ def main(args: Namespace) -> None:
                            image_output_key=args.image_output_key,
                            height=args.height,
                            width=args.width)
-    dataset_len = len(dataset)
+    dataset_len = dataset.num_samples
     # Device should be first gpu if available, else cpu
     device = torch.device(f'cuda:{dist.get_local_rank()}' if torch.cuda.is_available() else 'cpu')
     captioner = LLaVACaptioner(model_name=args.model_name,
@@ -281,19 +288,16 @@ def main(args: Namespace) -> None:
     columns = dict(zip(reader.column_names, reader.column_encodings))
     columns[args.output_caption_key] = 'str'
 
-    # Construct the start and end indices for the dataset. We want each rank to process a subset of the dataset.
-    if args.end is not None:
-        # If end has been specified, need each rank to process a subset of the specified interval.
-        end = args.end
-        samples_per_rank = (end - args.start) // dist.get_world_size()
-        start_idx = args.start + dist.get_local_rank() * samples_per_rank
-        end_idx = start_idx + samples_per_rank
-    else:
-        # If end has not been specified, each rank processes all the data it has been given.
-        start_idx = args.start
-        end_idx = dataset_len
+    # Construct the start and end indices for this rank. We want each rank to process a subset of the dataset.
+    end = args.end if args.end is not None else dataset_len
+    samples_per_rank = (end - args.start) // dist.get_world_size()
+    start_idx = args.start + dist.get_local_rank() * samples_per_rank
+    end_idx = start_idx + samples_per_rank
     if not args.wandb_disabled:
         wandb.log({'start_idx': start_idx, 'end_idx': end_idx, 'dataset_len': dataset_len})
+    # Start prefetching samples
+    prefetch_thread = threading.Thread(target=prefetch_samples, args=(dataset, start_idx, end_idx))
+    prefetch_thread.start()
     # Each rank needs it's own output
     output_dir = args.output + f'/{dist.get_global_rank()}'
     # Process each subset
@@ -330,7 +334,6 @@ def main(args: Namespace) -> None:
                     'avg. time per sample (s)': time_per_sample,
                     'est. time remaining (s)': est_time_remaining
                 })
-            dist.barrier()
 
 
 if __name__ == '__main__':
