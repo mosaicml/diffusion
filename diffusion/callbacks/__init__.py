@@ -4,12 +4,14 @@
 """Custom callbacks for Diffusion."""
 
 from diffusion.callbacks.log_diffusion_images import LogAutoencoderImages, LogDiffusionImages
+from diffusion.callbacks.log_latent_statistics import LogLatentStatistics
 from diffusion.callbacks.nan_catcher import NaNCatcher
 from diffusion.callbacks.scheduled_garbage_collector import ScheduledGarbageCollector
 
 __all__ = [
     'LogAutoencoderImages',
     'LogDiffusionImages',
+    'LogLatentStatistics',
     'NaNCatcher',
     'ScheduledGarbageCollector',
 ]
