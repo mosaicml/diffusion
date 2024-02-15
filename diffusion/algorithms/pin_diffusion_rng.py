@@ -3,7 +3,7 @@
 
 """Algorithm to pin diffusion process noise."""
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import torch
 from composer.core import Algorithm, Event, State
@@ -18,8 +18,8 @@ class PinDiffusionRNG(Algorithm):
 
     def __init__(self) -> None:
         self.seed = 0
-        self.train_rng_state = None
-        self.eval_rng_state = None
+        self.train_rng_state: Optional[torch.Tensor] = None
+        self.eval_rng_state: Optional[torch.Tensor] = None
         self.train_rng_generator = torch.Generator()
         self.eval_rng_generator = torch.Generator()
 
