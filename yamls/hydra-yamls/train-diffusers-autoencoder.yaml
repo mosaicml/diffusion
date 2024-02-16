@@ -1,0 +1,114 @@
+name:  # Insert wandb run name
+project:  # Insert wandb project name
+batch_size: 256 # Global train batch size, adjust as needed
+image_size: 256 # Size of images to use in training
+seed: 17
+eval_first: true # Runs eval before starting training
+model:
+  _target_: diffusion.models.models.build_diffusers_autoencoder
+  model_name: stabilityai/stable-diffusion-2-base # Model name to use.
+  kl_divergence_weight: 0.1 # Loss weight for the VAE KL divergence term, adjust as needed
+  lpips_weight: 1.0 # Loss weight for LPIPS loss, adjust as needed
+  discriminator_weight: 0.1 # Loss weight for discriminator, adjust as needed
+  pretrained: false # Whether to use a pretrained model, false to train from scratch using the model_name config.
+dataset:
+  train_batch_size: ${batch_size}
+  eval_batch_size: ${batch_size}
+  train_dataset:
+    # Currently we are using the image_caption dataloader, though captions are not necessary for the autoencoder.
+    _target_: diffusion.datasets.image_caption.build_streaming_image_caption_dataloader
+    remote: # Path(s) to object store bucket for training data
+    local: # Path(s) to local training dataset cache
+    batch_size: ${batch_size}
+    tokenizer_name_or_path: stabilityai/stable-diffusion-2-base
+    caption_drop_prob: 0.1
+    resize_size: ${image_size}
+    image_key: image # Image key in the train dataset
+    caption_key: caption # Caption key in the train dataset
+    crop_type: random
+    dataloader_kwargs:
+      drop_last: true
+      num_workers: 8
+      prefetch_factor: 2
+      persistent_workers: true
+      pin_memory: true
+    streaming_kwargs:
+      shuffle: true
+      download_timeout: 300
+      num_canonical_nodes: 1
+  eval_dataset:
+    _target_: diffusion.datasets.image_caption.build_streaming_image_caption_dataloader
+    remote: # Path(s) to object store bucket for eval data
+    local: # Path(s) to local eval dataset cache
+    batch_size: ${batch_size}
+    resize_size: ${image_size}
+    tokenizer_name_or_path: stabilityai/stable-diffusion-2-base
+    caption_drop_prob: 0.0
+    image_key: image # Image key in the eval dataset
+    caption_key: caption # Caption key in the eval dataset
+    dataloader_kwargs:
+      drop_last: true
+      num_workers: 8
+      prefetch_factor: 2
+      persistent_workers: true
+      pin_memory: true
+    streaming_kwargs:
+      shuffle: false
+      download_timeout: 300
+      num_canonical_nodes: 1
+optimizer:
+  _target_: torch.optim.AdamW
+autoencoder_optimizer: # Optimizer for the autoencoder
+  lr: 4.5e-5
+  weight_decay: 0.01
+  betas:
+  - 0.9
+  - 0.95
+  eps: 1.0e-08
+discriminator_optimizer: # Optimizer for the discriminator, if one wants different params for it
+  lr: 4.5e-5
+  weight_decay: 0.01
+  betas:
+  - 0.9
+  - 0.95
+  eps: 1.0e-08
+scheduler:
+  _target_: composer.optim.CosineAnnealingWithWarmupScheduler
+  t_warmup: 100ba # Warmup iterations, adjust as needed
+logger:
+  wandb:
+    _target_: composer.loggers.wandb_logger.WandBLogger
+    name: ${name}
+    project: ${project}
+    group: ${name}
+callbacks:
+  speed_monitor:
+    _target_: composer.callbacks.speed_monitor.SpeedMonitor
+    window_size: 10
+  lr_monitor:
+    _target_: composer.callbacks.lr_monitor.LRMonitor
+  memory_monitor:
+    _target_: composer.callbacks.memory_monitor.MemoryMonitor
+  runtime_estimator:
+    _target_: composer.callbacks.runtime_estimator.RuntimeEstimator
+  latent_statistics_logger:
+    _target_: diffusion.callbacks.log_latent_statistics.LogLatentStatistics # Useful to track scale of latents during training
+  image_logger:
+    _target_: diffusion.callbacks.log_diffusion_images.LogAutoencoderImages # Logging callback for autoencoder reconstructions
+    max_images: 20
+algorithms:
+  discriminator_schedule:
+    _target_: diffusion.algorithms.DiscriminatorSchedule
+    start_iteration: 0ba
+trainer:
+  _target_: composer.Trainer
+  device: gpu
+  max_duration: 1ep # Adust as needed
+  eval_interval: 1000ba # Adjust as needed
+  device_train_microbatch_size: 16 # Adjust as needed
+  run_name: ${name}
+  seed: ${seed}
+  save_folder:  # Insert path to save folder or bucket
+  save_interval: 10000ba # Adjust as needed
+  save_overwrite: false
+  autoresume: true
