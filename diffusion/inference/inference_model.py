@@ -6,6 +6,7 @@
 import base64
 import io
 from typing import Any, Dict, List, Optional
+from google.protobuf.json_format import MessageToDict
 
 import torch
 from composer.utils.file_helpers import get_file
@@ -64,32 +65,24 @@ class StableDiffusionInference():
         model.to(self.device)
         self.model = model.eval()
 
-    def predict(self, model_requests: List[Dict[str, Any]]):
+    def predict(self, model_requests):
         prompts = []
         negative_prompts = []
         generate_kwargs = {}
 
         # assumes the same generate_kwargs across all samples
         for req in model_requests:
-            if 'input' not in req:
-                raise RuntimeError('"input" must be provided to generate call')
-            inputs = req['input']['processed_input']
-
+            try:
+                input = req.image_input
+            except:
+                raise RuntimeError('"input" must contain image input')
             # Prompts and negative prompts if available
-            if isinstance(inputs, str):
-                prompts.append(inputs)
-            elif isinstance(inputs, List):
-                prompts.extend(inputs)
-            elif isinstance(inputs, Dict):
-                if 'prompt' not in inputs:
-                    raise RuntimeError('"prompt" must be provided to generate call if using a dict as input')
-                prompts.append(inputs['prompt'])
-                if 'negative_prompt' in inputs:
-                    negative_prompts.append(inputs['negative_prompt'])
-            else:
-                raise RuntimeError(f'Input must be of type string or dict, but it is type: {type(inputs)}')
-
-            generate_kwargs = req['parameters']
+            prompt = input.prompt
+            prompts.append(prompt)
+            negative_prompt = input.negative_prompt if input.HasField('negative_prompt') else None
+            if negative_prompt:
+                negative_prompts.append(negative_prompt)
+            generate_kwargs = MessageToDict(input.parameters)
 
         # Check for prompts
         if len(prompts) == 0:
