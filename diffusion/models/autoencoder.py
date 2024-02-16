@@ -13,6 +13,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from composer.models import ComposerModel
+from composer.utils import dist
+from composer.utils.file_helpers import get_file
 from diffusers import AutoencoderKL
 from torchmetrics import MeanMetric, MeanSquaredError, Metric
 from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
@@ -225,6 +227,52 @@ class Decoder(nn.Module):
         return h
 
 
+class GaussianDistribution:
+    """Gaussian distribution parameterized with mean and log variance."""
+
+    def __init__(self, mean: torch.Tensor, log_var: torch.Tensor):
+        self.mean = mean
+        self.log_var = log_var
+        self.var = torch.exp(log_var)
+        self.std = torch.exp(0.5 * log_var)
+
+    def __getitem__(self, key):
+        if key == 'latent_dist':
+            return self
+        elif key == 'mean':
+            return self.mean
+        elif key == 'log_var':
+            return self.log_var
+        else:
+            raise KeyError(key)
+
+    @property
+    def latent_dist(self):
+        return self
+
+    def sample(self) -> torch.Tensor:
+        """Sample from the distribution."""
+        return self.mean + self.std * torch.randn_like(self.mean)
+
+
+class AutoEncoderOutput:
+    """Output from an autoencoder."""
+
+    def __init__(self, x_recon: torch.Tensor):
+        self.x_recon = x_recon
+
+    def __getitem__(self, key):
+        if key == 'x_recon':
+            return self.x_recon
+        else:
+            raise KeyError(key)
+
+    @property
+    def sample(self) -> torch.Tensor:
+        """Sample from the output."""
+        return self.x_recon
+
+
 class AutoEncoder(nn.Module):
     """Autoencoder module for training a latent diffusion model.
 
@@ -257,32 +305,35 @@ class AutoEncoder(nn.Module):
                  zero_init_last: bool = False,
                  use_attention: bool = True):
         super().__init__()
-        self.input_channels = input_channels
-        self.output_channels = output_channels
-        self.hidden_channels = hidden_channels
-        self.latent_channels = latent_channels
-        self.double_latent_channels = double_latent_channels
-        self.channel_multipliers = channel_multipliers
-        self.num_residual_blocks = num_residual_blocks
-        self.use_conv_shortcut = use_conv_shortcut
-        self.dropout_probability = dropout_probability
-        self.resample_with_conv = resample_with_conv
-        self.zero_init_last = zero_init_last
-        self.use_attention = use_attention
+        self.config = {}
+        self.config['input_channels'] = input_channels
+        self.config['output_channels'] = output_channels
+        self.config['hidden_channels'] = hidden_channels
+        self.config['latent_channels'] = latent_channels
+        self.config['double_latent_channels'] = double_latent_channels
+        self.config['channel_multipliers'] = channel_multipliers
+        self.config['num_residual_blocks'] = num_residual_blocks
+        self.config['use_conv_shortcut'] = use_conv_shortcut
+        self.config['dropout_probability'] = dropout_probability
+        self.config['resample_with_conv'] = resample_with_conv
+        self.config['use_attention'] = use_attention
+        self.config['zero_init_last'] = zero_init_last
+        self.set_extra_state(None)
 
-        self.encoder = Encoder(input_channels=self.input_channels,
-                               hidden_channels=self.hidden_channels,
-                               latent_channels=self.latent_channels,
-                               double_latent_channels=self.double_latent_channels,
-                               channel_multipliers=self.channel_multipliers,
-                               num_residual_blocks=self.num_residual_blocks,
-                               use_conv_shortcut=self.use_conv_shortcut,
-                               dropout_probability=self.dropout_probability,
-                               resample_with_conv=self.resample_with_conv,
-                               zero_init_last=self.zero_init_last,
-                               use_attention=self.use_attention)
+        self.encoder = Encoder(input_channels=self.config['input_channels'],
+                               hidden_channels=self.config['hidden_channels'],
+                               latent_channels=self.config['latent_channels'],
+                               double_latent_channels=self.config['double_latent_channels'],
+                               channel_multipliers=self.config['channel_multipliers'],
+                               num_residual_blocks=self.config['num_residual_blocks'],
+                               use_conv_shortcut=self.config['use_conv_shortcut'],
+                               dropout_probability=self.config['dropout_probability'],
+                               resample_with_conv=self.config['resample_with_conv'],
+                               zero_init_last=self.config['zero_init_last'],
+                               use_attention=self.config['use_attention'])
 
-        channels = 2 * self.latent_channels if self.double_latent_channels else self.latent_channels
+        channels = 2 * self.config['latent_channels'] if self.config['double_latent_channels'] else self.config[
+            'latent_channels']
         self.quant_conv = nn.Conv2d(channels, channels, kernel_size=1, stride=1, padding=0)
         nn.init.kaiming_normal_(self.quant_conv.weight, nonlinearity='linear')
         # KL divergence is minimized when mean is 0.0 and log variance is 0.0
@@ -293,46 +344,58 @@ class AutoEncoder(nn.Module):
         if self.quant_conv.bias is not None:
             self.quant_conv.bias.data[channels // 2:].fill_(-0.9431)
 
-        self.decoder = Decoder(latent_channels=self.latent_channels,
-                               output_channels=self.output_channels,
-                               hidden_channels=self.hidden_channels,
-                               channel_multipliers=self.channel_multipliers,
-                               num_residual_blocks=self.num_residual_blocks,
-                               use_conv_shortcut=self.use_conv_shortcut,
-                               dropout_probability=self.dropout_probability,
-                               resample_with_conv=self.resample_with_conv,
-                               zero_init_last=self.zero_init_last,
-                               use_attention=self.use_attention)
+        self.decoder = Decoder(latent_channels=self.config['latent_channels'],
+                               output_channels=self.config['output_channels'],
+                               hidden_channels=self.config['hidden_channels'],
+                               channel_multipliers=self.config['channel_multipliers'],
+                               num_residual_blocks=self.config['num_residual_blocks'],
+                               use_conv_shortcut=self.config['use_conv_shortcut'],
+                               dropout_probability=self.config['dropout_probability'],
+                               resample_with_conv=self.config['resample_with_conv'],
+                               zero_init_last=self.config['zero_init_last'],
+                               use_attention=self.config['use_attention'])
 
-        self.post_quant_conv = nn.Conv2d(self.latent_channels, self.latent_channels, kernel_size=1, stride=1, padding=0)
+        self.post_quant_conv = nn.Conv2d(self.config['latent_channels'],
+                                         self.config['latent_channels'],
+                                         kernel_size=1,
+                                         stride=1,
+                                         padding=0)
         nn.init.kaiming_normal_(self.post_quant_conv.weight, nonlinearity='linear')
+
+    @property
+    def device(self) -> torch.device:
+        return next(self.parameters()).device
+
+    def get_extra_state(self):
+        return {'config': self.config}
+
+    def set_extra_state(self, state):
+        pass
 
     def get_last_layer_weight(self) -> torch.Tensor:
         """Get the weight of the last layer of the decoder."""
         return self.decoder.conv_out.weight
 
-    def encode(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
+    def encode(self, x: torch.Tensor) -> GaussianDistribution:
         """Encode an input tensor into a latent tensor."""
         h = self.encoder(x)
         moments = self.quant_conv(h)
         # Split the moments into mean and log variance
-        mean, log_var = moments[:, :self.latent_channels], moments[:, self.latent_channels:]
-        return {'mean': mean, 'log_var': log_var}
+        mean, log_var = moments[:, :self.config['latent_channels']], moments[:, self.config['latent_channels']:]
+        return GaussianDistribution(mean, log_var)
 
-    def decode(self, z: torch.Tensor) -> Dict[str, torch.Tensor]:
+    def decode(self, z: torch.Tensor) -> AutoEncoderOutput:
         """Decode a latent tensor into an output tensor."""
         z = self.post_quant_conv(z)
         x_recon = self.decoder(z)
-        return {'x_recon': x_recon}
+        return AutoEncoderOutput(x_recon)
 
     def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
         """Forward through the autoencoder."""
-        encoded = self.encode(x)
-        mean, log_var = encoded['mean'], encoded['log_var']
-        # Reparameteriztion trick
-        z = mean + torch.exp(0.5 * log_var) * torch.randn_like(mean)
+        encoded_dist = self.encode(x)
+        z = encoded_dist.sample()
         x_recon = self.decode(z)['x_recon']
-        return {'x_recon': x_recon, 'latents': z, 'mean': mean, 'log_var': log_var}
+        return {'x_recon': x_recon, 'latents': z, 'mean': encoded_dist.mean, 'log_var': encoded_dist.log_var}
 
 
 class NlayerDiscriminator(nn.Module):
@@ -599,7 +662,7 @@ class ComposerAutoEncoder(ComposerModel):
             metric.update(outputs['x_recon'], batch[self.input_key])
 
 
-class ComposerDiffusersAutoEncoder(ComposerModel):
+class ComposerDiffusersAutoEncoder(ComposerAutoEncoder):
     """Composer wrapper for the Huggingface Diffusers Autoencoder.
 
     Args:
@@ -609,20 +672,10 @@ class ComposerDiffusersAutoEncoder(ComposerModel):
     """
 
     def __init__(self, model: AutoencoderKL, autoencoder_loss: AutoEncoderLoss, input_key: str = 'image'):
-        super().__init__()
+        super().__init__(model, autoencoder_loss, input_key)
         self.model = model
         self.autoencoder_loss = autoencoder_loss
         self.input_key = input_key
-
-        # Set up train metrics
-        train_metrics = [MeanSquaredError()]
-        self.train_metrics = {metric.__class__.__name__: metric for metric in train_metrics}
-        # Set up val metrics
-        psnr_metric = PeakSignalNoiseRatio(data_range=2.0)
-        ssim_metric = StructuralSimilarityIndexMeasure(data_range=2.0)
-        lpips_metric = LearnedPerceptualImagePatchSimilarity(net_type='vgg')
-        val_metrics = [MeanSquaredError(), MeanMetric(), lpips_metric, psnr_metric, ssim_metric]
-        self.val_metrics = {metric.__class__.__name__: metric for metric in val_metrics}
 
     def get_last_layer_weight(self) -> torch.Tensor:
         """Get the weight of the last layer of the decoder."""
@@ -635,33 +688,51 @@ class ComposerDiffusersAutoEncoder(ComposerModel):
         recon = self.model.decode(latents).sample
         return {'x_recon': recon, 'latents': latents, 'mean': mean, 'log_var': log_var}
 
-    def loss(self, outputs, batch):
-        last_layer = self.get_last_layer_weight()
-        return self.autoencoder_loss(outputs, batch, last_layer)
 
-    def eval_forward(self, batch, outputs=None):
-        if outputs is not None:
-            return outputs
-        return self.forward(batch)
+def load_autoencoder(load_path: str, local_path: str = '/tmp/autoencoder_weights.pt', torch_dtype=None):
+    """Function to load an AutoEncoder from a composer checkpoint without the loss weights.
 
-    def get_metrics(self, is_train: bool = False):
-        if is_train:
-            metrics = self.train_metrics
-        else:
-            metrics = self.val_metrics
-        return metrics
+    Will also load the latent statistics if the statistics tracking callback was used.
 
-    def update_metric(self, batch, outputs, metric):
-        clamped_imgs = outputs['x_recon'].clamp(-1, 1)
-        if isinstance(metric, MeanMetric):
-            metric.update(torch.square(outputs['latents']))
-        elif isinstance(metric, LearnedPerceptualImagePatchSimilarity):
-            metric.update(clamped_imgs, batch[self.input_key])
-        elif isinstance(metric, PeakSignalNoiseRatio):
-            metric.update(clamped_imgs, batch[self.input_key])
-        elif isinstance(metric, StructuralSimilarityIndexMeasure):
-            metric.update(clamped_imgs, batch[self.input_key])
-        elif isinstance(metric, MeanSquaredError):
-            metric.update(outputs['x_recon'], batch[self.input_key])
-        else:
-            metric.update(outputs['x_recon'], batch[self.input_key])
+    Args:
+        load_path (str): Path to the composer checkpoint. Can be a local folder, URL, or composer object store.
+        local_path (str): Local path to save the autoencoder weights to. Default: `/tmp/autoencoder_weights.pt`.
+        torch_dtype (torch.dtype): Torch dtype to cast the weights to. Default: `None`.
+
+    Returns:
+        autoencoder (AutoEncoder): AutoEncoder model with weights loaded from the checkpoint.
+        latent_statistics (Dict[str, Union[list, float]]): Dictionary of latent statistics if present, else `None`.
+    """
+    # Download the autoencoder weights and init them
+    if dist.get_local_rank() == 0:
+        get_file(path=load_path, destination=local_path)
+    with dist.local_rank_zero_download_and_wait(local_path):
+        # Load the autoencoder weights from the state dict
+        state_dict = torch.load(local_path, map_location='cpu')
+    # Get the config from the state dict and init the model using it
+    autoencoder_config = state_dict['state']['model']['model._extra_state']['config']
+    autoencoder = AutoEncoder(**autoencoder_config)
+    # Need to clean up the state dict to remove loss and metrics.
+    cleaned_state_dict = {}
+    for key in list(state_dict['state']['model'].keys()):
+        if key.split('.')[0] == 'model':
+            cleaned_key = '.'.join(key.split('.')[1:])
+            cleaned_state_dict[cleaned_key] = state_dict['state']['model'][key]
+    # Load the cleaned state dict into the model
+    autoencoder.load_state_dict(cleaned_state_dict, strict=True)
+    if torch_dtype is not None:
+        autoencoder = autoencoder.to(dtype=torch_dtype)
+    # If present, extract the channel means and standard deviations from the state dict
+    if 'LogLatentStatistics' in state_dict['state']['callbacks']:
+        latent_statistics = {'latent_channel_means': [], 'latent_channel_stds': []}
+        logged_latent_stats = state_dict['state']['callbacks']['LogLatentStatistics']
+        # Extract the channelwise latent means and stds
+        for i in range(autoencoder_config['latent_channels']):
+            latent_statistics['latent_channel_means'].append(logged_latent_stats[f'channel_mean_{i}'])
+            latent_statistics['latent_channel_stds'].append(logged_latent_stats[f'channel_std_{i}'])
+        # Extract the global latent means and second moment
+        latent_statistics['global_mean'] = logged_latent_stats['global_mean']
+        latent_statistics['global_std'] = logged_latent_stats['global_std']
+    else:
+        latent_statistics = None
+    return autoencoder, latent_statistics
