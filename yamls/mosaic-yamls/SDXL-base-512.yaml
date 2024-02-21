@@ -1,0 +1,124 @@
+name: SDXL-base-512
+image: mosaicml/pytorch_vision:1.13.1_cu117-python3.10-ubuntu20.04
+compute:
+  gpus:  # Number of GPUs to use
+
+  ## These configurations are optional
+  # cluster: TODO # Name of the cluster to use for this run
+  # gpu_type: a100_80gb # Type of GPU to use. We use a100_80gb in our experiments
+
+integrations:
+  - integration_type: "git_repo"
+    git_repo: mosaicml/diffusion
+    git_branch: main
+    pip_install: .[all]
+  - integration_type: "wandb"
+    project: # Insert wandb project name
+    entity: # Insert wandb entity name
+env_variables:
+- key: HYDRA_FULL_ERROR
+  value: '1' # Set to '0' to limit Hydra tracebacks
+command: |
+  cd diffusion
+  composer run.py --config-path /mnt/config --config-name parameters
+parameters:
+  project: # Insert wandb project name
+  name: # Insert wandb run name
+  seed: 17
+  eval_first: false
+  algorithms:
+    low_precision_groupnorm:
+      attribute: unet
+      precision: amp_fp16
+    low_precision_layernorm:
+      attribute: unet
+      precision: amp_fp16
+  model:
+    _target_: diffusion.models.models.stable_diffusion_xl
+    pretrained: false
+    clip_qkv: null
+    model_name: stabilityai/stable-diffusion-xl-base-1.0
+    unet_model_name: stabilityai/stable-diffusion-xl-base-1.0
+    vae_model_name: madebyollin/sdxl-vae-fp16-fix
+    precomputed_latents: false
+    encode_latents_in_fp16: true
+    fsdp: true
+    val_metrics:
+      - _target_: torchmetrics.MeanSquaredError
+    val_guidance_scales: []
+    loss_bins: []
+  dataset:
+    train_batch_size: # Global training batch size
+    eval_batch_size: # Global evaluation batch size
+    train_dataset:
+      _target_: diffusion.datasets.image_caption.build_streaming_image_caption_dataloader
+      remote:
+        # Path to object store bucket(s)
+      local:
+        # Path to corresponding local dataset(s)
+      tokenizer_name_or_path: stabilityai/stable-diffusion-xl-base-1.0
+      caption_drop_prob: 0.1
+      caption_key: caption
+      image_key: jpg
+      resize_size: 512
+      crop_type: random
+      dataloader_kwargs:
+        drop_last: true
+        num_workers: 8
+        persistent_workers: true
+        pin_memory: true
+        prefetch_factor: 2
+      streaming_kwargs:
+        cache_limit: 5tb
+        download_timeout: 12000
+        num_canonical_nodes: 8
+        shuffle: true
+    eval_dataset:
+      _target_: diffusion.datasets.coco.coco_captions.build_streaming_cocoval_dataloader
+      remote:  # Path to object store bucket
+      local: # Path to local dataset cache
+      resize_size: 512
+      prefetch_factor: 2
+      num_workers: 8
+      persistent_workers: True
+      pin_memory: True
+  optimizer:
+    _target_: torch.optim.AdamW
+    lr: 1.0e-4
+    weight_decay: 0.01
+  scheduler:
+    _target_: composer.optim.LinearWithWarmupScheduler
+    t_warmup: 10000ba
+    alpha_f: 1.0
+  logger:
+    wandb:
+      _target_: composer.loggers.wandb_logger.WandBLogger
+      name: ${name}
+      project: ${project}
+      group: ${name}
+  callbacks:
+    speed_monitor:
+      _target_: composer.callbacks.speed_monitor.SpeedMonitor
+      window_size: 10
+    lr_monitor:
+      _target_: composer.callbacks.lr_monitor.LRMonitor
+    memory_monitor:
+      _target_: composer.callbacks.memory_monitor.MemoryMonitor
+    runtime_estimator:
+      _target_: composer.callbacks.runtime_estimator.RuntimeEstimator
+    optimizer_monitor:
+      _target_: composer.callbacks.OptimizerMonitor
+  trainer:
+    _target_: composer.Trainer
+    device: gpu
+    max_duration: 200000ba
+    eval_interval: 10000ba
+    device_train_microbatch_size: # Device microbatch size
+    run_name: ${name}
+    seed: ${seed}
+    save_folder:  # Insert path to save folder or bucket
+    save_interval: 10000ba
+    save_overwrite: true
+    autoresume: false
+    fsdp_config:
+      sharding_strategy: "SHARD_GRAD_OP"

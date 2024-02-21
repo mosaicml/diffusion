@@ -19,7 +19,7 @@ install_requires = [
     'lpips==0.1.4',
     'clean-fid',
     'clip@git+https://github.com/openai/CLIP.git',
-    'gradio==4.5.0',
+    'gradio==4.14.0',
 ]
 
 extras_require = {}

@@ -4,7 +4,8 @@
 """Constructors for diffusion models."""
 
 import logging
-from typing import List, Optional, Tuple
+import math
+from typing import List, Optional, Tuple, Union
 
 import torch
 from composer.devices import DeviceGPU
@@ -15,7 +16,8 @@ from torchmetrics.multimodal.clip_score import CLIPScore
 from transformers import (AutoModel, AutoTokenizer, CLIPTextModel, CLIPTextModelWithProjection, CLIPTokenizer,
                           PretrainedConfig)
 
-from diffusion.models.autoencoder import AutoEncoder, AutoEncoderLoss, ComposerAutoEncoder, ComposerDiffusersAutoEncoder
+from diffusion.models.autoencoder import (AutoEncoder, AutoEncoderLoss, ComposerAutoEncoder,
+                                          ComposerDiffusersAutoEncoder, load_autoencoder)
 from diffusion.models.layers import ClippedAttnProcessor2_0, ClippedXFormersAttnProcessor, zero_module
 from diffusion.models.pixel_diffusion import PixelDiffusion
 from diffusion.models.stable_diffusion import StableDiffusion
@@ -34,7 +36,10 @@ log = logging.getLogger(__name__)
 def stable_diffusion_2(
     model_name: str = 'stabilityai/stable-diffusion-2-base',
     pretrained: bool = True,
+    autoencoder_path: Optional[str] = None,
+    autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
     prediction_type: str = 'epsilon',
+    latent_scale: Union[float, str] = 0.18215,
     offset_noise: Optional[float] = None,
     train_metrics: Optional[List] = None,
     val_metrics: Optional[List] = None,
@@ -56,8 +61,13 @@ def stable_diffusion_2(
     Args:
         model_name (str): Name of the model to load. Defaults to 'stabilityai/stable-diffusion-2-base'.
         pretrained (bool): Whether to load pretrained weights. Defaults to True.
+        autoencoder_path (optional, str): Path to autoencoder weights if using custom autoencoder. If not specified,
+            will use the vae from `model_name`. Default `None`.
+        autoencoder_local_path (optional, str): Path to autoencoder weights. Default: `/tmp/autoencoder_weights.pt`.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
+        latent_scale (float, str): The scale of the autoencoder latents. Either a float for the scaling value,
+            or `'latent_statistics'` to try to use the value from the autoencoder checkpoint. Defaults to `0.18215`.
         train_metrics (list, optional): List of metrics to compute during training. If None, defaults to
             [MeanSquaredError()].
         val_metrics (list, optional): List of metrics to compute during validation. If None, defaults to
@@ -76,6 +86,11 @@ def stable_diffusion_2(
         clip_qkv (float, optional): If not None, clip the qkv values to this value. Defaults to None.
         use_xformers (bool): Whether to use xformers for attention. Defaults to True.
     """
+    if isinstance(latent_scale, str):
+        latent_scale = latent_scale.lower()
+        if latent_scale != 'latent_statistics':
+            raise ValueError(f'Invalid latent scale {latent_scale}. Must be a float or "latent_statistics".')
+
     if train_metrics is None:
         train_metrics = [MeanSquaredError()]
     if val_metrics is None:
@@ -89,20 +104,46 @@ def stable_diffusion_2(
         if isinstance(metric, CLIPScore):
             metric.requires_grad_(False)
 
+    precision = torch.float16 if encode_latents_in_fp16 else None
+    # Make the text encoder
+    text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder', torch_dtype=precision)
+    tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer')
+
+    # Make the autoencoder
+    if autoencoder_path is None:
+        if latent_scale == 'latent_statistics':
+            raise ValueError('Cannot use tracked latent_statistics when using the pretrained vae.')
+        # Use the pretrained vae
+        downsample_factor = 8
+        vae = AutoencoderKL.from_pretrained(model_name, subfolder='vae', torch_dtype=precision)
+    else:
+        # Use a custom autoencoder
+        vae, latent_statistics = load_autoencoder(autoencoder_path, autoencoder_local_path, torch_dtype=precision)
+        if latent_statistics is not None and latent_scale == 'latent_statistics':
+            assert isinstance(latent_statistics['global_mean'], float)
+            assert isinstance(latent_statistics['global_std'], float)
+            second_moment = latent_statistics['global_mean']**2 + latent_statistics['global_std']**2
+            latent_scale = 1 / math.sqrt(second_moment)
+        else:
+            raise ValueError(
+                'Must specify latent scale when using a custom autoencoder without tracking latent statistics.')
+        downsample_factor = 2**(len(vae.config['channel_multipliers']) - 1)
+
+    # Make the unet
     if pretrained:
         unet = UNet2DConditionModel.from_pretrained(model_name, subfolder='unet')
+        if autoencoder_path is not None and vae.config['latent_channels'] != 4:
+            raise ValueError(f'Pretrained unet has 4 latent channels but the vae has {vae.latent_channels}.')
     else:
-        config = PretrainedConfig.get_config_dict(model_name, subfolder='unet')
-        unet = UNet2DConditionModel(**config[0])
+        unet_config = PretrainedConfig.get_config_dict(model_name, subfolder='unet')[0]
+        if autoencoder_path is not None:
+            # Adapt the unet config to account for differing number of latent channels if necessary
+            unet_config['in_channels'] = vae.config['latent_channels']
+            unet_config['out_channels'] = vae.config['latent_channels']
+        # Init the unet from the config
+        unet = UNet2DConditionModel(**unet_config)
 
-    if encode_latents_in_fp16:
-        vae = AutoencoderKL.from_pretrained(model_name, subfolder='vae', torch_dtype=torch.float16)
-        text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder', torch_dtype=torch.float16)
-    else:
-        vae = AutoencoderKL.from_pretrained(model_name, subfolder='vae')
-        text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder')
-
-    tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer')
+    # Make the noise schedulers
     noise_scheduler = DDPMScheduler.from_pretrained(model_name, subfolder='scheduler')
     inference_noise_scheduler = DDIMScheduler(num_train_timesteps=noise_scheduler.config.num_train_timesteps,
                                               beta_start=noise_scheduler.config.beta_start,
@@ -113,6 +154,7 @@ def stable_diffusion_2(
                                               set_alpha_to_one=noise_scheduler.config.set_alpha_to_one,
                                               prediction_type=prediction_type)
 
+    # Make the composer model
     model = StableDiffusion(
         unet=unet,
         vae=vae,
@@ -121,6 +163,8 @@ def stable_diffusion_2(
         noise_scheduler=noise_scheduler,
         inference_noise_scheduler=inference_noise_scheduler,
         prediction_type=prediction_type,
+        latent_scale=latent_scale,
+        downsample_factor=downsample_factor,
         offset_noise=offset_noise,
         train_metrics=train_metrics,
         val_metrics=val_metrics,
@@ -136,7 +180,8 @@ def stable_diffusion_2(
         model = DeviceGPU().module_to_device(model)
         if is_xformers_installed and use_xformers:
             model.unet.enable_xformers_memory_efficient_attention()
-            model.vae.enable_xformers_memory_efficient_attention()
+            if hasattr(model.vae, 'enable_xformers_memory_efficient_attention'):
+                model.vae.enable_xformers_memory_efficient_attention()
 
     if clip_qkv is not None:
         if is_xformers_installed and use_xformers:
@@ -154,7 +199,10 @@ def stable_diffusion_xl(
     unet_model_name: str = 'stabilityai/stable-diffusion-xl-base-1.0',
     vae_model_name: str = 'madebyollin/sdxl-vae-fp16-fix',
     pretrained: bool = True,
+    autoencoder_path: Optional[str] = None,
+    autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
     prediction_type: str = 'epsilon',
+    latent_scale: Union[float, str] = 0.13025,
     offset_noise: Optional[float] = None,
     train_metrics: Optional[List] = None,
     val_metrics: Optional[List] = None,
@@ -183,8 +231,13 @@ def stable_diffusion_xl(
             'madebyollin/sdxl-vae-fp16-fix' as the official VAE checkpoint (from
             'stabilityai/stable-diffusion-xl-base-1.0') is not compatible with fp16.
         pretrained (bool): Whether to load pretrained weights. Defaults to True.
+        autoencoder_path (optional, str): Path to autoencoder weights if using custom autoencoder. If not specified,
+            will use the vae from `model_name`. Default `None`.
+        autoencoder_local_path (optional, str): Path to autoencoder weights. Default: `/tmp/autoencoder_weights.pt`.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
+        latent_scale (float, str): The scale of the autoencoder latents. Either a float for the scaling value,
+            or `'latent_statistics'` to try to use the value from the autoencoder checkpoint. Defaults to `0.13025`.
         offset_noise (float, optional): The scale of the offset noise. If not specified, offset noise will not
             be used. Default `None`.
         train_metrics (list, optional): List of metrics to compute during training. If None, defaults to
@@ -204,6 +257,10 @@ def stable_diffusion_xl(
             of training.
         use_xformers (bool): Whether to use xformers for attention. Defaults to True.
     """
+    if isinstance(latent_scale, str):
+        latent_scale = latent_scale.lower()
+        if latent_scale != 'latent_statistics':
+            raise ValueError(f'Invalid latent scale {latent_scale}. Must be a float or "latent_statistics".')
     if train_metrics is None:
         train_metrics = [MeanSquaredError()]
     if val_metrics is None:
@@ -217,13 +274,50 @@ def stable_diffusion_xl(
         if isinstance(metric, CLIPScore):
             metric.requires_grad_(False)
 
+    # Make the text encoder
+    tokenizer = SDXLTokenizer(model_name)
+    text_encoder = SDXLTextEncoder(model_name, encode_latents_in_fp16)
+
+    precision = torch.float16 if encode_latents_in_fp16 else None
+    # Make the autoencoder
+    if autoencoder_path is None:
+        if latent_scale == 'latent_statistics':
+            raise ValueError('Cannot use tracked latent_statistics when using the pretrained vae.')
+        downsample_factor = 8
+        # Use the pretrained vae
+        try:
+            vae = AutoencoderKL.from_pretrained(vae_model_name, subfolder='vae', torch_dtype=precision)
+        except:  # for handling SDXL vae fp16 fixed checkpoint
+            vae = AutoencoderKL.from_pretrained(vae_model_name, torch_dtype=precision)
+    else:
+        # Use a custom autoencoder
+        vae, latent_statistics = load_autoencoder(autoencoder_path, autoencoder_local_path, torch_dtype=precision)
+        if latent_statistics is not None and latent_scale == 'latent_statistics':
+            assert isinstance(latent_statistics['global_mean'], float)
+            assert isinstance(latent_statistics['global_std'], float)
+            second_moment = latent_statistics['global_mean']**2 + latent_statistics['global_std']**2
+            latent_scale = 1 / math.sqrt(second_moment)
+        else:
+            raise ValueError(
+                'Must specify latent scale when using a custom autoencoder without tracking latent statistics.')
+        downsample_factor = 2**(len(vae.config['channel_multipliers']) - 1)
+
+    # Make the unet
     if pretrained:
         unet = UNet2DConditionModel.from_pretrained(unet_model_name, subfolder='unet')
+        if autoencoder_path is not None and vae.config['latent_channels'] != 4:
+            raise ValueError(f'Pretrained unet has 4 latent channels but the vae has {vae.latent_channels}.')
     else:
-        config = PretrainedConfig.get_config_dict(unet_model_name, subfolder='unet')
+        unet_config = PretrainedConfig.get_config_dict(unet_model_name, subfolder='unet')[0]
+        if autoencoder_path is not None:
+            # Adapt the unet config to account for differing number of latent channels if necessary
+            unet_config['in_channels'] = vae.config['latent_channels']
+            unet_config['out_channels'] = vae.config['latent_channels']
         if model_name == 'sdxl-e5':  # e5 + clip embedding dims + micro conditioning
-            config[0]['cross_attention_dim'] = 2304
-        unet = UNet2DConditionModel(**config[0])
+            unet_config]['cross_attention_dim'] = 2304
+        # Init the unet from the config
+        unet = UNet2DConditionModel(**unet_config)
+
         # Zero initialization trick
         for name, layer in unet.named_modules():
             # Final conv in ResNet blocks
@@ -246,6 +340,7 @@ def stable_diffusion_xl(
 
     scheduler_model_name = 'stabilityai/stable-diffusion-xl-base-1.0' if model_name == 'sdxl-e5' else model_name
     noise_scheduler = DDPMScheduler.from_pretrained(scheduler_model_name, subfolder='scheduler')
+
     inference_noise_scheduler = EulerDiscreteScheduler(num_train_timesteps=1000,
                                                        beta_start=0.00085,
                                                        beta_end=0.012,
@@ -257,6 +352,7 @@ def stable_diffusion_xl(
                                                        timestep_spacing='leading',
                                                        steps_offset=1)
 
+    # Make the composer model
     model = StableDiffusion(
         unet=unet,
         vae=vae,
@@ -265,6 +361,8 @@ def stable_diffusion_xl(
         noise_scheduler=noise_scheduler,
         inference_noise_scheduler=inference_noise_scheduler,
         prediction_type=prediction_type,
+        latent_scale=latent_scale,
+        downsample_factor=downsample_factor,
         offset_noise=offset_noise,
         train_metrics=train_metrics,
         val_metrics=val_metrics,
@@ -281,7 +379,8 @@ def stable_diffusion_xl(
         model = DeviceGPU().module_to_device(model)
         if is_xformers_installed and use_xformers:
             model.unet.enable_xformers_memory_efficient_attention()
-            model.vae.enable_xformers_memory_efficient_attention()
+            if hasattr(model.vae, 'enable_xformers_memory_efficient_attention'):
+                model.vae.enable_xformers_memory_efficient_attention()
 
     if clip_qkv is not None:
         if is_xformers_installed and use_xformers:

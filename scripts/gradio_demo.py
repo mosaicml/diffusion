@@ -71,8 +71,8 @@ if __name__ == '__main__':
             with gr.Row():
                 guidance_scale = gr.Slider(minimum=1, maximum=15, value=7, step=0.1, label='Guidance scale')
                 seed = gr.Slider(minimum=0, maximum=1e6, randomize=True, step=1, label='Random seed')
-                height = gr.inputs.Number(default=512, label='Image height')
-                width = gr.inputs.Number(default=512, label='Image width')
+                height = gr.Number(value=512, label='Image height')
+                width = gr.Number(value=512, label='Image width')
             with gr.Row():
                 generate_button = gr.Button('Generate')
             with gr.Row():
