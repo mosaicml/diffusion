@@ -31,7 +31,7 @@ coco_val_dataloader = build_streaming_cocoval_dataloader(
 )
 
 fid = FrechetInceptionDistance(normalize=True)
-model, _ = stable_diffusion_2(model_name='stabilityai/stable-diffusion-2-base', val_metrics=[fid])
+model = stable_diffusion_2(model_name='stabilityai/stable-diffusion-2-base', val_metrics=[fid])
 
 logger = WandBLogger(name='coco-val2014-10k-fid')
 

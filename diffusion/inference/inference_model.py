@@ -46,7 +46,7 @@ class StableDiffusionInference():
                  **kwargs):
         self.device = torch.cuda.current_device()
 
-        model, _ = stable_diffusion_2(
+        model = stable_diffusion_2(
             model_name=model_name,
             pretrained=pretrained,
             prediction_type=prediction_type,
@@ -143,7 +143,7 @@ class StableDiffusionXLInference():
                  **kwargs):
         self.device = torch.cuda.current_device()
 
-        model, _ = stable_diffusion_xl(
+        model = stable_diffusion_xl(
             model_name=model_name,
             unet_model_name=unet_model_name,
             vae_model_name=vae_model_name,

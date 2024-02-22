@@ -16,6 +16,7 @@ from composer.algorithms.low_precision_layernorm import apply_low_precision_laye
 from composer.core import Precision
 from composer.loggers import LoggerDestination
 from composer.utils import dist, reproducibility
+from diffusers.loaders import AttnProcsLayers
 from omegaconf import DictConfig, OmegaConf
 from torch.optim import Optimizer
 
@@ -60,13 +61,16 @@ def train(config: DictConfig) -> None:
     """
     reproducibility.seed_all(config['seed'])
 
-    model, trainable_params = hydra.utils.instantiate(config.model)
+    model = hydra.utils.instantiate(config.model)
 
-    # Check if this is training an autoencoder. If so, the optimizer needs different param groups
+    # Check if this is training an autoencoder, or uses LoRA. If so, the optimizer needs different param groups
     if hasattr(model, 'autoencoder_loss'):
         optimizer = make_autoencoder_optimizer(config, model)
+    elif getattr(config.model, 'lora_rank') and hasattr(model, 'unet'):
+        lora_layers = AttnProcsLayers(model.unet.attn_processors)
+        optimizer = hydra.utils.instantiate(config.optimizer, params=lora_layers.parameters())
     else:
-        optimizer = hydra.utils.instantiate(config.optimizer, params=trainable_params)
+        optimizer = hydra.utils.instantiate(config.optimizer, params=model.parameters())
 
     # Load train dataset. Currently this expects to load according to the datasetHparam method.
     # This means adding external datasets is currently not super easy. Will refactor or check for
