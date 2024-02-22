@@ -12,7 +12,7 @@ from diffusion.models.models import stable_diffusion_2
 
 def test_model_forward():
     # fp16 vae does not run on cpu
-    model, trainable_params = stable_diffusion_2(pretrained=False, fsdp=False, encode_latents_in_fp16=False)
+    model = stable_diffusion_2(pretrained=False, fsdp=False, encode_latents_in_fp16=False)
     batch_size = 1
     H = 8
     W = 8
