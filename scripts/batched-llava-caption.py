@@ -19,14 +19,14 @@ from tqdm.auto import tqdm
 try:
     from llava.constants import DEFAULT_IMAGE_TOKEN  # type: ignore
     from llava.constants import DEFAULT_IM_END_TOKEN, DEFAULT_IM_START_TOKEN, IMAGE_TOKEN_INDEX  # type: ignore
-    from llava.conversation import SeparatorStyle, conv_templates  # type: ignore
+    from llava.conversation import conv_templates  # type: ignore
     from llava.mm_utils import get_model_name_from_path, tokenizer_image_token  # type: ignore
     from llava.model.builder import load_pretrained_model  # type: ignore
     from llava.utils import disable_torch_init  # type: ignore
-except ImportError:
+except ImportError as e:
     raise ImportError(
         'LLaVA is not installed. Please install it with `pip install llava@git+https://github.com/haotian-liu/LLaVA.git`'
-    )
+    ) from e
 
 from PIL import Image, ImageOps
 from streaming import Stream
@@ -58,11 +58,6 @@ class LLaVACaptioner:
             self.generate = torch.compile(self.generate)
 
         self.input_ids: Optional[torch.Tensor] = None
-
-    def to(self, device: torch.device):
-        self.device = device
-        self.model = self.model.to(device)
-        return self
 
     def load_llava(self, quantize: bool = False, multi_gpu: bool = False):
         """Loads the llava model."""
@@ -303,7 +298,7 @@ def main(args: Namespace) -> None:
                                device=device)
 
     # Each rank needs it's own output
-    output_dir = args.output + f'/{dist.get_global_rank()}'
+    output_dir = os.path.join(args.output, str(dist.get_global_rank()))
     # Process each subset
     start_time = time.time()
     sample_time = time.time()
