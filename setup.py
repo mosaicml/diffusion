@@ -31,7 +31,7 @@ extras_require['dev'] = {
     'pyarrow==14.0.1',
 }
 
-extras_require['all'] = set(dep for deps in extras_require.values() for dep in deps)
+extras_require['all'] = {dep for deps in extras_require.values() for dep in deps}
 
 setup(
     name='diffusion',
