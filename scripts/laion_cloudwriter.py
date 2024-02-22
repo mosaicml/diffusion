@@ -253,7 +253,7 @@ def convert_and_upload_shards(args: Namespace, queue, lower_res: int, upper_res:
 
 def remove_shards(args: Namespace, queue, signal_queue, num_buckets) -> None:
     """Remove shards from local directory as they are completed."""
-    print(f'Starting remover process...')
+    print('Starting remover process...')
 
     if not args.wandb_disabled:
         wandb.init(project=args.wandb_project, entity=args.wandb_entity, name=args.wandb_name)
@@ -284,7 +284,7 @@ def remove_shards(args: Namespace, queue, signal_queue, num_buckets) -> None:
             wandb.log({'finished': True})
         if not signal_queue.empty():
             break
-    print(f'Finished remover process...')
+    print('Finished remover process...')
 
 
 def main(args: Namespace) -> None:
