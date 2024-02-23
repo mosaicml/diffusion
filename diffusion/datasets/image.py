@@ -77,9 +77,9 @@ class StreamingImageDataset(StreamingDataset):
         if self.transform is not None:
             img = self.transform(img)
         # Make the output
-        if self.image_output_key != self.image_key and self.image_output_key in sample:
-            raise ValueError(f'Output key {self.image_output_key} already exists in the sample.')
         if self.return_all_fields:
+            if self.image_output_key != self.image_key and self.image_output_key in sample:
+                raise ValueError(f'Output key {self.image_output_key} already exists in the sample.')
             output = {**sample, self.image_output_key: img}
         else:
             output = {self.image_output_key: img}
