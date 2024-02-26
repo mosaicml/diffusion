@@ -314,7 +314,7 @@ def stable_diffusion_xl(
             unet_config['in_channels'] = vae.config['latent_channels']
             unet_config['out_channels'] = vae.config['latent_channels']
         if model_name == 'sdxl-e5':  # e5 + clip embedding dims + micro conditioning
-            unet_config]['cross_attention_dim'] = 2304
+            unet_config['cross_attention_dim'] = 2304
         # Init the unet from the config
         unet = UNet2DConditionModel(**unet_config)
 
