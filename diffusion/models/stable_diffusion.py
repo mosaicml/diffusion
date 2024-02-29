@@ -185,17 +185,15 @@ class StableDiffusion(ComposerModel):
         self.rng_generator = rng_generator
 
     def forward(self, batch):
-        latents, conditionings, conditioning_2, pooled_conditioning = None, None, None, None
+        latents, text_embeds, text_pooled_embeds = None, [], []
         # Use latents if specified and available. When specified, they might not exist during eval
         if self.precomputed_latents and self.image_latents_key in batch and self.text_latents_key in batch:
             if self.sdxl:
                 raise NotImplementedError('SDXL not yet supported with precomputed latents')
-            latents, conditioning = batch[self.image_latents_key], batch[self.text_latents_key]
+            latents, text_embeds = batch[self.image_latents_key], batch[self.text_latents_key]
         else:
             inputs, conditionings = batch[self.image_key], batch[self.text_key]
             conditionings = [c.view(-1, c.shape[-1]) for c in conditionings]
-            text_encoder_embeds = []
-            text_encoder_pooleds = []
             if self.encode_latents_in_fp16:
                 # Disable autocast context as models are in fp16
                 with torch.cuda.amp.autocast(enabled=False):
@@ -204,24 +202,28 @@ class StableDiffusion(ComposerModel):
                     latents = self.vae.encode(inputs.half())['latent_dist'].sample().data
                     for conditioning, text_encoder in zip(conditioning, self.text_encoders):
                         text_encoder_embed, text_encoder_pooled = text_encoder(conditioning)
-                        text_encoder_embeds.append(text_encoder_embed)
-                        text_encoder_pooleds.append(text_encoder_pooled)
+                        text_embeds.append(text_encoder_embed)
+                        text_pooled_embeds.append(text_encoder_pooled)
 
             else:
                 latents = self.vae.encode(inputs)['latent_dist'].sample().data
                 for conditioning, text_encoder in zip(conditioning, self.text_encoders):
                     text_encoder_embed, text_encoder_pooled = text_encoder(conditioning)
-                    text_encoder_embeds.append(text_encoder_embed)
-                    text_encoder_pooleds.append(text_encoder_pooled)
+                    text_embeds.append(text_encoder_embed)
+                    text_pooled_embeds.append(text_encoder_pooled)
+
+            # Concatenate text encoder embeddings and pooled embeddings
+            text_embeds = torch.cat(text_embeds, dim=-1)
+            text_pooled_embeds = torch.cat(text_pooled_embeds, dim=-1)
 
             # Magical scaling number (See https://github.com/huggingface/diffusers/issues/437#issuecomment-1241827515)
             latents *= self.latent_scale
 
         # Zero dropped captions if needed
         if 'drop_caption_mask' in batch.keys():
-            conditioning *= batch['drop_caption_mask'].view(-1, 1, 1)
-            if pooled_conditioning is not None:
-                pooled_conditioning *= batch['drop_caption_mask'].view(-1, 1)
+            text_embeds *= batch['drop_caption_mask'].view(-1, 1, 1)
+            if text_pooled_embeds:
+                text_pooled_embeds *= batch['drop_caption_mask'].view(-1, 1)
 
         # Attention mask if needed
         if self.mask_pad_tokens and 'attention_mask' in batch.keys():
@@ -261,13 +263,12 @@ class StableDiffusion(ComposerModel):
         if self.sdxl:
             add_time_ids = torch.cat(
                 [batch['cond_original_size'], batch['cond_crops_coords_top_left'], batch['cond_target_size']], dim=1)
-            add_text_embeds = pooled_conditioning
-            added_cond_kwargs = {'text_embeds': add_text_embeds, 'time_ids': add_time_ids}
+            added_cond_kwargs = {'text_embeds': text_pooled_embeds, 'time_ids': add_time_ids}
 
         # Forward through the model
         return self.unet(noised_latents,
                          timesteps,
-                         conditioning,
+                         text_embeds,
                          encoder_attention_mask=encoder_attention_mask,
                          added_cond_kwargs=added_cond_kwargs)['sample'], targets, timesteps
 
@@ -566,38 +567,38 @@ class StableDiffusion(ComposerModel):
                                  num_images_per_prompt):
         """Tokenizes and embeds prompts if needed, then duplicates embeddings to support multiple generations per prompt."""
         device = self.text_encoder.device
-        pooled_text_embeddings = None
+        prompt_pooled_embeds = []
         if prompt_embeds is None:
-            max_length = None if self.sdxl else self.tokenizer.model_max_length
-            if tokenized_prompts is None:
-                tokenized_out = self.tokenizer(prompt,
-                                               padding='max_length',
-                                               max_length=max_length,
-                                               truncation=True,
-                                               return_tensors='pt')
-                tokenized_prompts = tokenized_out.input_ids
-                if self.mask_pad_tokens:
-                    tokenized_pad_mask = tokenized_out.attention_mask
-                if self.sdxl:
-                    tokenized_prompts = torch.stack([tokenized_prompts[0], tokenized_prompts[1]], dim=1)
-                    if self.mask_pad_tokens:
-                        # For cross attention mask, take union of masks (want [B, 77])
-                        tokenized_pad_mask = torch.logical_or(tokenized_pad_mask[0], tokenized_pad_mask[1]).to(
-                            tokenized_pad_mask[0].dtype).to(device)
-            if self.sdxl:
-                text_embeddings, pooled_text_embeddings = self.text_encoder(
-                    [tokenized_prompts[:, 0, :].to(device), tokenized_prompts[:, 1, :].to(device)])  # type: ignore
-            else:
-                text_embeddings = self.text_encoder(tokenized_prompts.to(device))[0]  # type: ignore
+            prompt_embeds = []
+            tokenized_pad_mask = []
+            for i in range(len(self.tokenizers)):
+                if tokenized_prompts is None:
+                    tokenized_out = self.tokenizers[i](prompt,
+                                                padding='max_length',
+                                                max_length=self.tokenizers[i].model_max_length,
+                                                truncation=True,
+                                                return_tensors='pt')
+                    tokenized_prompts = tokenized_out.input_ids.to(device)
+                    tokenized_pad_mask.append(tokenized_out.attention_mask)
+
+                prompt_embed, prompt_pooled_embed = self.text_encoders[i](tokenized_prompts)             
+                prompt_embeds.append(prompt_embed)
+                prompt_pooled_embeds.append(prompt_pooled_embed)
+
+            # Concatenate embeddings and pooled emebddings
+            prompt_embeds = torch.cat(prompt_embeds, dim=-1)
+            prompt_pooled_embeds = torch.cat(prompt_pooled_embeds, dim=-1)
+            # TODO: logical or for mask
+
         else:
             if self.sdxl:
                 raise NotImplementedError('SDXL not yet supported with precomputed embeddings')
             text_embeddings = prompt_embeds
 
         # duplicate text embeddings for each generation per prompt
-        bs_embed, seq_len, _ = text_embeddings.shape
-        text_embeddings = text_embeddings.repeat(1, num_images_per_prompt, 1)  # type: ignore
-        text_embeddings = text_embeddings.view(bs_embed * num_images_per_prompt, seq_len, -1)
+        bs_embed, seq_len, _ = prompt_embeds.shape
+        prompt_embeds = prompt_embeds.repeat(1, num_images_per_prompt, 1)  # type: ignore
+        prompt_embeds = prompt_embeds.view(bs_embed * num_images_per_prompt, seq_len, -1)
 
         if tokenized_pad_mask is not None:
             tokenized_pad_mask = tokenized_pad_mask.repeat(1, num_images_per_prompt, 1)
