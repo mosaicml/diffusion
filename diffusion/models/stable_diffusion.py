@@ -158,8 +158,8 @@ class StableDiffusion(ComposerModel):
         # Add a mse metric for the full loss
         self.val_metrics['MeanSquaredError'] = MeanSquaredError()
 
-        self.text_encoder = text_encoder
-        self.tokenizer = tokenizer
+        self.text_encoders = text_encoder
+        self.tokenizers = tokenizer
         self.inference_scheduler = inference_noise_scheduler
         self.text_key = text_key
         self.text_latents_key = text_latents_key
@@ -169,7 +169,7 @@ class StableDiffusion(ComposerModel):
         self.text_encoder.requires_grad_(False)
         self.vae.requires_grad_(False)
         if self.encode_latents_in_fp16:
-            self.text_encoder = self.text_encoder.half()
+            # TODO: Fix text_encoder .half()
             self.vae = self.vae.half()
         if fsdp:
             # only wrap models we are training
@@ -185,37 +185,34 @@ class StableDiffusion(ComposerModel):
         self.rng_generator = rng_generator
 
     def forward(self, batch):
-        latents, conditioning, conditioning_2, pooled_conditioning = None, None, None, None
+        latents, conditionings, conditioning_2, pooled_conditioning = None, None, None, None
         # Use latents if specified and available. When specified, they might not exist during eval
         if self.precomputed_latents and self.image_latents_key in batch and self.text_latents_key in batch:
             if self.sdxl:
                 raise NotImplementedError('SDXL not yet supported with precomputed latents')
             latents, conditioning = batch[self.image_latents_key], batch[self.text_latents_key]
         else:
-            inputs, conditioning = batch[self.image_key], batch[self.text_key]
-            if self.sdxl:
-                # If SDXL, separate the conditioning ([B, 2, 77]) from each tokenizer
-                conditioning, conditioning_2 = conditioning[:, 0, :], conditioning[:, 1, :]
-                conditioning_2 = conditioning_2.view(-1, conditioning_2.shape[-1])
-
-            conditioning = conditioning.view(-1, conditioning.shape[-1])
+            inputs, conditionings = batch[self.image_key], batch[self.text_key]
+            conditionings = [c.view(-1, c.shape[-1]) for c in conditionings]
+            text_encoder_embeds = []
+            text_encoder_pooleds = []
             if self.encode_latents_in_fp16:
                 # Disable autocast context as models are in fp16
                 with torch.cuda.amp.autocast(enabled=False):
                     # Encode the images to the latent space.
                     # Encode prompt into conditioning vector
                     latents = self.vae.encode(inputs.half())['latent_dist'].sample().data
-                    if self.sdxl:
-                        conditioning, pooled_conditioning = self.text_encoder([conditioning, conditioning_2])
-                    else:
-                        conditioning = self.text_encoder(conditioning)[0]  # Should be (batch_size, 77, 768)
+                    for conditioning, text_encoder in zip(conditioning, self.text_encoders):
+                        text_encoder_embed, text_encoder_pooled = text_encoder(conditioning)
+                        text_encoder_embeds.append(text_encoder_embed)
+                        text_encoder_pooleds.append(text_encoder_pooled)
 
             else:
                 latents = self.vae.encode(inputs)['latent_dist'].sample().data
-                if self.sdxl:
-                    conditioning, pooled_conditioning = self.text_encoder([conditioning, conditioning_2])
-                else:
-                    conditioning = self.text_encoder(conditioning)[0]
+                for conditioning, text_encoder in zip(conditioning, self.text_encoders):
+                    text_encoder_embed, text_encoder_pooled = text_encoder(conditioning)
+                    text_encoder_embeds.append(text_encoder_embed)
+                    text_encoder_pooleds.append(text_encoder_pooled)
 
             # Magical scaling number (See https://github.com/huggingface/diffusers/issues/437#issuecomment-1241827515)
             latents *= self.latent_scale
