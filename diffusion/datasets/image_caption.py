@@ -99,9 +99,10 @@ class StreamingImageCaptionDataset(StreamingDataset):
         for tokenizer_name_or_path in tokenizer_names_or_paths:
             # If tokenizer_name_or_path contains more than one '/', then the string includes a subfolder to extract
             path_split = tokenizer_name_or_path.split('/')
-            subfolder = ''.join(path_split[2:]) if len(path_split) > 2 else ''
+            name = '/'.join(path_split[:2])
+            subfolder = '/'.join(path_split[2:]) if len(path_split) > 2 else ''
 
-            self.tokenizers.append(AutoTokenizer.from_pretrained(tokenizer_name_or_path, subfolder=subfolder))
+            self.tokenizers.append(AutoTokenizer.from_pretrained(name, subfolder=subfolder))
 
     def __getitem__(self, index):
         sample = super().__getitem__(index)
@@ -181,7 +182,7 @@ def build_streaming_image_caption_dataloader(
     remote: Union[str, List],
     local: Union[str, List],
     batch_size: int,
-    tokenizer_names_or_paths: Union[str, List[str]] = 'stabilityai/stable-diffusion-2-base',
+    tokenizer_names_or_paths: Union[str, List[str]] = 'stabilityai/stable-diffusion-2-base/tokenizer',
     caption_drop_prob: float = 0.0,
     microcond_drop_prob: float = 0.0,
     resize_size: int = 256,

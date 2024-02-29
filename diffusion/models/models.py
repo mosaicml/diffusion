@@ -13,7 +13,7 @@ from diffusers import AutoencoderKL, DDIMScheduler, DDPMScheduler, EulerDiscrete
 from torchmetrics import MeanSquaredError
 from torchmetrics.image.fid import FrechetInceptionDistance
 from torchmetrics.multimodal.clip_score import CLIPScore
-from transformers import CLIPTextModel, CLIPTextModelWithProjection, CLIPTokenizer, PretrainedConfig
+from transformers import AutoTokenizer, CLIPTextModel, CLIPTextModelWithProjection, CLIPTokenizer, PretrainedConfig
 
 from diffusion.models.autoencoder import (AutoEncoder, AutoEncoderLoss, ComposerAutoEncoder,
                                           ComposerDiffusersAutoEncoder, load_autoencoder)
@@ -194,7 +194,8 @@ def stable_diffusion_2(
 
 
 def stable_diffusion_xl(
-    model_name: str = 'stabilityai/stable-diffusion-xl-base-1.0',
+    tokenizer_names: Union[str, List[str]] = 'stabilityai/stable-diffusion-xl-base-1.0/tokenizer',
+    text_encoder_names: Union[str, List[str]] = 'stabilityai/stable-diffusion-xl-base-1.0/text_encoder',
     unet_model_name: str = 'stabilityai/stable-diffusion-xl-base-1.0',
     vae_model_name: str = 'madebyollin/sdxl-vae-fp16-fix',
     pretrained: bool = True,
@@ -272,9 +273,38 @@ def stable_diffusion_xl(
         if isinstance(metric, CLIPScore):
             metric.requires_grad_(False)
 
+    # Convert string to list    
+    if isinstance(tokenizer_names, str):
+        tokenizer_names = [tokenizer_names]
+    
+    # Instantiate tokenizers
+    tokenizers = []
+    for tokenizer_name in tokenizer_names:
+            # If tokenizer_name_or_path contains more than one '/', then the string includes a subfolder to extract
+            path_split = tokenizer_name.split('/')
+            name = '/'.join(path_split[:2])
+            subfolder = '/'.join(path_split[2:]) if len(path_split) > 2 else ''
+
+            tokenizers.append(AutoTokenizer.from_pretrained(name, subfolder=subfolder))
+
     # Make the text encoder
-    tokenizer = SDXLTokenizer(model_name)
-    text_encoder = SDXLTextEncoder(model_name, encode_latents_in_fp16)
+    if isinstance(text_encoder_names, str):
+        text_encoder_names = [text_encoder_names]
+
+    torch_dtype = torch.float16 if encode_latents_in_fp16 else None
+    text_encoders = torch.nn.ModuleList()
+    for text_encoder_name in text_encoder_names:
+        # If tokenizer_name_or_path contains more than one '/', then the string includes a subfolder to extract
+        path_split = text_encoder_name.split('/')
+        name = '/'.join(path_split[:2])
+        subfolder = '/'.join(path_split[2:]) if len(path_split) > 2 else ''
+
+        # I'm not sure how to load this CLIP Text model using Auto...
+        if name == 'stabilityai/stable-diffusion-xl-base-1.0':
+            text_encoders.append(CLIPTextModelWithProjection.from_pretrained(name, subfolder=subfolder, torch_dtype=torch_dtype))
+        else:
+            # TOOD: add AutoModel
+            pass
 
     precision = torch.float16 if encode_latents_in_fp16 else None
     # Make the autoencoder
@@ -326,7 +356,7 @@ def stable_diffusion_xl(
         unet.conv_out = zero_module(unet.conv_out)
 
     # Make the noise schedulers
-    noise_scheduler = DDPMScheduler.from_pretrained(model_name, subfolder='scheduler')
+    noise_scheduler = DDPMScheduler.from_pretrained(unet_model_name, subfolder='scheduler')
     inference_noise_scheduler = EulerDiscreteScheduler(num_train_timesteps=1000,
                                                        beta_start=0.00085,
                                                        beta_end=0.012,
@@ -342,8 +372,8 @@ def stable_diffusion_xl(
     model = StableDiffusion(
         unet=unet,
         vae=vae,
-        text_encoder=text_encoder,
-        tokenizer=tokenizer,
+        text_encoder=text_encoders,
+        tokenizer=tokenizers,
         noise_scheduler=noise_scheduler,
         inference_noise_scheduler=inference_noise_scheduler,
         prediction_type=prediction_type,
