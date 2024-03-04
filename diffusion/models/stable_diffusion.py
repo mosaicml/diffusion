@@ -496,7 +496,7 @@ def _check_prompt_lenths(prompt, negative_prompt):
     if negative_prompt:
         negative_prompt_bs = 1 if isinstance(negative_prompt, str) else len(negative_prompt)
         if negative_prompt_bs != batch_size:
-            raise ValueError(f'len(prompts) and len(negative_prompts) must be the same. \
+            raise ValueError('len(prompts) and len(negative_prompts) must be the same. \
                     A negative prompt must be provided for each given prompt.')
 
 
