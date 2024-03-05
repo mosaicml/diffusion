@@ -33,7 +33,6 @@ class StreamingImageCaptionDataset(StreamingDataset):
         remote (str, optional): Remote directory (S3 or local filesystem) where dataset is stored. Default: ``None``.
         local (str, optional): Local filesystem directory where dataset is cached during operation. Default: ``None``.
         tokenizer_names_or_paths (str, list[str]): The name(s) or path(s) of the tokenizer(s) to use. 
-            Default: ``'stabilityai/stable-diffusion-2-base'``.
         caption_drop_prob (float): The probability of dropping a caption. Default: ``0.0``.
         microcond_drop_prob (float): The probability of dropping microconditioning. Only relevant for SDXL. Default: ``0.0``.
         caption_selection (str): If there are multiple captions, specifies how to select a single caption.
@@ -52,10 +51,10 @@ class StreamingImageCaptionDataset(StreamingDataset):
 
     def __init__(
         self,
+        tokenizer_names_or_paths: Union[str, List[str]],
         streams: Optional[Sequence[Stream]] = None,
         remote: Optional[str] = None,
         local: Optional[str] = None,
-        tokenizer_names_or_paths: Union[str, List[str]] = 'stabilityai/stable-diffusion-2-base',
         caption_drop_prob: float = 0.0,
         microcond_drop_prob: float = 0.0,
         caption_selection: str = 'first',
@@ -168,7 +167,7 @@ def build_streaming_image_caption_dataloader(
     remote: Union[str, List],
     local: Union[str, List],
     batch_size: int,
-    tokenizer_names_or_paths: Union[str, List[str]] = 'stabilityai/stable-diffusion-2-base/tokenizer',
+    tokenizer_names_or_paths: Union[str, List[str]],
     caption_drop_prob: float = 0.0,
     microcond_drop_prob: float = 0.0,
     resize_size: int = 256,
@@ -188,8 +187,7 @@ def build_streaming_image_caption_dataloader(
         remote (str, Sequence[str]): One or more remote directories (S3 or local filesystem) where dataset is stored.
         local (str, Sequence[str]): One or more local filesystem directories where dataset is cached during operation.
         batch_size (int): The batch size to use for both the ``StreamingDataset`` and ``DataLoader``.
-        tokenizer_names_or_paths (str, list[str]): The name(s) or path(s) of the tokenizer(s) to use. 
-            Default: ``'stabilityai/stable-diffusion-2-base'``.
+        tokenizer_names_or_paths (str, list[str]): The name(s) or path(s) of the tokenizer(s) to use.
         caption_drop_prob (float): The probability of dropping a caption. Default: ``0.0``.
         microcond_drop_prob (float): The probability of dropping microconditioning. Only relevant for SDXL. Default: ``0.0``.
         resize_size (int): The size to resize the image to. Default: ``256``.

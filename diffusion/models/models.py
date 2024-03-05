@@ -20,7 +20,7 @@ from diffusion.models.autoencoder import (AutoEncoder, AutoEncoderLoss, Composer
 from diffusion.models.layers import ClippedAttnProcessor2_0, ClippedXFormersAttnProcessor, zero_module
 from diffusion.models.pixel_diffusion import PixelDiffusion
 from diffusion.models.stable_diffusion import StableDiffusion
-from diffusion.models.text_encoder import MultiTextEncoder
+from diffusion.models.text_encoder import MultiTextEncoder, MultiTokenizer
 from diffusion.schedulers.schedulers import ContinuousTimeScheduler
 
 try:
@@ -279,17 +279,10 @@ def stable_diffusion_xl(
         tokenizer_names = [tokenizer_names]
     
     # Instantiate tokenizers
-    tokenizers = []
-    for tokenizer_name in tokenizer_names:
-            # If tokenizer_name_or_path contains more than one '/', then the string includes a subfolder to extract
-            path_split = tokenizer_name.split('/')
-            name = '/'.join(path_split[:2])
-            subfolder = '/'.join(path_split[2:]) if len(path_split) > 2 else ''
 
-            tokenizers.append(AutoTokenizer.from_pretrained(name, subfolder=subfolder))
-
-    # Make the text encoder
-    text_encoders = MultiTextEncoder(model_names=text_encoder_names, encode_latents_in_fp16=encode_latents_in_fp16)
+    # Make the tokenizer and text encoder
+    tokenizer = MultiTokenizer(tokenizer_names_or_paths=tokenizer_names)
+    text_encoder = MultiTextEncoder(model_names=text_encoder_names, encode_latents_in_fp16=encode_latents_in_fp16)
 
     precision = torch.float16 if encode_latents_in_fp16 else None
     # Make the autoencoder
@@ -357,8 +350,8 @@ def stable_diffusion_xl(
     model = StableDiffusion(
         unet=unet,
         vae=vae,
-        text_encoder=text_encoders,
-        tokenizer=tokenizers,
+        text_encoder=text_encoder,
+        tokenizer=tokenizer,
         noise_scheduler=noise_scheduler,
         inference_noise_scheduler=inference_noise_scheduler,
         prediction_type=prediction_type,
