@@ -196,14 +196,19 @@ class StableDiffusion(ComposerModel):
             inputs, conditionings = batch[self.image_key], batch[self.text_key]
 
             # If encode_latents_in_fp16, disable autocast context as models are in fp16
-            with torch.cuda.amp.autocast(enabled=False) if self.encode_latents_in_fp16 else nullcontext:
+            with torch.cuda.amp.autocast(enabled=False) if self.encode_latents_in_fp16 else nullcontext:  # type: ignore
                 # Encode the images to the latent space.
                 if self.encode_latents_in_fp16:
                     latents = self.vae.encode(inputs.half())['latent_dist'].sample().data
                 else:
                     latents = self.vae.encode(inputs)['latent_dist'].sample().data
                 # Encode tokenized prompt into embedded text and pooled text embeddings
-                text_embeds, text_pooled_embeds = self.text_encoder(conditionings)
+                text_encoder_out = self.text_encoder(conditionings)
+                text_embeds = text_encoder_out[0]
+                if self.sdxl:
+                    if len(text_encoder_out) <= 1:
+                        raise RuntimeError('SDXL requires text encoder output to include a pooled text embedding')
+                    text_pooled_embeds = text_encoder_out[1]
 
             # Magical scaling number (See https://github.com/huggingface/diffusers/issues/437#issuecomment-1241827515)
             latents *= self.latent_scale

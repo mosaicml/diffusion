@@ -76,11 +76,11 @@ class MultiTextEncoder(torch.nn.Module):
     def device(self):
         return self.text_encoders[0].device
 
-    def forward(self, tokenized_texts):
-        # Make sure tokenized_texts is shape [batch_size, len(self.tokenizers), max_sequence_length]
+    def forward(self, tokenized_texts: torch.Tensor):
+        # Make sure tokenized_texts is shape [batch_size, len(self.text_encoders), max_sequence_length]
         if len(tokenized_texts.shape) == 2:
             tokenized_texts = tokenized_texts.unsqueeze(dim=1)
-        if tokenized_texts.shape[1] != len(self.tokenizers):
+        if tokenized_texts.shape[1] != len(self.text_encoders):
             raise RuntimeError(
                 f'tokenized_texts must be of shape [batch_size, len(self.tokenizers), s]: {tokenized_texts.shape}')
 
@@ -88,7 +88,7 @@ class MultiTextEncoder(torch.nn.Module):
         all_pooled_text = []
         for i in range(len(self.text_encoders)):
             output_hidden_states = self.architectures[i] in ['CLIPTextModel', 'CLIPTextModelWithProjection']
-            out = self.text_encoder[i](tokenized_texts[:, i], output_hidden_states=output_hidden_states)
+            out = self.text_encoders[i](tokenized_texts[:, i], output_hidden_states=output_hidden_states)
             text_embed = out.hidden_states[-2] if output_hidden_states else out[0]
             pooled_text = out[0] if self.architectures[i] == 'CLIPTextModelWithProjection' else None
 
