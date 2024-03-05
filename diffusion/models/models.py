@@ -274,12 +274,6 @@ def stable_diffusion_xl(
         if isinstance(metric, CLIPScore):
             metric.requires_grad_(False)
 
-    # Convert string to list    
-    if isinstance(tokenizer_names, str):
-        tokenizer_names = [tokenizer_names]
-    
-    # Instantiate tokenizers
-
     # Make the tokenizer and text encoder
     tokenizer = MultiTokenizer(tokenizer_names_or_paths=tokenizer_names)
     text_encoder = MultiTextEncoder(model_names=text_encoder_names, encode_latents_in_fp16=encode_latents_in_fp16)
