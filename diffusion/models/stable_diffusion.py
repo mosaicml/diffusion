@@ -3,6 +3,7 @@
 
 """Diffusion models."""
 
+from contextlib import nullcontext
 from typing import List, Optional
 
 import torch
@@ -158,8 +159,8 @@ class StableDiffusion(ComposerModel):
         # Add a mse metric for the full loss
         self.val_metrics['MeanSquaredError'] = MeanSquaredError()
 
-        self.text_encoders = text_encoder
-        self.tokenizers = tokenizer
+        self.text_encoder = text_encoder
+        self.tokenizer = tokenizer
         self.inference_scheduler = inference_noise_scheduler
         self.text_key = text_key
         self.text_latents_key = text_latents_key
@@ -169,7 +170,7 @@ class StableDiffusion(ComposerModel):
         self.text_encoder.requires_grad_(False)
         self.vae.requires_grad_(False)
         if self.encode_latents_in_fp16:
-            # TODO: Fix text_encoder .half()
+            self.text_encoder = self.text_encoder.half()
             self.vae = self.vae.half()
         if fsdp:
             # only wrap models we are training
@@ -185,7 +186,7 @@ class StableDiffusion(ComposerModel):
         self.rng_generator = rng_generator
 
     def forward(self, batch):
-        latents, text_embeds, text_pooled_embeds = None, [], []
+        latents, text_embeds, text_pooled_embeds = None, None, []
         # Use latents if specified and available. When specified, they might not exist during eval
         if self.precomputed_latents and self.image_latents_key in batch and self.text_latents_key in batch:
             if self.sdxl:
@@ -194,27 +195,16 @@ class StableDiffusion(ComposerModel):
         else:
             inputs, conditionings = batch[self.image_key], batch[self.text_key]
             conditionings = [c.view(-1, c.shape[-1]) for c in conditionings]
-            if self.encode_latents_in_fp16:
-                # Disable autocast context as models are in fp16
-                with torch.cuda.amp.autocast(enabled=False):
-                    # Encode the images to the latent space.
-                    # Encode prompt into conditioning vector
+
+            # If encode_latents_in_fp16, disable autocast context as models are in fp16
+            with torch.cuda.amp.autocast(enabled=False) if self.encode_latents_in_fp16 else nullcontext:
+                # Encode the images to the latent space.
+                if self.encode_latents_in_fp16:
                     latents = self.vae.encode(inputs.half())['latent_dist'].sample().data
-                    for conditioning, text_encoder in zip(conditioning, self.text_encoders):
-                        text_encoder_embed, text_encoder_pooled = text_encoder(conditioning)
-                        text_embeds.append(text_encoder_embed)
-                        text_pooled_embeds.append(text_encoder_pooled)
-
-            else:
-                latents = self.vae.encode(inputs)['latent_dist'].sample().data
-                for conditioning, text_encoder in zip(conditioning, self.text_encoders):
-                    text_encoder_embed, text_encoder_pooled = text_encoder(conditioning)
-                    text_embeds.append(text_encoder_embed)
-                    text_pooled_embeds.append(text_encoder_pooled)
-
-            # Concatenate text encoder embeddings and pooled embeddings
-            text_embeds = torch.cat(text_embeds, dim=-1)
-            text_pooled_embeds = torch.cat(text_pooled_embeds, dim=-1)
+                else:
+                    latents = self.vae.encode(inputs)['latent_dist'].sample().data
+                # Encode tokenized prompt into embedded text and pooled text embeddings
+                text_embeds, text_pooled_embeds = self.text_encoder(conditionings)
 
             # Magical scaling number (See https://github.com/huggingface/diffusers/issues/437#issuecomment-1241827515)
             latents *= self.latent_scale

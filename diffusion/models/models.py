@@ -20,6 +20,7 @@ from diffusion.models.autoencoder import (AutoEncoder, AutoEncoderLoss, Composer
 from diffusion.models.layers import ClippedAttnProcessor2_0, ClippedXFormersAttnProcessor, zero_module
 from diffusion.models.pixel_diffusion import PixelDiffusion
 from diffusion.models.stable_diffusion import StableDiffusion
+from diffusion.models.text_encoder import MultiTextEncoder
 from diffusion.schedulers.schedulers import ContinuousTimeScheduler
 
 try:
@@ -288,23 +289,7 @@ def stable_diffusion_xl(
             tokenizers.append(AutoTokenizer.from_pretrained(name, subfolder=subfolder))
 
     # Make the text encoder
-    if isinstance(text_encoder_names, str):
-        text_encoder_names = [text_encoder_names]
-
-    torch_dtype = torch.float16 if encode_latents_in_fp16 else None
-    text_encoders = torch.nn.ModuleList()
-    for text_encoder_name in text_encoder_names:
-        # If tokenizer_name_or_path contains more than one '/', then the string includes a subfolder to extract
-        path_split = text_encoder_name.split('/')
-        name = '/'.join(path_split[:2])
-        subfolder = '/'.join(path_split[2:]) if len(path_split) > 2 else ''
-
-        # I'm not sure how to load this CLIP Text model using Auto...
-        if name == 'stabilityai/stable-diffusion-xl-base-1.0':
-            text_encoders.append(CLIPTextModelWithProjection.from_pretrained(name, subfolder=subfolder, torch_dtype=torch_dtype))
-        else:
-            # TOOD: add AutoModel
-            pass
+    text_encoders = MultiTextEncoder(model_names=text_encoder_names, encode_latents_in_fp16=encode_latents_in_fp16)
 
     precision = torch.float16 if encode_latents_in_fp16 else None
     # Make the autoencoder
