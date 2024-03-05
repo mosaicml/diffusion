@@ -10,10 +10,6 @@ model: # This is the model to evaluate
   precomputed_latents: false
   encode_latents_in_fp16: true
   fsdp: false
-  val_metrics:
-    - _target_: torchmetrics.MeanSquaredError
-  val_guidance_scales: []
-  loss_bins: []
 eval_dataloader:
   _target_: diffusion.datasets.build_streaming_image_caption_dataloader
   remote:
