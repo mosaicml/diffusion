@@ -699,8 +699,9 @@ class ComposerDiffusersAutoEncoder(ComposerModel):
         latent_dist = encoder_output['latent_dist']
         latents = latent_dist.sample()
         mean, log_var = latent_dist.mean, latent_dist.logvar
-        recon = self.model.decode(latents, return_dict=True)
-        assert isinstance(recon, DecoderOutput)
+        output_dist = self.model.decode(latents, return_dict=True)
+        assert isinstance(output_dist, DecoderOutput)
+        recon = output_dist.sample
         return {'x_recon': recon, 'latents': latents, 'mean': mean, 'log_var': log_var}
 
     def loss(self, outputs, batch):
