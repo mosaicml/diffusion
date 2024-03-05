@@ -12,14 +12,14 @@ install_requires = [
     'hydra-colorlog>=1.1.0',
     'diffusers[torch]==0.26.3',
     'transformers[torch]==4.38.2',
-    'wandb==0.15.4',
+    'wandb==0.16.3',
     'xformers==0.0.21',
     'triton==2.0.0',
-    'torchmetrics[image]==0.11.4',
+    'torchmetrics[image]==1.3.1',
     'lpips==0.1.4',
-    'clean-fid',
-    'clip@git+https://github.com/openai/CLIP.git',
-    'gradio==4.14.0',
+    'clean-fid==0.1.35',
+    'clip@git+https://github.com/openai/CLIP.git@a1d071733d7111c9c014f024669f959182114e33',
+    'gradio==4.19.2',
 ]
 
 extras_require = {}
