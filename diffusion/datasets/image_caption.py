@@ -16,6 +16,7 @@ from torchvision import transforms
 from transformers import AutoTokenizer
 
 from diffusion.datasets.laion.transforms import LargestCenterSquare, RandomCropAspectRatioTransorm, RandomCropSquare
+from diffusion.models.text_encoder import MultiTokenizer
 
 log = logging.getLogger(__name__)
 
@@ -92,17 +93,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
         self.zero_dropped_captions = zero_dropped_captions
 
         # Convert string to list
-        if isinstance(tokenizer_names_or_paths, str):
-            tokenizer_names_or_paths = [tokenizer_names_or_paths]
-
-        self.tokenizers = []
-        for tokenizer_name_or_path in tokenizer_names_or_paths:
-            # If tokenizer_name_or_path contains more than one '/', then the string includes a subfolder to extract
-            path_split = tokenizer_name_or_path.split('/')
-            name = '/'.join(path_split[:2])
-            subfolder = '/'.join(path_split[2:]) if len(path_split) > 2 else ''
-
-            self.tokenizers.append(AutoTokenizer.from_pretrained(name, subfolder=subfolder))
+        self.tokenizer = MultiTokenizer(tokenizer_names_or_paths)
 
     def __getitem__(self, index):
         sample = super().__getitem__(index)
@@ -163,18 +154,13 @@ class StreamingImageCaptionDataset(StreamingDataset):
                 caption = random.sample(caption, k=1)[0]
             out['drop_caption_mask'] = 1.0
 
-        out['captions'] = []
-        out['attention_mask'] = []
-        for tokenizer in self.tokenizers:
-            tokenizer_out = tokenizer(caption,
-                                      padding='max_length',
-                                      max_length=tokenizer.model_max_length,
-                                      truncation=True,
-                                      return_tensors='pt')
-
-            out['captions'].append(tokenizer_out.input_ids.squeeze())
-            out['attention_mask'].append(tokenizer_out.attention_mask)
-        # TODO: do I need to take the union of the masks?
+        tokenizer_out = self.tokenizer(caption,
+                                       padding='max_length',
+                                       max_length=self.tokenizer.model_max_length,
+                                       truncation=True,
+                                       return_tensors='pt')
+        out['captions'] = tokenizer_out['input_ids'].squeeze()
+        out['attention_mask'] = tokenizer_out['attention_mask']
         return out
 
 
