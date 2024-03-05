@@ -11,8 +11,6 @@ import torch
 from composer.devices import DeviceGPU
 from diffusers import AutoencoderKL, DDIMScheduler, DDPMScheduler, EulerDiscreteScheduler, UNet2DConditionModel
 from torchmetrics import MeanSquaredError
-from torchmetrics.image.fid import FrechetInceptionDistance
-from torchmetrics.multimodal.clip_score import CLIPScore
 from transformers import CLIPTextModel, CLIPTextModelWithProjection, CLIPTokenizer, PretrainedConfig
 
 from diffusion.models.autoencoder import (AutoEncoder, AutoEncoderLoss, ComposerAutoEncoder,
@@ -42,9 +40,7 @@ def stable_diffusion_2(
     offset_noise: Optional[float] = None,
     train_metrics: Optional[List] = None,
     val_metrics: Optional[List] = None,
-    val_guidance_scales: Optional[List] = None,
     val_seed: int = 1138,
-    loss_bins: Optional[List] = None,
     precomputed_latents: bool = False,
     encode_latents_in_fp16: bool = True,
     mask_pad_tokens: bool = False,
@@ -70,12 +66,8 @@ def stable_diffusion_2(
         train_metrics (list, optional): List of metrics to compute during training. If None, defaults to
             [MeanSquaredError()].
         val_metrics (list, optional): List of metrics to compute during validation. If None, defaults to
-            [MeanSquaredError(), FrechetInceptionDistance(normalize=True)].
-        val_guidance_scales (list, optional): List of scales to use for validation guidance. If None, defaults to
-            [1.0, 3.0, 7.0].
+            [MeanSquaredError()].
         val_seed (int): Seed to use for generating evaluation images. Defaults to 1138.
-        loss_bins (list, optional): List of tuples of (min, max) values to use for loss binning. If None, defaults to
-            [(0, 1)].
         precomputed_latents (bool): Whether to use precomputed latents. Defaults to False.
         offset_noise (float, optional): The scale of the offset noise. If not specified, offset noise will not
             be used. Default `None`.
@@ -93,15 +85,7 @@ def stable_diffusion_2(
     if train_metrics is None:
         train_metrics = [MeanSquaredError()]
     if val_metrics is None:
-        val_metrics = [MeanSquaredError(), FrechetInceptionDistance(normalize=True)]
-    if val_guidance_scales is None:
-        val_guidance_scales = [1.0, 3.0, 7.0]
-    if loss_bins is None:
-        loss_bins = [(0, 1)]
-    # Fix a bug where CLIPScore requires grad
-    for metric in val_metrics:
-        if isinstance(metric, CLIPScore):
-            metric.requires_grad_(False)
+        val_metrics = [MeanSquaredError()]
 
     precision = torch.float16 if encode_latents_in_fp16 else None
     # Make the text encoder
@@ -167,9 +151,7 @@ def stable_diffusion_2(
         offset_noise=offset_noise,
         train_metrics=train_metrics,
         val_metrics=val_metrics,
-        val_guidance_scales=val_guidance_scales,
         val_seed=val_seed,
-        loss_bins=loss_bins,
         precomputed_latents=precomputed_latents,
         encode_latents_in_fp16=encode_latents_in_fp16,
         mask_pad_tokens=mask_pad_tokens,
@@ -205,9 +187,7 @@ def stable_diffusion_xl(
     offset_noise: Optional[float] = None,
     train_metrics: Optional[List] = None,
     val_metrics: Optional[List] = None,
-    val_guidance_scales: Optional[List] = None,
     val_seed: int = 1138,
-    loss_bins: Optional[List] = None,
     precomputed_latents: bool = False,
     encode_latents_in_fp16: bool = True,
     mask_pad_tokens: bool = False,
@@ -241,12 +221,8 @@ def stable_diffusion_xl(
         train_metrics (list, optional): List of metrics to compute during training. If None, defaults to
             [MeanSquaredError()].
         val_metrics (list, optional): List of metrics to compute during validation. If None, defaults to
-            [MeanSquaredError(), FrechetInceptionDistance(normalize=True)].
-        val_guidance_scales (list, optional): List of scales to use for validation guidance. If None, defaults to
-            [1.0, 3.0, 7.0].
+            [MeanSquaredError()].
         val_seed (int): Seed to use for generating evaluation images. Defaults to 1138.
-        loss_bins (list, optional): List of tuples of (min, max) values to use for loss binning. If None, defaults to
-            [(0, 1)].
         precomputed_latents (bool): Whether to use precomputed latents. Defaults to False.
         encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
         mask_pad_tokens (bool): Whether to mask pad tokens in cross attention. Defaults to False.
@@ -262,15 +238,7 @@ def stable_diffusion_xl(
     if train_metrics is None:
         train_metrics = [MeanSquaredError()]
     if val_metrics is None:
-        val_metrics = [MeanSquaredError(), FrechetInceptionDistance(normalize=True)]
-    if val_guidance_scales is None:
-        val_guidance_scales = [1.0, 3.0, 7.0]
-    if loss_bins is None:
-        loss_bins = [(0, 1)]
-    # Fix a bug where CLIPScore requires grad
-    for metric in val_metrics:
-        if isinstance(metric, CLIPScore):
-            metric.requires_grad_(False)
+        val_metrics = [MeanSquaredError()]
 
     # Make the text encoder
     tokenizer = SDXLTokenizer(model_name)
@@ -352,9 +320,7 @@ def stable_diffusion_xl(
         offset_noise=offset_noise,
         train_metrics=train_metrics,
         val_metrics=val_metrics,
-        val_guidance_scales=val_guidance_scales,
         val_seed=val_seed,
-        loss_bins=loss_bins,
         precomputed_latents=precomputed_latents,
         encode_latents_in_fp16=encode_latents_in_fp16,
         mask_pad_tokens=mask_pad_tokens,
