@@ -3,7 +3,7 @@
 
 """Helpful layers and functions for UNet and Autoencoder construction."""
 
-from typing import Optional
+from typing import Optional, TypeVar
 
 import torch
 import torch.nn as nn
@@ -14,8 +14,10 @@ try:
 except:
     pass
 
+T = TypeVar('T', bound=nn.Module)
 
-def zero_module(module: torch.nn.Module) -> torch.nn.Module:
+
+def zero_module(module: T) -> T:
     """Zero out the parameters of a module and return it."""
     for p in module.parameters():
         p.detach().zero_()
