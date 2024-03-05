@@ -186,7 +186,7 @@ class StableDiffusion(ComposerModel):
         self.rng_generator = rng_generator
 
     def forward(self, batch):
-        latents, text_embeds, text_pooled_embeds = None, None, []
+        latents, text_embeds, text_pooled_embeds = None, None, None
         # Use latents if specified and available. When specified, they might not exist during eval
         if self.precomputed_latents and self.image_latents_key in batch and self.text_latents_key in batch:
             if self.sdxl:
@@ -556,33 +556,22 @@ class StableDiffusion(ComposerModel):
                                  num_images_per_prompt):
         """Tokenizes and embeds prompts if needed, then duplicates embeddings to support multiple generations per prompt."""
         device = self.text_encoder.device
-        prompt_pooled_embeds = []
+        pooled_text_embeddings = None
         if prompt_embeds is None:
-            prompt_embeds = []
-            tokenized_pad_mask = []
-            for i in range(len(self.tokenizers)):
-                if tokenized_prompts is None:
-                    tokenized_out = self.tokenizers[i](prompt,
-                                                padding='max_length',
-                                                max_length=self.tokenizers[i].model_max_length,
-                                                truncation=True,
-                                                return_tensors='pt')
-                    tokenized_prompts = tokenized_out.input_ids.to(device)
-                    tokenized_pad_mask.append(tokenized_out.attention_mask)
-
-                prompt_embed, prompt_pooled_embed = self.text_encoders[i](tokenized_prompts)             
-                prompt_embeds.append(prompt_embed)
-                prompt_pooled_embeds.append(prompt_pooled_embed)
-
-            # Concatenate embeddings and pooled emebddings
-            prompt_embeds = torch.cat(prompt_embeds, dim=-1)
-            prompt_pooled_embeds = torch.cat(prompt_pooled_embeds, dim=-1)
-            # TODO: logical or for mask
+            if tokenized_prompts is None:
+                tokenized_out = self.tokenizer(prompt,
+                                               padding='max_length',
+                                               max_length=self.tokenizer.model_max_length,
+                                               truncation=True,
+                                               return_tensors='pt')
+                tokenized_prompts = tokenized_out['input_ids']
+                if self.mask_pad_tokens:
+                    tokenized_pad_mask = tokenized_out['attention_mask']
+                prompt_embeds, pooled_text_embeddings = self.text_encoder(tokenized_prompts.to(device))
 
         else:
             if self.sdxl:
                 raise NotImplementedError('SDXL not yet supported with precomputed embeddings')
-            text_embeddings = prompt_embeds
 
         # duplicate text embeddings for each generation per prompt
         bs_embed, seq_len, _ = prompt_embeds.shape
@@ -596,7 +585,7 @@ class StableDiffusion(ComposerModel):
         if self.sdxl and pooled_text_embeddings is not None:
             pooled_text_embeddings = pooled_text_embeddings.repeat(1, num_images_per_prompt)
             pooled_text_embeddings = pooled_text_embeddings.view(bs_embed * num_images_per_prompt, -1)
-        return text_embeddings, pooled_text_embeddings, tokenized_pad_mask
+        return prompt_embeds, pooled_text_embeddings, tokenized_pad_mask
 
 
 def _check_prompt_lenths(prompt, negative_prompt):

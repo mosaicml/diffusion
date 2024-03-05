@@ -116,6 +116,7 @@ class MultiTokenizer:
         self.model_max_length = max([t.model_max_length for t in self.tokenizers])
 
     def __call__(self, text, padding, max_length, truncation, return_tensors):
+        """Return shape: [len(text), len(self.tokenizers), max_length]"""
         input_ids = []
         attention_masks = []
         for tokenizer in self.tokenizers:
@@ -125,10 +126,10 @@ class MultiTokenizer:
                             truncation=truncation,
                             return_tensors=return_tensors)
 
-            input_ids.append(out.input_ids.squeeze())
+            input_ids.append(out.input_ids)
             attention_masks.append(out.attention_masks)
 
-        input_ids = torch.concat(input_ids, dim=0)
+        input_ids = torch.stack(input_ids, dim=1).squeeze(dim=1)
         attention_mask = torch.zeros_like(attention_masks[0])
         for mask in attention_masks:
             attention_mask |= mask
