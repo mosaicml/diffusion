@@ -319,6 +319,7 @@ def stable_diffusion_xl(
             # Adapt the unet config to account for differing number of latent channels if necessary
             unet_config['in_channels'] = vae.config['latent_channels']
             unet_config['out_channels'] = vae.config['latent_channels']
+        unet_config['cross_attention_dim'] = text_encoder.text_encoder_dim
         # Init the unet from the config
         unet = UNet2DConditionModel(**unet_config)
 
