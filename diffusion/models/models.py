@@ -13,7 +13,7 @@ from diffusers import AutoencoderKL, DDIMScheduler, DDPMScheduler, EulerDiscrete
 from torchmetrics import MeanSquaredError
 from torchmetrics.image.fid import FrechetInceptionDistance
 from torchmetrics.multimodal.clip_score import CLIPScore
-from transformers import AutoTokenizer, CLIPTextModel, CLIPTextModelWithProjection, CLIPTokenizer, PretrainedConfig
+from transformers import CLIPTextModel, CLIPTokenizer, PretrainedConfig
 
 from diffusion.models.autoencoder import (AutoEncoder, AutoEncoderLoss, ComposerAutoEncoder,
                                           ComposerDiffusersAutoEncoder, load_autoencoder)
@@ -195,8 +195,10 @@ def stable_diffusion_2(
 
 
 def stable_diffusion_xl(
-    tokenizer_names: Union[str, List[str]] = 'stabilityai/stable-diffusion-xl-base-1.0/tokenizer',
-    text_encoder_names: Union[str, List[str]] = 'stabilityai/stable-diffusion-xl-base-1.0/text_encoder',
+    tokenizer_names: Union[str, Tuple[str, ...]] = ('stabilityai/stable-diffusion-xl-base-1.0/tokenizer',
+                                                    'stabilityai/stable-diffusion-xl-base-1.0/tokenizer_2'),
+    text_encoder_names: Union[str, Tuple[str, ...]] = ('stabilityai/stable-diffusion-xl-base-1.0/text_encoder',
+                                                       'stabilityai/stable-diffusion-xl-base-1.0/text_encoder_2'),
     unet_model_name: str = 'stabilityai/stable-diffusion-xl-base-1.0',
     vae_model_name: str = 'madebyollin/sdxl-vae-fp16-fix',
     pretrained: bool = True,
@@ -223,8 +225,12 @@ def stable_diffusion_xl(
     prompts. Currently uses UNet and VAE config from SDXL, but text encoder/tokenizer from SD2.
 
     Args:
-        model_name (str): Name of the model to load. Determines the text encoders, tokenizers,
-            and noise scheduler. Defaults to 'stabilityai/stable-diffusion-xl-base-1.0'.
+        tokenizer_names (str, Tuple[str, ...]): HuggingFace name(s) of the tokenizer(s) to load.
+            Default: ``('stabilityai/stable-diffusion-xl-base-1.0/tokenizer',
+            'stabilityai/stable-diffusion-xl-base-1.0/tokenizer_2')``.
+        text_encoder_names (str, Tuple[str, ...]): HuggingFace name(s) of the text encoder(s) to load.
+            Default: ``('stabilityai/stable-diffusion-xl-base-1.0/text_encoder',
+            'stabilityai/stable-diffusion-xl-base-1.0/text_encoder_2')``.
         unet_model_name (str): Name of the UNet model to load. Defaults to
             'stabilityai/stable-diffusion-xl-base-1.0'.
         vae_model_name (str): Name of the VAE model to load. Defaults to
