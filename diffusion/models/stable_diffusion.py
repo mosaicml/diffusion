@@ -450,7 +450,12 @@ class StableDiffusion(ComposerModel):
                 tokenized_prompts = tokenized_out['input_ids']
                 if self.mask_pad_tokens:
                     tokenized_pad_mask = tokenized_out['attention_mask']
-                prompt_embeds, pooled_text_embeddings = self.text_encoder(tokenized_prompts.to(device))
+            text_encoder_out = self.text_encoder(tokenized_prompts.to(device))
+            prompt_embeds = text_encoder_out[0]
+            if self.sdxl:
+                if len(text_encoder_out) <= 1:
+                    raise RuntimeError('SDXL requires text encoder output to include a pooled text embedding')
+                pooled_text_embeddings = text_encoder_out[1]
 
         else:
             if self.sdxl:
