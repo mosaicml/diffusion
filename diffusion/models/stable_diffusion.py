@@ -153,7 +153,7 @@ class StableDiffusion(ComposerModel):
             inputs, conditionings = batch[self.image_key], batch[self.text_key]
 
             # If encode_latents_in_fp16, disable autocast context as models are in fp16
-            c = torch.cuda.amp.autocast(enabled=False) if self.encode_latents_in_fp16 else nullcontext() # type: ignore
+            c = torch.cuda.amp.autocast(enabled=False) if self.encode_latents_in_fp16 else nullcontext()  # type: ignore
             with c:
                 # Encode the images to the latent space.
                 if self.encode_latents_in_fp16:

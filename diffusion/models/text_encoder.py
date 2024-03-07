@@ -22,6 +22,8 @@ class MultiTextEncoder(torch.nn.Module):
         model_dim_keys (optional, str, list[str]): Key(s) that specify the models' output dimension in the config.
             If ``None``, this is set to ['projection_dim', 'd_model', 'hidden_size']. Default: ``None``.
         encode_latents_in_fp16 (bool): Whether to encode text embeddings in fp16. Default: ``True``.
+        pretrained_sdxl (bool): Whether this text encoder is for a pretrained SDXL. If true, this will only use
+            the projected output from a CLIPTextModelWithProjection. Default: ``False``.
     """
 
     def __init__(
@@ -29,8 +31,11 @@ class MultiTextEncoder(torch.nn.Module):
         model_names: Union[str, Tuple[str, ...]],
         model_dim_keys: Optional[Union[str, List[str]]] = None,
         encode_latents_in_fp16: bool = True,
+        pretrained_sdxl: bool = False,
     ):
         super().__init__()
+        self.pretrained_sdxl = pretrained_sdxl
+
         if isinstance(model_names, str):
             model_names = (model_names,)
         if model_dim_keys is None:
@@ -90,7 +95,12 @@ class MultiTextEncoder(torch.nn.Module):
             output_hidden_states = self.architectures[i] in ['CLIPTextModel', 'CLIPTextModelWithProjection']
             out = self.text_encoders[i](tokenized_texts[:, i], output_hidden_states=output_hidden_states)
             text_embed = out.hidden_states[-2] if output_hidden_states else out[0]
-            pooled_text = out[0] if self.architectures[i] == 'CLIPTextModelWithProjection' else None
+            if self.architectures[i] == 'CLIPTextModelWithProjection':
+                pooled_text = out[0]
+            elif not self.pretrained_sdxl:
+                pooled_text = out[1]
+            else:
+                pooled_text = None
 
             all_text_embed.append(text_embed)
             if pooled_text is not None:

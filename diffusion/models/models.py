@@ -250,7 +250,9 @@ def stable_diffusion_xl(
 
     # Make the tokenizer and text encoder
     tokenizer = MultiTokenizer(tokenizer_names_or_paths=tokenizer_names)
-    text_encoder = MultiTextEncoder(model_names=text_encoder_names, encode_latents_in_fp16=encode_latents_in_fp16)
+    text_encoder = MultiTextEncoder(model_names=text_encoder_names,
+                                    encode_latents_in_fp16=encode_latents_in_fp16,
+                                    pretrained_sdxl=pretrained)
 
     precision = torch.float16 if encode_latents_in_fp16 else None
     # Make the autoencoder
