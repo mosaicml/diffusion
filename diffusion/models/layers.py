@@ -14,10 +14,10 @@ try:
 except:
     pass
 
-T = TypeVar('T', bound=nn.Module)
+_T = TypeVar('_T', bound=nn.Module)
 
 
-def zero_module(module: T) -> T:
+def zero_module(module: _T) -> _T:
     """Zero out the parameters of a module and return it."""
     for p in module.parameters():
         p.detach().zero_()
