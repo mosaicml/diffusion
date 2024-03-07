@@ -239,6 +239,9 @@ def stable_diffusion_xl(
             of training.
         use_xformers (bool): Whether to use xformers for attention. Defaults to True.
     """
+    if len(tokenizer_names) != len(text_encoder_names):
+        raise ValueError('Number of tokenizer_names and text_encoder_names must be equal')
+
     if isinstance(latent_scale, str):
         latent_scale = latent_scale.lower()
         if latent_scale != 'latent_statistics':

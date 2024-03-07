@@ -17,8 +17,7 @@ class MultiTextEncoder(torch.nn.Module):
 
     Args:
         model_names (str, Tuple[str, ...]): Name(s) of the text encoder(s) to load. The name format should be
-            "org_name/repo_name/subfolder" where the subfolder is exclused if it is not used in the repo.
-            Default: ``'stabilityai/stable-diffusion-xl-base-1.0/text_encoder'``.
+            "org_name/repo_name/subfolder" where the subfolder is excluded if it is not used in the repo.
         model_dim_keys (optional, str, list[str]): Key(s) that specify the models' output dimension in the config.
             If ``None``, this is set to ['projection_dim', 'd_model', 'hidden_size']. Default: ``None``.
         encode_latents_in_fp16 (bool): Whether to encode text embeddings in fp16. Default: ``True``.
@@ -114,6 +113,12 @@ class MultiTextEncoder(torch.nn.Module):
 
 
 class MultiTokenizer:
+    """Wrapper to handle multiple HuggingFace tokenizers.
+
+    Args:
+        tokenizer_names_or_paths (str, Tuple[str, ...]): Name(s) of the tokenizer(s) to load. The name format should be
+            "org_name/repo_name/subfolder" where the subfolder is excluded if it is not used in the repo.
+    """
 
     def __init__(self, tokenizer_names_or_paths: Union[str, Tuple[str, ...]]):
         if isinstance(tokenizer_names_or_paths, str):
@@ -129,7 +134,12 @@ class MultiTokenizer:
         self.model_max_length = max([t.model_max_length for t in self.tokenizers])
 
     def __call__(self, text, padding, max_length, truncation, return_tensors):
-        """Return shape: [len(text), len(self.tokenizers), max_length]"""
+        """Function to tokenize text.
+
+        Returns:
+            {'input_ids': PyTorch Tensor for tokenized text of shape [len(text), len(self.tokenizers), max_length],
+            'attention_mask': PyTorch Tensor containing 0s and 1s of shape [len(text), max_length]}
+        """
         input_ids = []
         attention_masks = []
         for tokenizer in self.tokenizers:
