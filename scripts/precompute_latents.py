@@ -13,6 +13,7 @@ import wandb
 from composer.devices import DeviceGPU
 from composer.utils import dist
 from diffusers import AutoencoderKL
+from diffusers.models.modeling_outputs import AutoencoderKLOutput
 from PIL import Image
 from streaming import MDSWriter, Stream, StreamingDataset
 from torch.utils.data import DataLoader
@@ -251,6 +252,7 @@ def main(args: Namespace) -> None:
 
     device = DeviceGPU()
     vae = AutoencoderKL.from_pretrained(args.model_name, subfolder='vae', torch_dtype=torch.float16)
+    assert isinstance(vae, AutoencoderKL)
     text_encoder = CLIPTextModel.from_pretrained(args.model_name, subfolder='text_encoder', torch_dtype=torch.float16)
     vae = device.module_to_device(vae)
     text_encoder = device.module_to_device(text_encoder)
@@ -294,8 +296,12 @@ def main(args: Namespace) -> None:
 
         with torch.no_grad():
             # Encode the images to the latent space with magical scaling number (See https://github.com/huggingface/diffusers/issues/437#issuecomment-1241827515)
-            latents_256 = vae.encode(image_256.half())['latent_dist'].sample().data * 0.18215
-            latents_512 = vae.encode(image_512.half())['latent_dist'].sample().data * 0.18215
+            latent_dist_256 = vae.encode(image_256.half())
+            assert isinstance(latent_dist_256, AutoencoderKLOutput)
+            latents_256 = latent_dist_256['latent_dist'].sample().data * 0.18215
+            latent_dist_512 = vae.encode(image_512.half())
+            assert isinstance(latent_dist_512, AutoencoderKLOutput)
+            latents_512 = latent_dist_512['latent_dist'].sample().data * 0.18215
             # Encode the text. Assume that the text is already tokenized
             conditioning = text_encoder(captions.view(-1, captions.shape[-1]))[0]  # Should be (batch_size, 77, 768)
 
