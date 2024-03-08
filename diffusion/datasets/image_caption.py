@@ -45,8 +45,6 @@ class StreamingImageCaptionDataset(StreamingDataset):
         sdxl_conditioning (bool): Whether or not to include SDXL microconditioning in a sample. Default: `False`.
         zero_dropped_captions (bool): If True, zero out text embeddings for dropped captions. Default: ``False``.
         **streaming_kwargs: Additional arguments to pass in the construction of the StreamingDataloader
-
-        TODO: Add a return documentation
     """
 
     def __init__(

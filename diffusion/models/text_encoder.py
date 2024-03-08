@@ -80,26 +80,29 @@ class MultiTextEncoder(torch.nn.Module):
     def device(self):
         return self.text_encoders[0].device
 
-    def forward(self, tokenized_texts: torch.Tensor):
-        # Make sure tokenized_texts is shape [batch_size, len(self.text_encoders), max_sequence_length]
-        if len(tokenized_texts.shape) == 2:
-            tokenized_texts = tokenized_texts.unsqueeze(dim=1)
-        if tokenized_texts.shape[1] != len(self.text_encoders):
+    def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor):
+        # Check input_ids and attention_mask is shape [batch_size, len(self.text_encoders), max_sequence_length]
+        if len(input_ids.shape) == 2:
+            input_ids = input_ids.unsqueeze(dim=1)
+        if len(attention_mask.shape) == 2:
+            attention_mask = attention_mask.unsqueeze(dim=1)
+        if input_ids.shape[1] != len(self.text_encoders) or attention_mask.shape[1] != len(self.text_encoders):
             raise RuntimeError(
-                f'tokenized_texts must be of shape [batch_size, len(self.tokenizers), s]: {tokenized_texts.shape}')
+                f'input_ids and attention_mask must be of shape [batch_size, len(self.tokenizers), max_seq_len]')
 
         all_text_embed = []
         all_pooled_text = []
         for i in range(len(self.text_encoders)):
             output_hidden_states = self.architectures[i] in ['CLIPTextModel', 'CLIPTextModelWithProjection']
-            out = self.text_encoders[i](tokenized_texts[:, i], output_hidden_states=output_hidden_states)
+            out = self.text_encoders[i](input_ids=input_ids[:, i],
+                                        attention_mask=attention_mask,
+                                        output_hidden_states=output_hidden_states)
             text_embed = out.hidden_states[-2] if output_hidden_states else out[0]
+            pooled_text = None
             if self.architectures[i] == 'CLIPTextModelWithProjection':
                 pooled_text = out[0]
             elif not self.pretrained_sdxl:
                 pooled_text = out[1]
-            else:
-                pooled_text = None
 
             all_text_embed.append(text_embed)
             if pooled_text is not None:
@@ -137,8 +140,8 @@ class MultiTokenizer:
         """Function to tokenize text.
 
         Returns:
-            {'input_ids': PyTorch Tensor for tokenized text of shape [len(text), len(self.tokenizers), max_length],
-            'attention_mask': PyTorch Tensor containing 0s and 1s of shape [len(text), max_length]}
+            {'input_ids': PyTorch Tensor for tokenized text of shape [n_text, len(self.tokenizers), max_length],
+            'attention_mask': PyTorch Tensor containing 0s and 1s of shape [n_text, len(self.tokenizers), max_length]}
         """
         input_ids = []
         attention_masks = []
@@ -150,10 +153,8 @@ class MultiTokenizer:
                             return_tensors=return_tensors)
 
             input_ids.append(out.input_ids)
-            attention_masks.append(out.attention_masks)
+            attention_masks.append(out.attention_mask)
 
-        input_ids = torch.stack(input_ids, dim=1).squeeze(dim=1)
-        attention_mask = torch.zeros_like(attention_masks[0])
-        for mask in attention_masks:
-            attention_mask |= mask
+        input_ids = torch.stack(input_ids, dim=1)
+        attention_mask = attention_mask = torch.stack(attention_masks, dim=1)
         return {'input_ids': input_ids, 'attention_mask': attention_mask}
