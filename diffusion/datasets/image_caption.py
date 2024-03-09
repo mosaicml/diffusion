@@ -157,7 +157,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
                                        truncation=True,
                                        return_tensors='pt')
         out['captions'] = tokenizer_out['input_ids'].squeeze()
-        out['attention_mask'] = tokenizer_out['attention_mask']
+        out['attention_mask'] = tokenizer_out['attention_mask'].squeeze(dim=0)
         return out
 
 
