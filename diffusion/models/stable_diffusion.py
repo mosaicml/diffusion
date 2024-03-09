@@ -155,7 +155,7 @@ class StableDiffusion(ComposerModel):
                     for i in range(1, attention_mask.shape[1]):
                         encoder_attention_mask |= attention_mask[:, i]
                 else:
-                    raise ValueError('attention_mask should have either 2 or 3 dimensions.')
+                    raise ValueError(f'attention_mask should have either 2 or 3 dimensions: {attention_mask.shape}')
 
         # Use latents if specified and available. When specified, they might not exist during eval
         if self.precomputed_latents and self.image_latents_key in batch and self.text_latents_key in batch:
