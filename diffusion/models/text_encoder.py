@@ -38,7 +38,7 @@ class MultiTextEncoder(torch.nn.Module):
         if isinstance(model_names, str):
             model_names = (model_names,)
         if model_dim_keys is None:
-            model_dim_keys = ['projection_dim', 'd_model', 'hidden_size']  # CLIP, T5, E5
+            model_dim_keys = ['d_model', 'hidden_size']  # CLIP, T5, E5
         torch_dtype = torch.float16 if encode_latents_in_fp16 else None
 
         self.text_encoders = torch.nn.ModuleList()
@@ -80,20 +80,21 @@ class MultiTextEncoder(torch.nn.Module):
     def device(self):
         return self.text_encoders[0].device
 
-    def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor):
-        # Check input_ids and attention_mask is shape [batch_size, len(self.text_encoders), max_sequence_length]
+    def forward(self, input_ids: torch.Tensor, attention_masks: Optional[torch.Tensor] = None):
+        # Check input_ids and attention_masks is shape [batch_size, len(self.text_encoders), max_sequence_length]
         if len(input_ids.shape) == 2:
             input_ids = input_ids.unsqueeze(dim=1)
-        if len(attention_mask.shape) == 2:
-            attention_mask = attention_mask.unsqueeze(dim=1)
-        if input_ids.shape[1] != len(self.text_encoders) or attention_mask.shape[1] != len(self.text_encoders):
+        if len(attention_masks.shape) == 2:
+            attention_masks = attention_masks.unsqueeze(dim=1)
+        if input_ids.shape[1] != len(self.text_encoders) or attention_masks.shape[1] != len(self.text_encoders):
             raise RuntimeError(
-                f'input_ids and attention_mask must be of shape [batch_size, len(self.tokenizers), max_seq_len]')
+                f'input_ids and attention_masks must be of shape [batch_size, len(self.tokenizers), max_seq_len]')
 
         all_text_embed = []
         all_pooled_text = []
         for i in range(len(self.text_encoders)):
             output_hidden_states = self.architectures[i] in ['CLIPTextModel', 'CLIPTextModelWithProjection']
+            attention_mask = attention_masks[:, i] if attention_masks is not None  else attention_masks
             out = self.text_encoders[i](input_ids=input_ids[:, i],
                                         attention_mask=attention_mask,
                                         output_hidden_states=output_hidden_states)
@@ -134,7 +135,7 @@ class MultiTokenizer:
             subfolder = '/'.join(path_split[2:])
             self.tokenizers.append(AutoTokenizer.from_pretrained(base_name, subfolder=subfolder))
 
-        self.model_max_length = max([t.model_max_length for t in self.tokenizers])
+        self.model_max_length = min([t.model_max_length for t in self.tokenizers])
 
     def __call__(self, text, padding, max_length, truncation, return_tensors):
         """Function to tokenize text.
