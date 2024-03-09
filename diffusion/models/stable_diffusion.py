@@ -151,7 +151,7 @@ class StableDiffusion(ComposerModel):
                 if len(attention_mask.shape) == 2:
                     encoder_attention_mask = attention_mask
                 elif len(attention_mask.shape) == 3:
-                    encoder_attention_mask = attention_mask[:0]
+                    encoder_attention_mask = attention_mask[:, 0]
                     for i in range(1, attention_mask.shape[1]):
                         encoder_attention_mask |= attention_mask[:, i]
                 else:
