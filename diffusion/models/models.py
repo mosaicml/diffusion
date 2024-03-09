@@ -115,11 +115,11 @@ def stable_diffusion_2(
     # Make the unet
     if pretrained:
         unet = UNet2DConditionModel.from_pretrained(model_name, subfolder='unet')
-        if autoencoder_path is not None and vae.config['latent_channels'] != 4:
+        if isinstance(vae, AutoEncoder) and vae.config['latent_channels'] != 4:
             raise ValueError(f'Pretrained unet has 4 latent channels but the vae has {vae.latent_channels}.')
     else:
         unet_config = PretrainedConfig.get_config_dict(model_name, subfolder='unet')[0]
-        if autoencoder_path is not None:
+        if isinstance(vae, AutoEncoder):
             # Adapt the unet config to account for differing number of latent channels if necessary
             unet_config['in_channels'] = vae.config['latent_channels']
             unet_config['out_channels'] = vae.config['latent_channels']
@@ -271,11 +271,11 @@ def stable_diffusion_xl(
     # Make the unet
     if pretrained:
         unet = UNet2DConditionModel.from_pretrained(unet_model_name, subfolder='unet')
-        if autoencoder_path is not None and vae.config['latent_channels'] != 4:
+        if isinstance(vae, AutoEncoder) and vae.config['latent_channels'] != 4:
             raise ValueError(f'Pretrained unet has 4 latent channels but the vae has {vae.latent_channels}.')
     else:
         unet_config = PretrainedConfig.get_config_dict(unet_model_name, subfolder='unet')[0]
-        if autoencoder_path is not None:
+        if isinstance(vae, AutoEncoder):
             # Adapt the unet config to account for differing number of latent channels if necessary
             unet_config['in_channels'] = vae.config['latent_channels']
             unet_config['out_channels'] = vae.config['latent_channels']
@@ -462,6 +462,7 @@ def build_diffusers_autoencoder(model_name: str = 'stabilityai/stable-diffusion-
         else:
             config = PretrainedConfig.get_config_dict(model_name)
         model = AutoencoderKL(**config[0])
+    assert isinstance(model, AutoencoderKL)
 
     # Configure the loss function
     autoencoder_loss = AutoEncoderLoss(input_key=input_key,
@@ -488,12 +489,13 @@ def discrete_pixel_diffusion(clip_model_name: str = 'openai/clip-vit-large-patch
             Defaults to 'epsilon'.
     """
     # Create a pixel space unet
-    unet = UNet2DConditionModel(in_channels=3,
-                                out_channels=3,
-                                attention_head_dim=[5, 10, 20, 20],
-                                cross_attention_dim=768,
-                                flip_sin_to_cos=True,
-                                use_linear_projection=True)
+    unet = UNet2DConditionModel(
+        in_channels=3,
+        out_channels=3,
+        attention_head_dim=[5, 10, 20, 20],  # type: ignore
+        cross_attention_dim=768,
+        flip_sin_to_cos=True,
+        use_linear_projection=True)
     # Get the CLIP text encoder and tokenizer:
     text_encoder = CLIPTextModel.from_pretrained(clip_model_name)
     tokenizer = CLIPTokenizer.from_pretrained(clip_model_name)
@@ -562,12 +564,13 @@ def continuous_pixel_diffusion(clip_model_name: str = 'openai/clip-vit-large-pat
             Defaults to 1.56 (pi/2 - 0.01 for stability).
     """
     # Create a pixel space unet
-    unet = UNet2DConditionModel(in_channels=3,
-                                out_channels=3,
-                                attention_head_dim=[5, 10, 20, 20],
-                                cross_attention_dim=768,
-                                flip_sin_to_cos=True,
-                                use_linear_projection=True)
+    unet = UNet2DConditionModel(
+        in_channels=3,
+        out_channels=3,
+        attention_head_dim=[5, 10, 20, 20],  # type: ignore
+        cross_attention_dim=768,
+        flip_sin_to_cos=True,
+        use_linear_projection=True)
     # Get the CLIP text encoder and tokenizer:
     text_encoder = CLIPTextModel.from_pretrained(clip_model_name)
     tokenizer = CLIPTokenizer.from_pretrained(clip_model_name)
