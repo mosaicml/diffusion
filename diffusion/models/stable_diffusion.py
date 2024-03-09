@@ -145,15 +145,15 @@ class StableDiffusion(ComposerModel):
     def forward(self, batch):
         latents, text_embeds, text_pooled_embeds, attention_mask, encoder_attention_mask = None, None, None, None, None
         if 'attention_mask' in batch:
-            attention_mask = batch['attention_mask'] # mask for text encoders
+            attention_mask = batch['attention_mask']  # mask for text encoders
             # text mask for U-Net
             if self.mask_pad_tokens:
                 if len(attention_mask.shape) == 2:
                     encoder_attention_mask = attention_mask
                 elif len(attention_mask.shape) == 3:
-                    encoder_attention_mask = attention_mask[: 0]
+                    encoder_attention_mask = attention_mask[:0]
                     for i in range(1, attention_mask.shape[1]):
-                        encoder_attention_mask |= attention_mask[: i]
+                        encoder_attention_mask |= attention_mask[:, i]
                 else:
                     raise ValueError('attention_mask should have either 2 or 3 dimensions.')
 

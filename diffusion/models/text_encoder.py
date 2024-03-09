@@ -88,7 +88,7 @@ class MultiTextEncoder(torch.nn.Module):
             attention_mask = attention_mask.unsqueeze(dim=1)
         if input_ids.shape[1] != len(self.text_encoders) or attention_mask.shape[1] != len(self.text_encoders):
             raise RuntimeError(
-                f'input_ids and attention_mask must be of shape [batch_size, len(self.tokenizers), max_seq_len]')
+                'input_ids and attention_mask must be of shape [batch_size, len(self.tokenizers), max_seq_len]')
 
         all_text_embed = []
         all_pooled_text = []
