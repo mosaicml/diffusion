@@ -143,7 +143,20 @@ class StableDiffusion(ComposerModel):
         self.rng_generator = rng_generator
 
     def forward(self, batch):
-        latents, text_embeds, text_pooled_embeds = None, None, None
+        latents, text_embeds, text_pooled_embeds, attention_mask, encoder_attention_mask = None, None, None, None, None
+        if 'attention_mask' in batch:
+            attention_mask = batch['attention_mask'] # mask for text encoders
+            # text mask for U-Net
+            if self.mask_pad_tokens:
+                if len(attention_mask.shape) == 2:
+                    encoder_attention_mask = attention_mask
+                elif len(attention_mask.shape) == 3:
+                    encoder_attention_mask = attention_mask[: 0]
+                    for i in range(1, attention_mask.shape[1]):
+                        encoder_attention_mask |= attention_mask[: i]
+                else:
+                    raise ValueError('attention_mask should have either 2 or 3 dimensions.')
+
         # Use latents if specified and available. When specified, they might not exist during eval
         if self.precomputed_latents and self.image_latents_key in batch and self.text_latents_key in batch:
             if self.sdxl:
@@ -161,7 +174,7 @@ class StableDiffusion(ComposerModel):
                 else:
                     latents = self.vae.encode(inputs)['latent_dist'].sample().data
                 # Encode tokenized prompt into embedded text and pooled text embeddings
-                text_encoder_out = self.text_encoder(conditionings)
+                text_encoder_out = self.text_encoder(conditionings, attention_mask=attention_mask)
                 text_embeds = text_encoder_out[0]
                 if self.sdxl:
                     if len(text_encoder_out) <= 1:
@@ -176,12 +189,6 @@ class StableDiffusion(ComposerModel):
             text_embeds *= batch['drop_caption_mask'].view(-1, 1, 1)
             if text_pooled_embeds:
                 text_pooled_embeds *= batch['drop_caption_mask'].view(-1, 1)
-
-        # Attention mask if needed
-        if self.mask_pad_tokens and 'attention_mask' in batch.keys():
-            encoder_attention_mask = batch['attention_mask']
-        else:
-            encoder_attention_mask = None
 
         # Sample the diffusion timesteps
         timesteps = torch.randint(0,

@@ -196,7 +196,7 @@ def stable_diffusion_xl(
     encode_latents_in_fp16: bool = True,
     mask_pad_tokens: bool = False,
     fsdp: bool = True,
-    clip_qkv: Optional[float] = 6.0,
+    clip_qkv: Optional[float] = None,
     use_xformers: bool = True,
 ):
     """Stable diffusion 2 training setup + SDXL UNet and VAE.
@@ -235,8 +235,8 @@ def stable_diffusion_xl(
         encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
         mask_pad_tokens (bool): Whether to mask pad tokens in cross attention. Defaults to False.
         fsdp (bool): Whether to use FSDP. Defaults to True.
-        clip_qkv (float, optional): If not None, clip the qkv values to this value. Defaults to 6.0. Improves stability
-            of training.
+        clip_qkv (float, optional): If not None, clip the qkv values to this value. Improves stability of training.
+            Default: ``None``.
         use_xformers (bool): Whether to use xformers for attention. Defaults to True.
     """
     if len(tokenizer_names) != len(text_encoder_names):
@@ -293,6 +293,9 @@ def stable_diffusion_xl(
             unet_config['in_channels'] = vae.config['latent_channels']
             unet_config['out_channels'] = vae.config['latent_channels']
         unet_config['cross_attention_dim'] = text_encoder.text_encoder_dim
+        # This config variable is the sum of the text encoder projection dimension and
+        # the number of additional time embeddings (6) * addition_time_embed_dim (256)
+        unet_config['projection_class_embeddings_input_dim'] = text_encoder.text_encoder_dim + 1536
         # Init the unet from the config
         unet = UNet2DConditionModel(**unet_config)
 

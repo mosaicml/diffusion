@@ -7,10 +7,10 @@
 import pytest
 import torch
 
-from diffusion.models.models import stable_diffusion_2
+from diffusion.models.models import stable_diffusion_2, stable_diffusion_xl
 
 
-def test_model_forward():
+def test_sd2_forward():
     # fp16 vae does not run on cpu
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     model = stable_diffusion_2(pretrained=False, fsdp=False, encode_latents_in_fp16=False)
@@ -28,10 +28,35 @@ def test_model_forward():
     assert output.shape == latent.shape
     assert target.shape == latent.shape
 
+def test_sdxl_forward():
+    # fp16 vae does not run on cpu
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    model = stable_diffusion_xl(pretrained=False, fsdp=False, encode_latents_in_fp16=False, use_xformers=False)
+    batch_size = 1
+    H = 16
+    W = 16
+    image = torch.randn(batch_size, 3, H, W, device=device)
+    prompt = 'a cool doge'
+    tokenized_prompt = model.tokenizer(prompt,
+                                       padding='max_length',
+                                       max_length=model.tokenizer.model_max_length,
+                                       truncation=True,
+                                       return_tensors='pt')
+    print(tokenized_prompt['attention_mask'].shape)
+    batch = {'image': image,
+             'captions': tokenized_prompt['input_ids'],
+             'attention_mask': tokenized_prompt['attention_mask'],
+             'cond_original_size': torch.tensor([[H, W]]),
+             'cond_crops_coords_top_left': torch.tensor([[0, 0]]),
+             'cond_target_size': torch.tensor([[H, W]])}
+    output, target, _ = model(batch)  # model.forward generates the unet output noise or v_pred target.
+    assert output.shape == torch.Size([batch_size, 4, H // 8, W // 8])
+    assert target.shape == torch.Size([batch_size, 4, H // 8, W // 8])
+
 
 @pytest.mark.parametrize('guidance_scale', [0.0, 3.0])
 @pytest.mark.parametrize('negative_prompt', [None, 'so cool'])
-def test_model_generate(guidance_scale, negative_prompt):
+def test_sd2_generate(guidance_scale, negative_prompt):
     # fp16 vae does not run on cpu
     model = stable_diffusion_2(pretrained=False, fsdp=False, encode_latents_in_fp16=False)
     output = model.generate(
