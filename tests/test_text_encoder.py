@@ -60,8 +60,7 @@ for i in range(2, len(text_encoders) + 1):
     text_encoder_combins += list(itertools.combinations(text_encoders, i))
 
 
-@pytest.mark.parametrize('tokenizer_names,text_encoder_names',
-                         [t for t in zip(tokenizer_combins, text_encoder_combins)])
+@pytest.mark.parametrize('tokenizer_names,text_encoder_names', list(zip(tokenizer_combins, text_encoder_combins)))
 def test_multi_text_encoder(tokenizer_names, text_encoder_names, encode_latents_in_fp16=False):
     prompt = 'What is a test? Who are we testing? Why are we testing? WHERE are we testing?!'
     tokenizer = MultiTokenizer(tokenizer_names)

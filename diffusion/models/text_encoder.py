@@ -84,9 +84,10 @@ class MultiTextEncoder(torch.nn.Module):
         # Check input_ids and attention_mask is shape [batch_size, len(self.text_encoders), max_sequence_length]
         if len(input_ids.shape) == 2:
             input_ids = input_ids.unsqueeze(dim=1)
-        if len(attention_mask.shape) == 2:
+        if attention_mask is not None and len(attention_mask.shape) == 2:
             attention_mask = attention_mask.unsqueeze(dim=1)
-        if input_ids.shape[1] != len(self.text_encoders) or attention_mask.shape[1] != len(self.text_encoders):
+        if input_ids.shape[1] != len(self.text_encoders) or (attention_mask is not None and
+                                                             attention_mask.shape[1] != len(self.text_encoders)):
             raise RuntimeError(
                 'input_ids and attention_mask must be of shape [batch_size, len(self.tokenizers), max_seq_len]')
 
