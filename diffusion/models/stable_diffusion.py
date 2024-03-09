@@ -456,14 +456,14 @@ class StableDiffusion(ComposerModel):
                                                return_tensors='pt')
                 tokenized_prompts = tokenized_out['input_ids']
                 tokenized_pad_mask = tokenized_out['attention_mask']
-            text_encoder_out = self.text_encoder(tokenized_prompts.to(device),
-                                                 attention_mask=tokenized_pad_mask.to(device))
+            if tokenized_pad_mask is not None:
+                tokenized_pad_mask = tokenized_pad_mask.to(device)
+            text_encoder_out = self.text_encoder(tokenized_prompts.to(device), attention_mask=tokenized_pad_mask)
             prompt_embeds = text_encoder_out[0]
             if self.sdxl:
                 if len(text_encoder_out) <= 1:
                     raise RuntimeError('SDXL requires text encoder output to include a pooled text embedding')
                 pooled_text_embeddings = text_encoder_out[1]
-
         else:
             if self.sdxl:
                 raise NotImplementedError('SDXL not yet supported with precomputed embeddings')
@@ -473,14 +473,12 @@ class StableDiffusion(ComposerModel):
         prompt_embeds = prompt_embeds.repeat(1, num_images_per_prompt, 1)  # type: ignore
         prompt_embeds = prompt_embeds.view(bs_embed * num_images_per_prompt, seq_len, -1)
 
-        if self.mask_pad_tokens:
+        if self.mask_pad_tokens and tokenized_pad_mask is not None:
             if len(tokenized_pad_mask.shape) == 3:
                 attention_mask = tokenized_pad_mask[:, 0]
                 for i in range(1, tokenized_pad_mask.shape[1]):
                     attention_mask |= tokenized_pad_mask[:, i]
-            else:
-                attention_mask = tokenized_pad_mask
-            tokenized_pad_mask = attention_mask
+                tokenized_pad_mask = attention_mask
             tokenized_pad_mask = tokenized_pad_mask.repeat(1, num_images_per_prompt, 1)
             tokenized_pad_mask = tokenized_pad_mask.view(bs_embed * num_images_per_prompt, seq_len)  # [B, 77]
 
