@@ -46,6 +46,7 @@ def test_sd2_generate(guidance_scale, negative_prompt):
     )
     assert output.shape == (1, 3, 8, 8)
 
+
 def test_sdxl_forward():
     # fp16 vae does not run on cpu
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
@@ -72,6 +73,7 @@ def test_sdxl_forward():
     output, target, _ = model(batch)  # model.forward generates the unet output noise or v_pred target.
     assert output.shape == torch.Size([batch_size, 4, H // 8, W // 8])
     assert target.shape == torch.Size([batch_size, 4, H // 8, W // 8])
+
 
 @pytest.mark.parametrize('guidance_scale', [0.0, 3.0])
 @pytest.mark.parametrize('negative_prompt', [None, 'so cool'])
