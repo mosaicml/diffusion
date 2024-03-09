@@ -39,26 +39,13 @@ Results from our Mosaic Diffusion model after training for 550k iterations at 25
 Here are the system settings we recommend to start training your own diffusion models:
 
 - Use a Docker image with PyTorch 1.13+, e.g. [MosaicML's PyTorch base image](https://hub.docker.com/r/mosaicml/pytorch/tags)
-  - Recommended tag: `mosaicml/pytorch_vision:1.13.1_cu117-python3.10-ubuntu20.04`
+  - Recommended tag: `mosaicml/pytorch:2.1.2_cu121-python3.10-ubuntu20.04`
   - This image comes pre-configured with the following dependencies:
-    - PyTorch Version: 1.13.1
-    - CUDA Version: 11.7
+    - PyTorch Version: 2.1.2
+    - CUDA Version: 12.1
     - Python Version: 3.10
     - Ubuntu Version: 20.04
 - Use a system with NVIDIA GPUs
-
-- For running on NVIDIA H100s, use a docker image with PyTorch 2.0+ e.g. [MosaicML's PyTorch base image](https://hub.docker.com/r/mosaicml/pytorch/tags)
-  - Recommended tag: `mosaicml/pytorch_vision:2.0.1_cu118-python3.10-ubuntu20.04`
-  - This image comes pre-configured with the following dependencies:
-    - PyTorch Version: 2.0.1
-    - CUDA Version: 11.8
-    - Python Version: 3.10
-    - Ubuntu Version: 20.04
-  - Depending on the training config, an additional install of `xformers` may be needed:
-    ```
-    pip install -U ninja
-    pip install -U git+https://github.com/facebookresearch/xformers
-    ```
 
 # How many GPUs do I need?
 
