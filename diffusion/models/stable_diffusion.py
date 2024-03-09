@@ -187,7 +187,7 @@ class StableDiffusion(ComposerModel):
         # Zero dropped captions if needed
         if 'drop_caption_mask' in batch.keys():
             text_embeds *= batch['drop_caption_mask'].view(-1, 1, 1)
-            if text_pooled_embeds:
+            if text_pooled_embeds is not None:
                 text_pooled_embeds *= batch['drop_caption_mask'].view(-1, 1)
 
         # Sample the diffusion timesteps
