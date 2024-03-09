@@ -29,6 +29,23 @@ def test_sd2_forward():
     assert target.shape == latent.shape
 
 
+@pytest.mark.parametrize('guidance_scale', [0.0, 3.0])
+@pytest.mark.parametrize('negative_prompt', [None, 'so cool'])
+def test_sd2_generate(guidance_scale, negative_prompt):
+    # fp16 vae does not run on cpu
+    model = stable_diffusion_2(pretrained=False, fsdp=False, encode_latents_in_fp16=False)
+    output = model.generate(
+        prompt='a cool doge',
+        negative_prompt=negative_prompt,
+        num_inference_steps=1,
+        num_images_per_prompt=1,
+        height=8,
+        width=8,
+        guidance_scale=guidance_scale,
+        progress_bar=False,
+    )
+    assert output.shape == (1, 3, 8, 8)
+
 def test_sdxl_forward():
     # fp16 vae does not run on cpu
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
@@ -56,20 +73,19 @@ def test_sdxl_forward():
     assert output.shape == torch.Size([batch_size, 4, H // 8, W // 8])
     assert target.shape == torch.Size([batch_size, 4, H // 8, W // 8])
 
-
 @pytest.mark.parametrize('guidance_scale', [0.0, 3.0])
 @pytest.mark.parametrize('negative_prompt', [None, 'so cool'])
-def test_sd2_generate(guidance_scale, negative_prompt):
+def test_sdxl_generate(guidance_scale, negative_prompt):
     # fp16 vae does not run on cpu
-    model = stable_diffusion_2(pretrained=False, fsdp=False, encode_latents_in_fp16=False)
+    model = stable_diffusion_xl(pretrained=False, fsdp=False, encode_latents_in_fp16=False, use_xformers=False)
     output = model.generate(
         prompt='a cool doge',
         negative_prompt=negative_prompt,
         num_inference_steps=1,
         num_images_per_prompt=1,
-        height=8,
-        width=8,
+        height=16,
+        width=16,
         guidance_scale=guidance_scale,
         progress_bar=False,
     )
-    assert output.shape == (1, 3, 8, 8)
+    assert output.shape == (1, 3, 16, 16)
