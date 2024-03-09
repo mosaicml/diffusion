@@ -239,7 +239,8 @@ def stable_diffusion_xl(
             Default: ``None``.
         use_xformers (bool): Whether to use xformers for attention. Defaults to True.
     """
-    if len(tokenizer_names) != len(text_encoder_names):
+    if (isinstance(tokenizer_names, tuple) or
+            isinstance(text_encoder_names, tuple)) and len(tokenizer_names) != len(text_encoder_names):
         raise ValueError('Number of tokenizer_names and text_encoder_names must be equal')
 
     if isinstance(latent_scale, str):
