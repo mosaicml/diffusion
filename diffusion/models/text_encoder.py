@@ -43,6 +43,7 @@ class MultiTextEncoder(torch.nn.Module):
 
         self.text_encoders = torch.nn.ModuleList()
         self.text_encoder_dim = 0
+        self.text_encoder_proj_dim = 0
         self.architectures = []
         for model_name in model_names:
             # Process model_name string and get model config
@@ -56,6 +57,9 @@ class MultiTextEncoder(torch.nn.Module):
             for model_dim_key in model_dim_keys:
                 if model_dim_key in text_encoder_config:
                     self.text_encoder_dim += text_encoder_config[model_dim_key]
+                    # This does not add to proj_dim when pretrained and architecture is CLIPTextModel
+                    if not self.pretrained_sdxl or text_encoder_config['architectures'] != ['CLIPTextModel']:
+                        self.text_encoder_proj_dim += text_encoder_config[model_dim_key]
                     dim_found = True
             if not dim_found:
                 raise ValueError(
@@ -99,21 +103,18 @@ class MultiTextEncoder(torch.nn.Module):
                                         attention_mask=attention_mask[:, i] if attention_mask is not None else None,
                                         output_hidden_states=output_hidden_states)
             text_embed = out.hidden_states[-2] if output_hidden_states else out[0]
-            pooled_text = None
+            all_text_embed.append(text_embed)
+
             if self.architectures[i] == 'CLIPTextModelWithProjection':
                 pooled_text = out[0]
+                all_pooled_text.append(pooled_text)
             elif not self.pretrained_sdxl:
                 pooled_text = out[1]
-
-            all_text_embed.append(text_embed)
-            if pooled_text is not None:
                 all_pooled_text.append(pooled_text)
 
         text_embed = torch.concat(all_text_embed, dim=-1)
-        if all_pooled_text:
-            pooled_text = torch.concat(all_pooled_text, dim=-1)
-            return text_embed, pooled_text
-        return (text_embed,)
+        pooled_text = torch.concat(all_pooled_text, dim=-1)
+        return text_embed, pooled_text
 
 
 class MultiTokenizer:

@@ -138,12 +138,10 @@ class StableDiffusionXLInference():
     """
 
     def __init__(self,
-                 tokenizer_names: Union[str, Tuple[str,
-                                                   ...]] = ('stabilityai/stable-diffusion-xl-base-1.0/tokenizer',
-                                                            'stabilityai/stable-diffusion-xl-base-1.0/tokenizer_2'),
-                 text_encoder_names: Union[str, Tuple[str,
-                                                      ...]] = ('stabilityai/stable-diffusion-xl-base-1.0/tokenizer',
-                                                               'stabilityai/stable-diffusion-xl-base-1.0/tokenizer_2'),
+                 tokenizer_names: Union[str, Tuple[str, ...]] = ('stabilityai/stable-diffusion-xl-base-1.0/tokenizer',
+                                                                 'stabilityai/stable-diffusion-xl-base-1.0/tokenizer_2'),
+                 text_encoder_names: Union[str, Tuple[str, ...]] = ('stabilityai/stable-diffusion-xl-base-1.0/text_encoder',
+                                                                    'stabilityai/stable-diffusion-xl-base-1.0/text_encoder_2'),
                  unet_model_name: str = 'stabilityai/stable-diffusion-xl-base-1.0',
                  vae_model_name: str = 'madebyollin/sdxl-vae-fp16-fix',
                  clip_qkv: Optional[float] = None,

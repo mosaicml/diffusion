@@ -296,7 +296,7 @@ def stable_diffusion_xl(
         unet_config['cross_attention_dim'] = text_encoder.text_encoder_dim
         # This config variable is the sum of the text encoder projection dimension and
         # the number of additional time embeddings (6) * addition_time_embed_dim (256)
-        unet_config['projection_class_embeddings_input_dim'] = text_encoder.text_encoder_dim + 1536
+        unet_config['projection_class_embeddings_input_dim'] = text_encoder.text_encoder_proj_dim + 1536
         # Init the unet from the config
         unet = UNet2DConditionModel(**unet_config)
 

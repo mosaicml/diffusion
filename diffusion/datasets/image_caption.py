@@ -32,7 +32,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
             ``StreamingImageCaptionDataset`` uses either ``streams`` or ``remote``/``local``. Default:``None``.
         remote (str, optional): Remote directory (S3 or local filesystem) where dataset is stored. Default: ``None``.
         local (str, optional): Local filesystem directory where dataset is cached during operation. Default: ``None``.
-        tokenizer_names_or_paths (str, list[str]): The name(s) or path(s) of the tokenizer(s) to use.
+        tokenizer_names_or_paths (str, Tuple[str, ...]): The name(s) or path(s) of the tokenizer(s) to use.
         caption_drop_prob (float): The probability of dropping a caption. Default: ``0.0``.
         microcond_drop_prob (float): The probability of dropping microconditioning. Only relevant for SDXL. Default: ``0.0``.
         caption_selection (str): If there are multiple captions, specifies how to select a single caption.
@@ -157,7 +157,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
                                        truncation=True,
                                        return_tensors='pt')
         out['captions'] = tokenizer_out['input_ids'].squeeze()
-        out['attention_mask'] = tokenizer_out['attention_mask'].squeeze(dim=0)
+        out['attention_mask'] = tokenizer_out['attention_mask'].squeeze()
         return out
 
 
