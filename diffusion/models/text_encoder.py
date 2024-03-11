@@ -160,3 +160,8 @@ class MultiTokenizer:
         input_ids = torch.stack(input_ids, dim=1)
         attention_mask = torch.stack(attention_masks, dim=1)
         return {'input_ids': input_ids, 'attention_mask': attention_mask}
+
+    def batch_decode(self, sequences, skip_special_tokens: bool = False):
+        sequences = sequences[:, 0] if len(sequences.shape) == 3 else sequences
+        text = self.tokenizers[0].batch_decode(sequences, skip_special_tokens=skip_special_tokens)
+        return text

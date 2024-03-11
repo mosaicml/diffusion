@@ -158,11 +158,7 @@ class CleanFIDEvaluator:
                                                        input_size_params=input_size_params,
                                                        progress_bar=False)  # type: ignore
             # Get the prompts from the tokens
-            if self.sdxl:
-                # Decode with first tokenizer
-                text_captions = self.tokenizer.tokenizer.batch_decode(captions[:, 0, :], skip_special_tokens=True)
-            else:
-                text_captions = self.tokenizer.batch_decode(captions, skip_special_tokens=True)
+            text_captions = self.tokenizer.batch_decode(captions, skip_special_tokens=True)
             self.clip_metric.update((generated_images * 255).to(torch.uint8), text_captions)
             # Save the real images
             # Verify that the real images are in the proper range
