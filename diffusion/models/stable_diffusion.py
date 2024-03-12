@@ -39,8 +39,10 @@ class StableDiffusion(ComposerModel):
         loss_fn (torch.nn.Module): torch loss function. Default: `F.mse_loss`.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
-        latent_scale: (float): The scale of the latents. Defaults to `0.18215`, for the SD1/SD2 autoencoder.
-            If `sdxl` is True, defaults to `0.13025`, for the SDXL autoencoder.
+        latent_mean (Optional[list[float]]): The mean of the latent space. If not specified, defaults to
+            4 * [0]. Default: `None`.
+        latent_std (Optional[list[float]]): The standard deviation of the latent space. If not specified,
+            defaults to 4 * [1/0.13025] for SDXL, or 4 * [1/0.18215] for non-SDXL. Default: `None`.
         downsample_factor (int): The factor by which the image is downsampled by the autoencoder. Default `8`.
         offset_noise (float, optional): The scale of the offset noise. If not specified, offset noise will not
             be used. Default `None`.
@@ -76,7 +78,8 @@ class StableDiffusion(ComposerModel):
                  inference_noise_scheduler,
                  loss_fn=F.mse_loss,
                  prediction_type: str = 'epsilon',
-                 latent_scale: Optional[float] = None,
+                 latent_mean: Optional[List[float]] = None,
+                 latent_std: Optional[List[float]] = None,
                  downsample_factor: int = 8,
                  offset_noise: Optional[float] = None,
                  train_metrics: Optional[List] = None,
@@ -107,12 +110,12 @@ class StableDiffusion(ComposerModel):
         self.precomputed_latents = precomputed_latents
         self.mask_pad_tokens = mask_pad_tokens
         self.sdxl = sdxl
-        if self.sdxl and latent_scale is None:
-            self.latent_scale = 0.13025
-        elif latent_scale is None:
-            self.latent_scale = 0.18215
-        else:
-            self.latent_scale = latent_scale
+        if latent_mean is None:
+            self.latent_mean = [0.0, 0.0, 0.0, 0.0]
+        if latent_std is None:
+            self.latent_std = 4 * [1 / 0.13025] if self.sdxl else 4 * [1 / 0.18215]
+        self.latent_mean = torch.tensor(latent_mean).view(1, -1, 1, 1)
+        self.latent_std = torch.tensor(latent_std).view(1, -1, 1, 1)
         self.train_metrics = train_metrics if train_metrics is not None else [MeanSquaredError()]
         self.val_metrics = val_metrics if val_metrics is not None else [MeanSquaredError()]
         self.text_encoder = text_encoder
@@ -136,6 +139,12 @@ class StableDiffusion(ComposerModel):
 
         # Optional rng generator
         self.rng_generator: Optional[torch.Generator] = None
+
+    def _apply(self, fn):
+        super(StableDiffusion, self)._apply(fn)
+        self.latent_mean = fn(self.latent_mean)
+        self.latent_std = fn(self.latent_std)
+        return self
 
     def set_rng_generator(self, rng_generator: torch.Generator):
         """Sets the rng generator for the model."""
@@ -174,8 +183,8 @@ class StableDiffusion(ComposerModel):
                 else:
                     conditioning = self.text_encoder(conditioning)[0]
 
-            # Magical scaling number (See https://github.com/huggingface/diffusers/issues/437#issuecomment-1241827515)
-            latents *= self.latent_scale
+        # Scale the latents
+        latents = (latents - self.latent_mean) / self.latent_std
 
         # Zero dropped captions if needed
         if 'drop_caption_mask' in batch.keys():
@@ -437,7 +446,7 @@ class StableDiffusion(ComposerModel):
 
         # We now use the vae to decode the generated latents back into the image.
         # scale and decode the image latents with vae
-        latents = 1 / self.latent_scale * latents
+        latents = latents * self.latent_std + self.latent_mean
         image = self.vae.decode(latents).sample
         image = (image / 2 + 0.5).clamp(0, 1)
         return image.detach()  # (batch*num_images_per_prompt, channel, h, w)
