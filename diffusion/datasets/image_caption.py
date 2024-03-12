@@ -6,17 +6,16 @@
 import logging
 import random
 from io import BytesIO
-from typing import Callable, Dict, List, Optional, Sequence, Union
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 from PIL import Image
 from streaming import Stream, StreamingDataset
 from torch.utils.data import DataLoader
 from torchvision import transforms
-from transformers import AutoTokenizer
 
 from diffusion.datasets.laion.transforms import LargestCenterSquare, RandomCropAspectRatioTransorm, RandomCropSquare
-from diffusion.models.models import SDXLTokenizer
+from diffusion.models.text_encoder import MultiTokenizer
 
 log = logging.getLogger(__name__)
 
@@ -28,11 +27,12 @@ class StreamingImageCaptionDataset(StreamingDataset):
     """Streaming dataset for image-caption pairs.
 
     Args:
+        tokenizer_names_or_paths (str, Tuple[str, ...]): The name(s) or path(s) of the tokenizer(s) to use.
         streams (Sequence[Stream], optional): One or more Streams to stream/cache samples from.
             ``StreamingImageCaptionDataset`` uses either ``streams`` or ``remote``/``local``. Default:``None``.
         remote (str, optional): Remote directory (S3 or local filesystem) where dataset is stored. Default: ``None``.
         local (str, optional): Local filesystem directory where dataset is cached during operation. Default: ``None``.
-        tokenizer_name_or_path (str): The name or path of the tokenizer to use. Default: ``'stabilityai/stable-diffusion-2-base'``.
+        tokenizer_names_or_paths (str, Tuple[str, ...]): The name(s) or path(s) of the tokenizer(s) to use.
         caption_drop_prob (float): The probability of dropping a caption. Default: ``0.0``.
         microcond_drop_prob (float): The probability of dropping microconditioning. Only relevant for SDXL. Default: ``0.0``.
         caption_selection (str): If there are multiple captions, specifies how to select a single caption.
@@ -42,18 +42,17 @@ class StreamingImageCaptionDataset(StreamingDataset):
         transform (Callable, optional): The transforms to apply to the image. Default: ``None``.
         image_key (str): Key associated with the image in the streaming dataset. Default: ``'image'``.
         caption_key (str): Key associated with the caption in the streaming dataset. Default: ``'caption'``.
-        sdxl (bool): Whether or not we're training SDXL. Default: `False`.
+        sdxl_conditioning (bool): Whether or not to include SDXL microconditioning in a sample. Default: `False`.
         zero_dropped_captions (bool): If True, zero out text embeddings for dropped captions. Default: ``False``.
-
         **streaming_kwargs: Additional arguments to pass in the construction of the StreamingDataloader
     """
 
     def __init__(
         self,
+        tokenizer_names_or_paths: Union[str, Tuple[str, ...]],
         streams: Optional[Sequence[Stream]] = None,
         remote: Optional[str] = None,
         local: Optional[str] = None,
-        tokenizer_name_or_path: str = 'stabilityai/stable-diffusion-2-base',
         caption_drop_prob: float = 0.0,
         microcond_drop_prob: float = 0.0,
         caption_selection: str = 'first',
@@ -61,7 +60,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
         transform: Optional[Callable] = None,
         image_key: str = 'image',
         caption_key: str = 'caption',
-        sdxl: bool = False,
+        sdxl_conditioning: bool = False,
         zero_dropped_captions: bool = False,
         **streaming_kwargs,
     ) -> None:
@@ -82,7 +81,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
 
         self.crop = crop
         self.transform = transform
-        self.sdxl = sdxl
+        self.sdxl_conditioning = sdxl_conditioning
         self.caption_drop_prob = caption_drop_prob
         self.microcond_drop_prob = microcond_drop_prob
         self.caption_selection = caption_selection
@@ -90,10 +89,8 @@ class StreamingImageCaptionDataset(StreamingDataset):
         self.caption_key = caption_key
         self.zero_dropped_captions = zero_dropped_captions
 
-        if self.sdxl:
-            self.tokenizer = SDXLTokenizer(tokenizer_name_or_path)
-        else:
-            self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, subfolder='tokenizer')
+        # Convert string to list
+        self.tokenizer = MultiTokenizer(tokenizer_names_or_paths)
 
     def __getitem__(self, index):
         sample = super().__getitem__(index)
@@ -117,7 +114,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
         out['image'] = img
 
         # SDXL microconditioning on image characteristics
-        if self.sdxl:
+        if self.sdxl_conditioning:
             # Get the new height and width
             if isinstance(img, torch.Tensor):
                 img_h, img_w = img.shape[-2], img.shape[-1]
@@ -154,23 +151,13 @@ class StreamingImageCaptionDataset(StreamingDataset):
                 caption = random.sample(caption, k=1)[0]
             out['drop_caption_mask'] = 1.0
 
-        max_length = None if self.sdxl else self.tokenizer.model_max_length  # type: ignore
         tokenizer_out = self.tokenizer(caption,
                                        padding='max_length',
-                                       max_length=max_length,
+                                       max_length=self.tokenizer.model_max_length,
                                        truncation=True,
                                        return_tensors='pt')
-        if self.sdxl:
-            tokenized_caption = [tokenized_cap.squeeze() for tokenized_cap in tokenizer_out.input_ids]
-            tokenized_caption = torch.stack(tokenized_caption)
-            # Take union over both tokenizers padding masks
-            attention_masks = tokenizer_out.attention_mask
-            attention_mask = torch.logical_or(attention_masks[0], attention_masks[1]).to(attention_masks[0].dtype)
-        else:
-            tokenized_caption = tokenizer_out.input_ids.squeeze()
-            attention_mask = tokenizer_out.attention_mask
-        out['captions'] = tokenized_caption
-        out['attention_mask'] = attention_mask
+        out['captions'] = tokenizer_out['input_ids'].squeeze()
+        out['attention_mask'] = tokenizer_out['attention_mask'].squeeze()
         return out
 
 
@@ -178,7 +165,7 @@ def build_streaming_image_caption_dataloader(
     remote: Union[str, List],
     local: Union[str, List],
     batch_size: int,
-    tokenizer_name_or_path: str = 'stabilityai/stable-diffusion-2-base',
+    tokenizer_names_or_paths: Union[str, Tuple[str, ...]],
     caption_drop_prob: float = 0.0,
     microcond_drop_prob: float = 0.0,
     resize_size: int = 256,
@@ -188,6 +175,7 @@ def build_streaming_image_caption_dataloader(
     caption_key: str = 'caption',
     crop_type: Optional[str] = 'square',
     zero_dropped_captions: bool = True,
+    sdxl_conditioning: bool = False,
     streaming_kwargs: Optional[Dict] = None,
     dataloader_kwargs: Optional[Dict] = None,
 ):
@@ -197,7 +185,7 @@ def build_streaming_image_caption_dataloader(
         remote (str, Sequence[str]): One or more remote directories (S3 or local filesystem) where dataset is stored.
         local (str, Sequence[str]): One or more local filesystem directories where dataset is cached during operation.
         batch_size (int): The batch size to use for both the ``StreamingDataset`` and ``DataLoader``.
-        tokenizer_name_or_path (str): The name or path of the tokenizer to use. Default: ``'stabilityai/stable-diffusion-2-base'``.
+        tokenizer_names_or_paths (str, Tuple[str, ...]): The name(s) or path(s) of the tokenizer(s) to use.
         caption_drop_prob (float): The probability of dropping a caption. Default: ``0.0``.
         microcond_drop_prob (float): The probability of dropping microconditioning. Only relevant for SDXL. Default: ``0.0``.
         resize_size (int): The size to resize the image to. Default: ``256``.
@@ -209,6 +197,7 @@ def build_streaming_image_caption_dataloader(
         caption_key (str): Key associated with the caption in the streaming dataset. Default: ``'caption'``.
         crop_type (str, optional): Type of crop to perform, either ['square', 'random', 'aspect_ratio']. Default: ``'square'``.
         zero_dropped_captions (bool): If True, zero out text embeddings for dropped captions. Default: ``True``.
+        sdxl_conditioning (bool): Whether or not to include SDXL microconditioning in a sample. Default: `False`.
         streaming_kwargs (dict, optional): Additional arguments to pass to the ``StreamingDataset``. Default: ``None``.
         dataloader_kwargs (dict, optional): Additional arguments to pass to the ``DataLoader``. Default: ``None``.
     """
@@ -240,11 +229,6 @@ def build_streaming_image_caption_dataloader(
     for r, l in zip(remote, local):
         streams.append(Stream(remote=r, local=l))
 
-    # Infer SDXL from tokenizer path
-    sdxl = (tokenizer_name_or_path == 'stabilityai/stable-diffusion-xl-base-1.0')
-    if sdxl:
-        log.info('Detected SDXL tokenizer, using SDXL crop transform and tokenizers.')
-
     # Set the crop to apply
     if crop_type == 'square':
         crop = LargestCenterSquare(resize_size)
@@ -262,7 +246,7 @@ def build_streaming_image_caption_dataloader(
 
     dataset = StreamingImageCaptionDataset(
         streams=streams,
-        tokenizer_name_or_path=tokenizer_name_or_path,
+        tokenizer_names_or_paths=tokenizer_names_or_paths,
         caption_drop_prob=caption_drop_prob,
         microcond_drop_prob=microcond_drop_prob,
         caption_selection=caption_selection,
@@ -271,7 +255,7 @@ def build_streaming_image_caption_dataloader(
         image_key=image_key,
         caption_key=caption_key,
         batch_size=batch_size,
-        sdxl=sdxl,
+        sdxl_conditioning=sdxl_conditioning,
         zero_dropped_captions=zero_dropped_captions,
         **streaming_kwargs,
     )
