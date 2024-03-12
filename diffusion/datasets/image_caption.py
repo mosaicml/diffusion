@@ -168,7 +168,7 @@ def build_streaming_image_caption_dataloader(
     tokenizer_names_or_paths: Union[str, Tuple[str, ...]],
     caption_drop_prob: float = 0.0,
     microcond_drop_prob: float = 0.0,
-    resize_size: int = 256,
+    resize_size: Union[int, Tuple[int, int], Tuple[Tuple[int, int], ...]] = 256,
     caption_selection: str = 'first',
     transform: Optional[List[Callable]] = None,
     image_key: str = 'image',
@@ -188,7 +188,8 @@ def build_streaming_image_caption_dataloader(
         tokenizer_names_or_paths (str, Tuple[str, ...]): The name(s) or path(s) of the tokenizer(s) to use.
         caption_drop_prob (float): The probability of dropping a caption. Default: ``0.0``.
         microcond_drop_prob (float): The probability of dropping microconditioning. Only relevant for SDXL. Default: ``0.0``.
-        resize_size (int): The size to resize the image to. Default: ``256``.
+        resize_size (int, Tuple[int, int], Tuple[Tuple[int, int], ...): The size to resize the image to. Specify a
+            tuple of tuples if using 'aspect_ratio' crop_type. Default: ``256``.
         caption_selection (str): If there are multiple captions, specifies how to select a single caption.
             'first' selects the first caption in the list and 'random' selects a random caption in the list.
             If there is only one caption, this argument is ignored. Default: ``'first'``.
@@ -206,6 +207,9 @@ def build_streaming_image_caption_dataloader(
         crop_type = crop_type.lower()
         if crop_type not in ['square', 'random', 'aspect_ratio']:
             raise ValueError(f'Invalid crop_type: {crop_type}. Must be ["square", "random", "aspect_ratio", None]')
+        if crop_type == 'aspect_ratio' and (isinstance(resize_size, int) or isinstance(resize_size[0], int)):
+            raise ValueError(
+                'If using crop_type="aspect_ratio", specify aspect ratio buckets in resize_size as a tuple of tuples.')
 
     # Handle ``None`` kwargs
     if streaming_kwargs is None:
@@ -235,7 +239,7 @@ def build_streaming_image_caption_dataloader(
     elif crop_type == 'random':
         crop = RandomCropSquare(resize_size)
     elif crop_type == 'aspect_ratio':
-        crop = RandomCropAspectRatioTransorm()
+        crop = RandomCropAspectRatioTransorm(resize_size)
     else:
         crop = None
 
