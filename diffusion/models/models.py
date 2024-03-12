@@ -29,14 +29,24 @@ except:
 log = logging.getLogger(__name__)
 
 
+def _parse_latent_statistics(latent_stat: Union[float, Tuple, str]) -> Union[float, Tuple, str]:
+    if isinstance(latent_stat, str):
+        latent_stat = latent_stat.lower()
+        if latent_stat != 'latent_statistics':
+            raise ValueError(f'Invalid latent statistic {latent_stat}. Must be a float, tuple or "latent_statistics".')
+    elif type(latent_stat).__name__ == 'ListConfig' and not isinstance(latent_stat, float):
+        latent_stat = tuple(latent_stat)
+    return latent_stat
+
+
 def stable_diffusion_2(
     model_name: str = 'stabilityai/stable-diffusion-2-base',
     pretrained: bool = True,
     autoencoder_path: Optional[str] = None,
     autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
     prediction_type: str = 'epsilon',
-    latent_mean: Union[float, list, str] = 0.0,
-    latent_std: Union[float, list, str] = 5.489980785067252,
+    latent_mean: Union[float, Tuple, str] = 0.0,
+    latent_std: Union[float, Tuple, str] = 5.489980785067252,
     offset_noise: Optional[float] = None,
     train_metrics: Optional[List] = None,
     val_metrics: Optional[List] = None,
@@ -62,10 +72,10 @@ def stable_diffusion_2(
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
         latent_mean (float, list, str): The mean of the autoencoder latents. Either a float for a single value,
-            a list of means, or or `'latent_statistics'` to try to use the value from the autoencoder
+            a tuple of means, or or `'latent_statistics'` to try to use the value from the autoencoder
             checkpoint. Defaults to `0.0`.
         latent_std (float, list, str): The std. dev. of the autoencoder latents. Either a float for a single value,
-            a list of std_devs, or or `'latent_statistics'` to try to use the value from the autoencoder
+            a tuple of std_devs, or or `'latent_statistics'` to try to use the value from the autoencoder
             checkpoint. Defaults to `1/0.18215`.
         train_metrics (list, optional): List of metrics to compute during training. If None, defaults to
             [MeanSquaredError()].
@@ -81,18 +91,7 @@ def stable_diffusion_2(
         clip_qkv (float, optional): If not None, clip the qkv values to this value. Defaults to None.
         use_xformers (bool): Whether to use xformers for attention. Defaults to True.
     """
-    if isinstance(latent_mean, str):
-        latent_mean = latent_mean.lower()
-        if latent_mean != 'latent_statistics':
-            raise ValueError(f'Invalid latent scale {latent_mean}. Must be a float or "latent_statistics".')
-    elif isinstance(latent_mean, (list, tuple)):
-        latent_mean = list(latent_mean)
-    if isinstance(latent_std, str):
-        latent_std = latent_std.lower()
-        if latent_std != 'latent_statistics':
-            raise ValueError(f'Invalid latent scale {latent_std}. Must be a float or "latent_statistics".')
-    elif isinstance(latent_std, (list, tuple)):
-        latent_std = list(latent_std)
+    latent_mean, latent_std = _parse_latent_statistics(latent_mean), _parse_latent_statistics(latent_std)
 
     if train_metrics is None:
         train_metrics = [MeanSquaredError()]
@@ -119,10 +118,10 @@ def stable_diffusion_2(
                 'Must specify latent scale when using a custom autoencoder without tracking latent statistics.')
         if isinstance(latent_mean, str) and latent_mean == 'latent_statistics':
             assert isinstance(latent_statistics, dict)
-            latent_mean = latent_statistics['latent_channel_means']
+            latent_mean = tuple(latent_statistics['latent_channel_means'])
         if isinstance(latent_std, str) and latent_std == 'latent_statistics':
             assert isinstance(latent_statistics, dict)
-            latent_std = latent_statistics['latent_channel_stds']
+            latent_std = tuple(latent_statistics['latent_channel_stds'])
         downsample_factor = 2**(len(vae.config['channel_multipliers']) - 1)
 
     # Make the unet
@@ -139,10 +138,10 @@ def stable_diffusion_2(
         # Init the unet from the config
         unet = UNet2DConditionModel(**unet_config)
     if type(latent_mean) is float:
-        latent_mean = [latent_mean] * unet_config['in_channels']
+        latent_mean = (latent_mean,) * unet_config['in_channels']
     if type(latent_std) is float:
-        latent_std = [latent_std] * unet_config['in_channels']
-    assert isinstance(latent_mean, list) and isinstance(latent_std, list)
+        latent_std = (latent_std,) * unet_config['in_channels']
+    assert isinstance(latent_mean, tuple) and isinstance(latent_std, tuple)
 
     # Make the noise schedulers
     noise_scheduler = DDPMScheduler.from_pretrained(model_name, subfolder='scheduler')
@@ -202,8 +201,8 @@ def stable_diffusion_xl(
     autoencoder_path: Optional[str] = None,
     autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
     prediction_type: str = 'epsilon',
-    latent_mean: Union[float, list, str] = 0.0,
-    latent_std: Union[float, list, str] = 0.13025,
+    latent_mean: Union[float, Tuple, str] = 0.0,
+    latent_std: Union[float, Tuple, str] = 0.13025,
     offset_noise: Optional[float] = None,
     train_metrics: Optional[List] = None,
     val_metrics: Optional[List] = None,
@@ -234,11 +233,11 @@ def stable_diffusion_xl(
         autoencoder_local_path (optional, str): Path to autoencoder weights. Default: `/tmp/autoencoder_weights.pt`.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
-        latent_mean (float, list, str): The mean of the autoencoder latents. Either a float for a single value,
-            a list of means, or or `'latent_statistics'` to try to use the value from the autoencoder
+        latent_mean (float, Tuple, str): The mean of the autoencoder latents. Either a float for a single value,
+            a tuple of means, or or `'latent_statistics'` to try to use the value from the autoencoder
             checkpoint. Defaults to `0.0`.
-        latent_std (float, list, str): The std. dev. of the autoencoder latents. Either a float for a single value,
-            a list of std_devs, or or `'latent_statistics'` to try to use the value from the autoencoder
+        latent_std (float, Tuple, str): The std. dev. of the autoencoder latents. Either a float for a single value,
+            a tuple of std_devs, or or `'latent_statistics'` to try to use the value from the autoencoder
             checkpoint. Defaults to `1/0.13025`.
         offset_noise (float, optional): The scale of the offset noise. If not specified, offset noise will not
             be used. Default `None`.
@@ -255,18 +254,7 @@ def stable_diffusion_xl(
             of training.
         use_xformers (bool): Whether to use xformers for attention. Defaults to True.
     """
-    if isinstance(latent_mean, str):
-        latent_mean = latent_mean.lower()
-        if latent_mean != 'latent_statistics':
-            raise ValueError(f'Invalid latent scale {latent_mean}. Must be a float or "latent_statistics".')
-    if isinstance(latent_mean, (list, tuple)):
-        latent_mean = list(latent_mean)
-    if isinstance(latent_std, str):
-        latent_std = latent_std.lower()
-        if latent_std != 'latent_statistics':
-            raise ValueError(f'Invalid latent scale {latent_std}. Must be a float or "latent_statistics".')
-    if isinstance(latent_std, (list, tuple)):
-        latent_std = list(latent_std)
+    latent_mean, latent_std = _parse_latent_statistics(latent_mean), _parse_latent_statistics(latent_std)
 
     if train_metrics is None:
         train_metrics = [MeanSquaredError()]
@@ -296,10 +284,10 @@ def stable_diffusion_xl(
                 'Must specify latent scale when using a custom autoencoder without tracking latent statistics.')
         if isinstance(latent_mean, str) and latent_mean == 'latent_statistics':
             assert isinstance(latent_statistics, dict)
-            latent_mean = latent_statistics['latent_channel_means']
+            latent_mean = tuple(latent_statistics['latent_channel_means'])
         if isinstance(latent_std, str) and latent_std == 'latent_statistics':
             assert isinstance(latent_statistics, dict)
-            latent_std = latent_statistics['latent_channel_stds']
+            latent_std = tuple(latent_statistics['latent_channel_stds'])
         downsample_factor = 2**(len(vae.config['channel_multipliers']) - 1)
 
     # Make the unet
@@ -327,10 +315,10 @@ def stable_diffusion_xl(
         # Last conv block out projection
         unet.conv_out = zero_module(unet.conv_out)
     if type(latent_mean) is float:
-        latent_mean = [latent_mean] * unet_config['in_channels']
+        latent_mean = (latent_mean,) * unet_config['in_channels']
     if type(latent_std) is float:
-        latent_std = [latent_std] * unet_config['in_channels']
-    assert isinstance(latent_mean, list) and isinstance(latent_std, list)
+        latent_std = (latent_std,) * unet_config['in_channels']
+    assert isinstance(latent_mean, tuple) and isinstance(latent_std, tuple)
 
     # Make the noise schedulers
     noise_scheduler = DDPMScheduler.from_pretrained(model_name, subfolder='scheduler')

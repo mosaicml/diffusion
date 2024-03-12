@@ -3,7 +3,7 @@
 
 """Diffusion models."""
 
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -39,10 +39,10 @@ class StableDiffusion(ComposerModel):
         loss_fn (torch.nn.Module): torch loss function. Default: `F.mse_loss`.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
-        latent_mean (Optional[list[float]]): The mean of the latent space. If not specified, defaults to
-            4 * [0]. Default: `None`.
-        latent_std (Optional[list[float]]): The standard deviation of the latent space. If not specified,
-            defaults to 4 * [1/0.13025] for SDXL, or 4 * [1/0.18215] for non-SDXL. Default: `None`.
+        latent_mean (Optional[tuple[float]]): The means of the latent space. If not specified, defaults to
+            4 * (0.0,). Default: `None`.
+        latent_std (Optional[tuple[float]]): The standard deviations of the latent space. If not specified,
+            defaults to 4 * (1/0.13025,) for SDXL, or 4 * (1/0.18215,) for non-SDXL. Default: `None`.
         downsample_factor (int): The factor by which the image is downsampled by the autoencoder. Default `8`.
         offset_noise (float, optional): The scale of the offset noise. If not specified, offset noise will not
             be used. Default `None`.
@@ -78,8 +78,8 @@ class StableDiffusion(ComposerModel):
                  inference_noise_scheduler,
                  loss_fn=F.mse_loss,
                  prediction_type: str = 'epsilon',
-                 latent_mean: Optional[List[float]] = None,
-                 latent_std: Optional[List[float]] = None,
+                 latent_mean: Optional[Tuple[float]] = None,
+                 latent_std: Optional[Tuple[float]] = None,
                  downsample_factor: int = 8,
                  offset_noise: Optional[float] = None,
                  train_metrics: Optional[List] = None,
@@ -111,9 +111,9 @@ class StableDiffusion(ComposerModel):
         self.mask_pad_tokens = mask_pad_tokens
         self.sdxl = sdxl
         if latent_mean is None:
-            self.latent_mean = [0.0, 0.0, 0.0, 0.0]
+            self.latent_mean = 4 * (0.0)
         if latent_std is None:
-            self.latent_std = 4 * [1 / 0.13025] if self.sdxl else 4 * [1 / 0.18215]
+            self.latent_std = 4 * (1 / 0.13025,) if self.sdxl else 4 * (1 / 0.18215,)
         self.latent_mean = torch.tensor(latent_mean).view(1, -1, 1, 1)
         self.latent_std = torch.tensor(latent_std).view(1, -1, 1, 1)
         self.train_metrics = train_metrics if train_metrics is not None else [MeanSquaredError()]
