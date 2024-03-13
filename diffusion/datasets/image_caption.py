@@ -3,21 +3,21 @@
 
 """Streaming Image-Caption dataset."""
 
-from pathlib import Path
 import logging
 import random
 from io import BytesIO
+from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Union
 
 import torch
-from PIL import Image
 import transformers
+from PIL import Image
 from streaming import Stream, StreamingDataset
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
-from diffusion.models.text_encoder import MultiTokenizer
 from diffusion.datasets.laion.transforms import LargestCenterSquare, RandomCropAspectRatioTransorm, RandomCropSquare
+from diffusion.models.text_encoder import MultiTokenizer
 
 log = logging.getLogger(__name__)
 
@@ -29,8 +29,8 @@ class StreamingImageCaptionDataset(StreamingDataset):
     """Streaming dataset for image-caption pairs.
 
     Args:
-        tokenizer (transformers.PreTrainedTokenizer, MultiTokenizer): Tokenizer used for text input. 
-            Should be the same tokenizer passed to the model being trained. 
+        tokenizer (transformers.PreTrainedTokenizer, MultiTokenizer): Tokenizer used for text input.
+            Should be the same tokenizer passed to the model being trained.
             Can be accessed with model.tokenizer.
         streams (Sequence[Stream], optional): One or more Streams to stream/cache samples from.
             ``StreamingImageCaptionDataset`` uses either ``streams`` or ``remote``/``local``. Default:``None``.
@@ -187,8 +187,8 @@ def build_streaming_image_caption_dataloader(
         remote (str, Sequence[str]): One or more remote directories (S3 or local filesystem) where dataset is stored.
         local (str, Sequence[str]): One or more local filesystem directories where dataset is cached during operation.
         batch_size (int): The batch size to use for both the ``StreamingDataset`` and ``DataLoader``.
-        tokenizer (transformers.PreTrainedTokenizer, MultiTokenizer): Tokenizer used for text input. 
-            Should be the same tokenizer passed to the model being trained. 
+        tokenizer (transformers.PreTrainedTokenizer, MultiTokenizer): Tokenizer used for text input.
+            Should be the same tokenizer passed to the model being trained.
             Can be accessed with model.tokenizer.
         caption_drop_prob (float): The probability of dropping a caption. Default: ``0.0``.
         microcond_drop_prob (float): The probability of dropping microconditioning. Only relevant for SDXL. Default: ``0.0``.
@@ -218,10 +218,10 @@ def build_streaming_image_caption_dataloader(
         dataloader_kwargs = {}
 
     # Check types for remote and local
-    
+
     if isinstance(remote, str):
         remote = [remote]
-    
+
     if not local:
         local = [_make_default_local_path(r) for r in remote]
 
@@ -235,7 +235,7 @@ def build_streaming_image_caption_dataloader(
     # Create a Stream for each (remote, local) pair
     streams = []
     for r, l in zip(remote, local):
-            streams.append(Stream(remote=r, local=l))
+        streams.append(Stream(remote=r, local=l))
 
     # Set the crop to apply
     if crop_type == 'square':
@@ -279,5 +279,4 @@ def build_streaming_image_caption_dataloader(
 
 
 def _make_default_local_path(remote_path):
-    return str(Path(*["/tmp"] + list(Path(remote_path).parts[1:])))
-    
+    return str(Path(*['/tmp'] + list(Path(remote_path).parts[1:])))

@@ -16,7 +16,7 @@ class SyntheticImageCaptionDataset(Dataset):
     Args:
         image_size (int): Size of the synthetic images. Default: ``512``.
         caption_length (int): Length of the synthetic captions. Default: ``77``.
-        tokenizer: dummy parameter to mimic api of real dataset. 
+        tokenizer: dummy parameter to mimic api of real dataset. Default: ``None``.
         sdxl (bool): Whether or not to generate synthetic data for SDXL. Default: ``False``.
     """
 
@@ -44,7 +44,7 @@ class SyntheticImageCaptionDataset(Dataset):
 
 def build_synthetic_image_caption_dataloader(
     batch_size: int,
-    tokenizer = None,
+    tokenizer=None,
     image_size: int = 512,
     caption_length: int = 77,
     sdxl: bool = False,
@@ -54,6 +54,7 @@ def build_synthetic_image_caption_dataloader(
 
     Args:
         batch_size (int): Batch size for the dataloader.
+        tokenizer: dummy parameter to mimic api of real dataset. Default: ``None``.
         image_size (int): Size of the synthetic images. Default: ``512``.
         caption_length (int): Length of the synthetic captions. Default: ``77``.
         sdxl (bool): Whether or not to generate synthetic data for SDXL. Default: ``False``.
