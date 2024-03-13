@@ -11,13 +11,14 @@ import torch
 from composer.devices import DeviceGPU
 from diffusers import AutoencoderKL, DDIMScheduler, DDPMScheduler, EulerDiscreteScheduler, UNet2DConditionModel
 from torchmetrics import MeanSquaredError
-from transformers import CLIPTextModel, CLIPTextModelWithProjection, CLIPTokenizer, PretrainedConfig
+from transformers import CLIPTextModel, CLIPTokenizer, PretrainedConfig
 
 from diffusion.models.autoencoder import (AutoEncoder, AutoEncoderLoss, ComposerAutoEncoder,
                                           ComposerDiffusersAutoEncoder, load_autoencoder)
 from diffusion.models.layers import ClippedAttnProcessor2_0, ClippedXFormersAttnProcessor, zero_module
 from diffusion.models.pixel_diffusion import PixelDiffusion
 from diffusion.models.stable_diffusion import StableDiffusion
+from diffusion.models.text_encoder import MultiTextEncoder, MultiTokenizer
 from diffusion.schedulers.schedulers import ContinuousTimeScheduler
 
 try:
@@ -176,7 +177,10 @@ def stable_diffusion_2(
 
 
 def stable_diffusion_xl(
-    model_name: str = 'stabilityai/stable-diffusion-xl-base-1.0',
+    tokenizer_names: Union[str, Tuple[str, ...]] = ('stabilityai/stable-diffusion-xl-base-1.0/tokenizer',
+                                                    'stabilityai/stable-diffusion-xl-base-1.0/tokenizer_2'),
+    text_encoder_names: Union[str, Tuple[str, ...]] = ('stabilityai/stable-diffusion-xl-base-1.0/text_encoder',
+                                                       'stabilityai/stable-diffusion-xl-base-1.0/text_encoder_2'),
     unet_model_name: str = 'stabilityai/stable-diffusion-xl-base-1.0',
     vae_model_name: str = 'madebyollin/sdxl-vae-fp16-fix',
     pretrained: bool = True,
@@ -192,7 +196,7 @@ def stable_diffusion_xl(
     encode_latents_in_fp16: bool = True,
     mask_pad_tokens: bool = False,
     fsdp: bool = True,
-    clip_qkv: Optional[float] = 6.0,
+    clip_qkv: Optional[float] = None,
     use_xformers: bool = True,
 ):
     """Stable diffusion 2 training setup + SDXL UNet and VAE.
@@ -201,8 +205,12 @@ def stable_diffusion_xl(
     prompts. Currently uses UNet and VAE config from SDXL, but text encoder/tokenizer from SD2.
 
     Args:
-        model_name (str): Name of the model to load. Determines the text encoders, tokenizers,
-            and noise scheduler. Defaults to 'stabilityai/stable-diffusion-xl-base-1.0'.
+        tokenizer_names (str, Tuple[str, ...]): HuggingFace name(s) of the tokenizer(s) to load.
+            Default: ``('stabilityai/stable-diffusion-xl-base-1.0/tokenizer',
+            'stabilityai/stable-diffusion-xl-base-1.0/tokenizer_2')``.
+        text_encoder_names (str, Tuple[str, ...]): HuggingFace name(s) of the text encoder(s) to load.
+            Default: ``('stabilityai/stable-diffusion-xl-base-1.0/text_encoder',
+            'stabilityai/stable-diffusion-xl-base-1.0/text_encoder_2')``.
         unet_model_name (str): Name of the UNet model to load. Defaults to
             'stabilityai/stable-diffusion-xl-base-1.0'.
         vae_model_name (str): Name of the VAE model to load. Defaults to
@@ -227,10 +235,14 @@ def stable_diffusion_xl(
         encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
         mask_pad_tokens (bool): Whether to mask pad tokens in cross attention. Defaults to False.
         fsdp (bool): Whether to use FSDP. Defaults to True.
-        clip_qkv (float, optional): If not None, clip the qkv values to this value. Defaults to 6.0. Improves stability
-            of training.
+        clip_qkv (float, optional): If not None, clip the qkv values to this value. Improves stability of training.
+            Default: ``None``.
         use_xformers (bool): Whether to use xformers for attention. Defaults to True.
     """
+    if (isinstance(tokenizer_names, tuple) or
+            isinstance(text_encoder_names, tuple)) and len(tokenizer_names) != len(text_encoder_names):
+        raise ValueError('Number of tokenizer_names and text_encoder_names must be equal')
+
     if isinstance(latent_scale, str):
         latent_scale = latent_scale.lower()
         if latent_scale != 'latent_statistics':
@@ -240,9 +252,11 @@ def stable_diffusion_xl(
     if val_metrics is None:
         val_metrics = [MeanSquaredError()]
 
-    # Make the text encoder
-    tokenizer = SDXLTokenizer(model_name)
-    text_encoder = SDXLTextEncoder(model_name, encode_latents_in_fp16)
+    # Make the tokenizer and text encoder
+    tokenizer = MultiTokenizer(tokenizer_names_or_paths=tokenizer_names)
+    text_encoder = MultiTextEncoder(model_names=text_encoder_names,
+                                    encode_latents_in_fp16=encode_latents_in_fp16,
+                                    pretrained_sdxl=pretrained)
 
     precision = torch.float16 if encode_latents_in_fp16 else None
     # Make the autoencoder
@@ -279,6 +293,10 @@ def stable_diffusion_xl(
             # Adapt the unet config to account for differing number of latent channels if necessary
             unet_config['in_channels'] = vae.config['latent_channels']
             unet_config['out_channels'] = vae.config['latent_channels']
+        unet_config['cross_attention_dim'] = text_encoder.text_encoder_dim
+        # This config variable is the sum of the text encoder projection dimension and
+        # the number of additional time embeddings (6) * addition_time_embed_dim (256)
+        unet_config['projection_class_embeddings_input_dim'] = text_encoder.text_encoder_proj_dim + 1536
         # Init the unet from the config
         unet = UNet2DConditionModel(**unet_config)
 
@@ -293,18 +311,16 @@ def stable_diffusion_xl(
         # Last conv block out projection
         unet.conv_out = zero_module(unet.conv_out)
 
-    if hasattr(unet.mid_block, 'attentions'):
+    assert isinstance(unet, UNet2DConditionModel)
+    if hasattr(unet, 'mid_block') and unet.mid_block is not None:
         for attention in unet.mid_block.attentions:
             attention._fsdp_wrap = True
-            attention._activation_checkpointing = True
-    if hasattr(unet.mid_block, 'resnets'):
         for resnet in unet.mid_block.resnets:
             resnet._fsdp_wrap = True
     for block in unet.up_blocks:
         if hasattr(block, 'attentions'):
             for attention in block.attentions:
                 attention._fsdp_wrap = True
-                attention._activation_checkpointing = True
         if hasattr(block, 'resnets'):
             for resnet in block.resnets:
                 resnet._fsdp_wrap = True
@@ -312,12 +328,12 @@ def stable_diffusion_xl(
         if hasattr(block, 'attentions'):
             for attention in block.attentions:
                 attention._fsdp_wrap = True
-                attention._activation_checkpointing = True
         if hasattr(block, 'resnets'):
             for resnet in block.resnets:
                 resnet._fsdp_wrap = True
 
-    noise_scheduler = DDPMScheduler.from_pretrained(model_name, subfolder='scheduler')
+    # Make the noise schedulers
+    noise_scheduler = DDPMScheduler.from_pretrained(unet_model_name, subfolder='scheduler')
     inference_noise_scheduler = EulerDiscreteScheduler(num_train_timesteps=1000,
                                                        beta_start=0.00085,
                                                        beta_end=0.012,
@@ -619,70 +635,3 @@ def continuous_pixel_diffusion(clip_model_name: str = 'openai/clip-vit-large-pat
         if is_xformers_installed:
             model.model.enable_xformers_memory_efficient_attention()
     return model
-
-
-class SDXLTextEncoder(torch.nn.Module):
-    """Wrapper around HuggingFace text encoders for SDXL.
-
-    Creates two text encoders (a CLIPTextModel and CLIPTextModelWithProjection) that behave like one.
-
-    Args:
-        model_name (str): Name of the model's text encoders to load. Defaults to 'stabilityai/stable-diffusion-xl-base-1.0'.
-        encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
-    """
-
-    def __init__(self, model_name='stabilityai/stable-diffusion-xl-base-1.0', encode_latents_in_fp16=True):
-        super().__init__()
-        torch_dtype = torch.float16 if encode_latents_in_fp16 else None
-        self.text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder', torch_dtype=torch_dtype)
-        self.text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(model_name,
-                                                                          subfolder='text_encoder_2',
-                                                                          torch_dtype=torch_dtype)
-
-    @property
-    def device(self):
-        return self.text_encoder.device
-
-    def forward(self, tokenized_text):
-        # first text encoder
-        conditioning = self.text_encoder(tokenized_text[0], output_hidden_states=True).hidden_states[-2]
-        # second text encoder
-        text_encoder_2_out = self.text_encoder_2(tokenized_text[1], output_hidden_states=True)
-        pooled_conditioning = text_encoder_2_out[0]  # (batch_size, 1280)
-        conditioning_2 = text_encoder_2_out.hidden_states[-2]  # (batch_size, 77, 1280)
-
-        conditioning = torch.concat([conditioning, conditioning_2], dim=-1)
-        return conditioning, pooled_conditioning
-
-
-class SDXLTokenizer:
-    """Wrapper around HuggingFace tokenizers for SDXL.
-
-    Tokenizes prompt with two tokenizers and returns the joined output.
-
-    Args:
-        model_name (str): Name of the model's text encoders to load. Defaults to 'stabilityai/stable-diffusion-xl-base-1.0'.
-    """
-
-    def __init__(self, model_name='stabilityai/stable-diffusion-xl-base-1.0'):
-        self.tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer')
-        self.tokenizer_2 = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer_2')
-
-    def __call__(self, prompt, padding, truncation, return_tensors, max_length=None):
-        tokenized_output = self.tokenizer(
-            prompt,
-            padding=padding,
-            max_length=self.tokenizer.model_max_length if max_length is None else max_length,
-            truncation=truncation,
-            return_tensors=return_tensors)
-        tokenized_output_2 = self.tokenizer_2(
-            prompt,
-            padding=padding,
-            max_length=self.tokenizer_2.model_max_length if max_length is None else max_length,
-            truncation=truncation,
-            return_tensors=return_tensors)
-
-        # Add second tokenizer output to first tokenizer
-        for key in tokenized_output.keys():
-            tokenized_output[key] = [tokenized_output[key], tokenized_output_2[key]]
-        return tokenized_output
