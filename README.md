@@ -39,26 +39,13 @@ Results from our Mosaic Diffusion model after training for 550k iterations at 25
 Here are the system settings we recommend to start training your own diffusion models:
 
 - Use a Docker image with PyTorch 1.13+, e.g. [MosaicML's PyTorch base image](https://hub.docker.com/r/mosaicml/pytorch/tags)
-  - Recommended tag: `mosaicml/pytorch_vision:1.13.1_cu117-python3.10-ubuntu20.04`
+  - Recommended tag: `mosaicml/pytorch:2.1.2_cu121-python3.10-ubuntu20.04`
   - This image comes pre-configured with the following dependencies:
-    - PyTorch Version: 1.13.1
-    - CUDA Version: 11.7
+    - PyTorch Version: 2.1.2
+    - CUDA Version: 12.1
     - Python Version: 3.10
     - Ubuntu Version: 20.04
 - Use a system with NVIDIA GPUs
-
-- For running on NVIDIA H100s, use a docker image with PyTorch 2.0+ e.g. [MosaicML's PyTorch base image](https://hub.docker.com/r/mosaicml/pytorch/tags)
-  - Recommended tag: `mosaicml/pytorch_vision:2.0.1_cu118-python3.10-ubuntu20.04`
-  - This image comes pre-configured with the following dependencies:
-    - PyTorch Version: 2.0.1
-    - CUDA Version: 11.8
-    - Python Version: 3.10
-    - Ubuntu Version: 20.04
-  - Depending on the training config, an additional install of `xformers` may be needed:
-    ```
-    pip install -U ninja
-    pip install -U git+https://github.com/facebookresearch/xformers
-    ```
 
 # How many GPUs do I need?
 
@@ -104,25 +91,6 @@ Next, start training at 512x512 resolution by running:
 ```
 composer run.py --config-path yamls/hydra-yamls --config-name SD-2-base-512.yaml
 ```
-
-# Online Eval
-Our code is able to calculate the FID score at several guidance scales while training. To use this feature, add the torchmetrics class `FrechetInceptionDistance` to the `val_metrics` field and specify your desired guidance scores at the `val_guidance_scales` field under `model`. Below is an example config for calculating FID score online for guidance scores [1, 3, 7]:
-```
-model:
-  _target_: diffusion.models.models.stable_diffusion_2
-  pretrained: false
-  precomputed_latents: false
-  encode_latents_in_fp16: true
-  fsdp: true
-  val_metrics:
-    - _target_: torchmetrics.MeanSquaredError
-    - _target_: torchmetrics.image.fid.FrechetInceptionDistance
-      normalize: true
-  val_guidance_scales: [1, 3, 7]
-  loss_bins: []
-```
-Computing FID during training can be slow due to the number of images that must be generated, and it requires extra device memory. Caution should be used when using online eval if device memory or runtime is a concern.
-
 You can also log generated images to Weights and Biases throughout training to qualitatively measure model performance. This is done by specifying the `LogDiffusionImages` callback class under `callbacks` in a configuration file like so:
 ```
   image_monitor:
@@ -135,11 +103,11 @@ You can also log generated images to Weights and Biases throughout training to q
 ```
 
 # Offline Eval
-We also provide an offline evaluation script to compute FID and CLIP metrics on a saved checkpoint and the COCO dataset. To use this, run:
+We also provide an offline evaluation script to compute common metrics on a saved checkpoint and an image+prompt dataset. To use this, run:
 ```
-composer scripts/fid-clip-evaluation.py --guidance_scale 3.0 --remote YOUR_DATASET_PATH_HERE --load_path YOUR_CHECKPOINT_PATH_HERE
+composer composer run_eval.py --config-path yaml/dir --config-name eval-clean-fid
 ```
-This will compute FID and CLIP score at a guidance scale of 3.0 using the image+prompts pairs. One can also set the seed used for image generation via `--seed 42` and the resolution to use for images via `--size 512`. Results can also be logged to Weights and Biases by setting the `--wandb` flag and specifying the `--project` and `--name`.
+This will compute FID, KID, CLIP-FID, and CLIP score at configurable guidance scales using the image+prompts pairs. See the yaml template [here](https://github.com/mosaicml/diffusion/blob/main/yamls/hydra-yamls/eval-clean-fid.yaml) for more configuration options, including logging to Weights and Biases.
 
 # Training an SDXL model
 We support training SDXL architectures and provide sample yamls for each stage of training. Once the sample configurations have been updated for your own data and use case, start training at 256x256 resolution by running:

@@ -6,7 +6,7 @@
 Based on the implementation from https://github.com/CompVis/stable-diffusion
 """
 
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 import lpips
 import torch
@@ -16,6 +16,8 @@ from composer.models import ComposerModel
 from composer.utils import dist
 from composer.utils.file_helpers import get_file
 from diffusers import AutoencoderKL
+from diffusers.models.autoencoders.vae import DecoderOutput
+from diffusers.models.modeling_outputs import AutoencoderKLOutput
 from torchmetrics import MeanMetric, MeanSquaredError, Metric
 from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
@@ -662,7 +664,7 @@ class ComposerAutoEncoder(ComposerModel):
             metric.update(outputs['x_recon'], batch[self.input_key])
 
 
-class ComposerDiffusersAutoEncoder(ComposerAutoEncoder):
+class ComposerDiffusersAutoEncoder(ComposerModel):
     """Composer wrapper for the Huggingface Diffusers Autoencoder.
 
     Args:
@@ -672,24 +674,83 @@ class ComposerDiffusersAutoEncoder(ComposerAutoEncoder):
     """
 
     def __init__(self, model: AutoencoderKL, autoencoder_loss: AutoEncoderLoss, input_key: str = 'image'):
-        super().__init__(model, autoencoder_loss, input_key)
+        super().__init__()
         self.model = model
         self.autoencoder_loss = autoencoder_loss
         self.input_key = input_key
+
+        # Set up train metrics
+        train_metrics = [MeanSquaredError()]
+        self.train_metrics = {metric.__class__.__name__: metric for metric in train_metrics}
+        # Set up val metrics
+        psnr_metric = PeakSignalNoiseRatio(data_range=2.0)
+        ssim_metric = StructuralSimilarityIndexMeasure(data_range=2.0)
+        lpips_metric = LearnedPerceptualImagePatchSimilarity(net_type='vgg')
+        val_metrics = [MeanSquaredError(), MeanMetric(), lpips_metric, psnr_metric, ssim_metric]
+        self.val_metrics = {metric.__class__.__name__: metric for metric in val_metrics}
 
     def get_last_layer_weight(self) -> torch.Tensor:
         """Get the weight of the last layer of the decoder."""
         return self.model.decoder.conv_out.weight
 
     def forward(self, batch):
-        latent_dist = self.model.encode(batch[self.input_key])['latent_dist']
+        encoder_output = self.model.encode(batch[self.input_key], return_dict=True)
+        assert isinstance(encoder_output, AutoencoderKLOutput)
+        latent_dist = encoder_output['latent_dist']
         latents = latent_dist.sample()
         mean, log_var = latent_dist.mean, latent_dist.logvar
-        recon = self.model.decode(latents).sample
+        output_dist = self.model.decode(latents, return_dict=True)
+        assert isinstance(output_dist, DecoderOutput)
+        recon = output_dist.sample
         return {'x_recon': recon, 'latents': latents, 'mean': mean, 'log_var': log_var}
 
+    def loss(self, outputs, batch):
+        last_layer = self.get_last_layer_weight()
+        return self.autoencoder_loss(outputs, batch, last_layer)
 
-def load_autoencoder(load_path: str, local_path: str = '/tmp/autoencoder_weights.pt', torch_dtype=None):
+    def eval_forward(self, batch, outputs=None):
+        if outputs is not None:
+            return outputs
+        outputs = self.forward(batch)
+        return outputs
+
+    def get_metrics(self, is_train: bool = False):
+        if is_train:
+            metrics = self.train_metrics
+        else:
+            metrics = self.val_metrics
+
+        if isinstance(metrics, Metric):
+            metrics_dict = {metrics.__class__.__name__: metrics}
+        elif isinstance(metrics, list):
+            metrics_dict = {metrics.__class__.__name__: metric for metric in metrics}
+        else:
+            metrics_dict = {}
+            for name, metric in metrics.items():
+                assert isinstance(metric, Metric)
+                metrics_dict[name] = metric
+
+        return metrics_dict
+
+    def update_metric(self, batch, outputs, metric):
+        clamped_imgs = outputs['x_recon'].clamp(-1, 1)
+        if isinstance(metric, MeanMetric):
+            metric.update(torch.square(outputs['latents']))
+        elif isinstance(metric, LearnedPerceptualImagePatchSimilarity):
+            metric.update(clamped_imgs, batch[self.input_key])
+        elif isinstance(metric, PeakSignalNoiseRatio):
+            metric.update(clamped_imgs, batch[self.input_key])
+        elif isinstance(metric, StructuralSimilarityIndexMeasure):
+            metric.update(clamped_imgs, batch[self.input_key])
+        elif isinstance(metric, MeanSquaredError):
+            metric.update(outputs['x_recon'], batch[self.input_key])
+        else:
+            metric.update(outputs['x_recon'], batch[self.input_key])
+
+
+def load_autoencoder(load_path: str,
+                     local_path: str = '/tmp/autoencoder_weights.pt',
+                     torch_dtype=None) -> Tuple[AutoEncoder, Optional[Dict]]:
     """Function to load an AutoEncoder from a composer checkpoint without the loss weights.
 
     Will also load the latent statistics if the statistics tracking callback was used.

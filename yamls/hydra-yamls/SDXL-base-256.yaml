@@ -21,8 +21,6 @@ model:
   fsdp: true
   val_metrics:
     - _target_: torchmetrics.MeanSquaredError
-  val_guidance_scales: []
-  loss_bins: []
 dataset:
   train_batch_size: # Global training batch size
   eval_batch_size: # Global evaluation batch size

@@ -84,7 +84,7 @@ def train(config: DictConfig) -> None:
     # Assumes that evaluators is a nested dictionary with evalutor / dataloader pairs
     if 'evaluators' in config.dataset:
         evaluators = []
-        for _, eval_conf in config.dataset.evaluators.items():
+        for eval_conf in config.dataset.evaluators.values():
             print(OmegaConf.to_yaml(eval_conf))
             eval_dataloader = hydra.utils.instantiate(
                 eval_conf.eval_dataset,
@@ -145,7 +145,7 @@ def train(config: DictConfig) -> None:
                 )
 
     if 'callbacks' in config:
-        for _, call_conf in config.callbacks.items():
+        for call_conf in config.callbacks.values():
             if '_target_' in call_conf:
                 print(f'Instantiating callbacks <{call_conf._target_}>')
                 callbacks.append(hydra.utils.instantiate(call_conf))
