@@ -31,7 +31,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
     Args:
         tokenizer (transformers.PreTrainedTokenizer, MultiTokenizer): Tokenizer used for text input.
             Should be the same tokenizer passed to the model being trained.
-            Can be accessed with model.tokenizer.
+            Can be accessed with model.tokenizer on Diffusion models. Default: ``None``.
         streams (Sequence[Stream], optional): One or more Streams to stream/cache samples from.
             ``StreamingImageCaptionDataset`` uses either ``streams`` or ``remote``/``local``. Default:``None``.
         remote (str, optional): Remote directory (S3 or local filesystem) where dataset is stored. Default: ``None``.
@@ -52,7 +52,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
 
     def __init__(
         self,
-        tokenizer: Union[transformers.PreTrainedTokenizer, MultiTokenizer],
+        tokenizer: Optional[Union[transformers.PreTrainedTokenizer, MultiTokenizer]] = None,
         streams: Optional[Sequence[Stream]] = None,
         remote: Optional[str] = None,
         local: Optional[str] = None,
@@ -153,20 +153,23 @@ class StreamingImageCaptionDataset(StreamingDataset):
                 caption = random.sample(caption, k=1)[0]
             out['drop_caption_mask'] = 1.0
 
-        tokenizer_out = self.tokenizer(caption,
-                                       padding='max_length',
-                                       max_length=self.tokenizer.model_max_length,
-                                       truncation=True,
-                                       return_tensors='pt')
-        out['captions'] = tokenizer_out['input_ids'].squeeze()
-        out['attention_mask'] = tokenizer_out['attention_mask'].squeeze()
+        if self.tokenizer:
+            tokenizer_out = self.tokenizer(caption,
+                                           padding='max_length',
+                                           max_length=self.tokenizer.model_max_length,
+                                           truncation=True,
+                                           return_tensors='pt')
+            out['captions'] = tokenizer_out['input_ids'].squeeze()
+            out['attention_mask'] = tokenizer_out['attention_mask'].squeeze()
+        else:
+            out['captions'] = caption
         return out
 
 
 def build_streaming_image_caption_dataloader(
     remote: Union[str, List],
     batch_size: int,
-    tokenizer: Union[transformers.PreTrainedTokenizer, MultiTokenizer],
+    tokenizer: Optional[Union[transformers.PreTrainedTokenizer, MultiTokenizer]] = None,
     local: Optional[Union[str, List]] = None,
     caption_drop_prob: float = 0.0,
     microcond_drop_prob: float = 0.0,
@@ -189,7 +192,7 @@ def build_streaming_image_caption_dataloader(
         batch_size (int): The batch size to use for both the ``StreamingDataset`` and ``DataLoader``.
         tokenizer (transformers.PreTrainedTokenizer, MultiTokenizer): Tokenizer used for text input.
             Should be the same tokenizer passed to the model being trained.
-            Can be accessed with model.tokenizer.
+            Can be accessed with model.tokenizer on Diffusion models. Default: ``None``.
         caption_drop_prob (float): The probability of dropping a caption. Default: ``0.0``.
         microcond_drop_prob (float): The probability of dropping microconditioning. Only relevant for SDXL. Default: ``0.0``.
         resize_size (int): The size to resize the image to. Default: ``256``.

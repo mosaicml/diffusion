@@ -65,15 +65,17 @@ def train(config: DictConfig) -> None:
     # Check if this is training an autoencoder. If so, the optimizer needs different param groups
     if hasattr(model, 'autoencoder_loss'):
         optimizer = make_autoencoder_optimizer(config, model)
+        tokenizer = None
     else:
         optimizer = hydra.utils.instantiate(config.optimizer, params=model.parameters())
+        tokenizer = model.tokenizer
 
     # Load train dataset. Currently this expects to load according to the datasetHparam method.
     # This means adding external datasets is currently not super easy. Will refactor or check for
     # upstream composer changes that could make this easier.
     train_dataloader: Union[Iterable, DataSpec, Dict[str, Any]] = hydra.utils.instantiate(
         config.dataset.train_dataset,
-        tokenizer=model.tokenizer,
+        tokenizer=tokenizer,
         batch_size=config.dataset.train_batch_size // dist.get_world_size(),
     )
     # Need to sleep for a bit to avoid dataloader crash
@@ -89,7 +91,7 @@ def train(config: DictConfig) -> None:
             print(OmegaConf.to_yaml(eval_conf))
             eval_dataloader = hydra.utils.instantiate(
                 eval_conf.eval_dataset,
-                tokenizer=model.tokenizer,
+                tokenizer=tokenizer,
                 batch_size=config.dataset.eval_batch_size // dist.get_world_size(),
             )
             evaluator = hydra.utils.instantiate(eval_conf.evaluator, dataloader=eval_dataloader)
