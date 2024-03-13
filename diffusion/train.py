@@ -73,6 +73,7 @@ def train(config: DictConfig) -> None:
     # upstream composer changes that could make this easier.
     train_dataloader: Union[Iterable, DataSpec, Dict[str, Any]] = hydra.utils.instantiate(
         config.dataset.train_dataset,
+        tokenizer=model.tokenizer,
         batch_size=config.dataset.train_batch_size // dist.get_world_size(),
     )
     # Need to sleep for a bit to avoid dataloader crash
@@ -88,7 +89,8 @@ def train(config: DictConfig) -> None:
             print(OmegaConf.to_yaml(eval_conf))
             eval_dataloader = hydra.utils.instantiate(
                 eval_conf.eval_dataset,
-                config.dataset.eval_batch_size // dist.get_world_size(),
+                tokenizer=model.tokenizer,
+                batch_size=config.dataset.eval_batch_size // dist.get_world_size(),
             )
             evaluator = hydra.utils.instantiate(eval_conf.evaluator, dataloader=eval_dataloader)
             # Need to sleep for a bit to avoid dataloader crash
@@ -99,6 +101,7 @@ def train(config: DictConfig) -> None:
 
     else:
         eval_set = hydra.utils.instantiate(config.dataset.eval_dataset,
+                                           tokenizer=model.tokenizer,
                                            batch_size=config.dataset.eval_batch_size // dist.get_world_size())
         # Need to sleep for a bit to avoid dataloader crash
         time.sleep(10)

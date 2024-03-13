@@ -165,9 +165,9 @@ class StreamingImageCaptionDataset(StreamingDataset):
 
 def build_streaming_image_caption_dataloader(
     remote: Union[str, List],
-    local: Union[str, List],
     batch_size: int,
     tokenizer: Union[transformers.PreTrainedTokenizer, MultiTokenizer],
+    local: Optional[Union[str, List]] = None,
     caption_drop_prob: float = 0.0,
     microcond_drop_prob: float = 0.0,
     resize_size: int = 256,
@@ -218,10 +218,14 @@ def build_streaming_image_caption_dataloader(
         dataloader_kwargs = {}
 
     # Check types for remote and local
-    if isinstance(remote, str) and isinstance(local, str):
-        # Hacky... make remote and local lists to simplify downstream code
-        remote, local = [remote], [local]
-    elif isinstance(remote, Sequence) and isinstance(local, Sequence):
+    
+    if isinstance(remote, str):
+        remote = [remote]
+    
+    if not local:
+        local = [_make_default_local_path(r) for r in remote]
+
+    if isinstance(remote, Sequence) and isinstance(local, Sequence):
         if len(remote) != len(local):
             ValueError(
                 f'remote and local Sequences must be the same length, got lengths {len(remote)} and {len(local)}')
@@ -230,11 +234,7 @@ def build_streaming_image_caption_dataloader(
 
     # Create a Stream for each (remote, local) pair
     streams = []
-    if not local:
-        for r in remote:
-            streams.append(Stream(remote=r, local=make_default_local_path(r)))
-    else:
-        for r, l in zip(remote, local):
+    for r, l in zip(remote, local):
             streams.append(Stream(remote=r, local=l))
 
     # Set the crop to apply
@@ -278,6 +278,6 @@ def build_streaming_image_caption_dataloader(
     return dataloader
 
 
-def make_default_local_path(remote_path):
+def _make_default_local_path(remote_path):
     return str(Path(*["/tmp"] + list(Path(remote_path).parts[1:])))
     
