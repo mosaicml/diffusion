@@ -239,7 +239,7 @@ def build_streaming_image_caption_dataloader(
     elif crop_type == 'random':
         crop = RandomCropSquare(resize_size)
     elif crop_type == 'aspect_ratio':
-        crop = RandomCropAspectRatioTransorm(resize_size)
+        crop = RandomCropAspectRatioTransorm(resize_size)  # type: ignore
     else:
         crop = None
 
