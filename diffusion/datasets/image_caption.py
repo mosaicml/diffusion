@@ -224,10 +224,10 @@ def build_streaming_image_caption_dataloader(
 
     if isinstance(remote, str):
         remote = [remote]
-
+    if isinstance(local, str):
+        local = [local]
     if not local:
         local = [_make_default_local_path(r) for r in remote]
-
     if isinstance(remote, Sequence) and isinstance(local, Sequence):
         if len(remote) != len(local):
             ValueError(
