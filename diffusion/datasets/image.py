@@ -92,6 +92,7 @@ def build_streaming_image_dataloader(
     batch_size: int,
     transform: Optional[List[Callable]] = None,
     image_key: str = 'image',
+    image_output_key: Optional[str] = None,
     streaming_kwargs: Optional[Dict] = None,
     dataloader_kwargs: Optional[Dict] = None,
 ):
@@ -103,6 +104,8 @@ def build_streaming_image_dataloader(
         batch_size (int): The batch size to use for both the ``StreamingDataset`` and ``DataLoader``.
         transform (Optional[Callable]): The transforms to apply to the image. Default: ``None``.
         image_key (str): Key associated with the image in the streaming dataset. Default: ``'image'``.
+        image_output_key (optional, str): Optional output key for the image. If none, the value of `image_key` will
+            be used. Default: ``None``.
         streaming_kwargs (dict, optional): Additional arguments to pass to the ``StreamingDataset``. Default: ``None``.
         dataloader_kwargs (dict, optional): Additional arguments to pass to the ``DataLoader``. Default: ``None``.
     """
@@ -137,6 +140,7 @@ def build_streaming_image_dataloader(
         streams=streams,
         transform=transform,
         image_key=image_key,
+        image_output_key=image_output_key,
         batch_size=batch_size,
         **streaming_kwargs,
     )
