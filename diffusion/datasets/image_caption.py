@@ -6,9 +6,11 @@
 import logging
 import random
 from io import BytesIO
-from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
+from pathlib import Path
+from typing import Callable, Dict, List, Optional, Sequence, Union
 
 import torch
+import transformers
 from PIL import Image
 from streaming import Stream, StreamingDataset
 from torch.utils.data import DataLoader
@@ -27,12 +29,13 @@ class StreamingImageCaptionDataset(StreamingDataset):
     """Streaming dataset for image-caption pairs.
 
     Args:
-        tokenizer_names_or_paths (str, Tuple[str, ...]): The name(s) or path(s) of the tokenizer(s) to use.
+        tokenizer (transformers.PreTrainedTokenizer, MultiTokenizer): Tokenizer used for text input.
+            Should be the same tokenizer passed to the model being trained.
+            Can be accessed with model.tokenizer on Diffusion models. Default: ``None``.
         streams (Sequence[Stream], optional): One or more Streams to stream/cache samples from.
             ``StreamingImageCaptionDataset`` uses either ``streams`` or ``remote``/``local``. Default:``None``.
         remote (str, optional): Remote directory (S3 or local filesystem) where dataset is stored. Default: ``None``.
         local (str, optional): Local filesystem directory where dataset is cached during operation. Default: ``None``.
-        tokenizer_names_or_paths (str, Tuple[str, ...]): The name(s) or path(s) of the tokenizer(s) to use.
         caption_drop_prob (float): The probability of dropping a caption. Default: ``0.0``.
         microcond_drop_prob (float): The probability of dropping microconditioning. Only relevant for SDXL. Default: ``0.0``.
         caption_selection (str): If there are multiple captions, specifies how to select a single caption.
@@ -49,7 +52,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
 
     def __init__(
         self,
-        tokenizer_names_or_paths: Union[str, Tuple[str, ...]],
+        tokenizer: Optional[Union[transformers.PreTrainedTokenizer, MultiTokenizer]] = None,
         streams: Optional[Sequence[Stream]] = None,
         remote: Optional[str] = None,
         local: Optional[str] = None,
@@ -89,8 +92,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
         self.caption_key = caption_key
         self.zero_dropped_captions = zero_dropped_captions
 
-        # Convert string to list
-        self.tokenizer = MultiTokenizer(tokenizer_names_or_paths)
+        self.tokenizer = tokenizer
 
     def __getitem__(self, index):
         sample = super().__getitem__(index)
@@ -151,21 +153,24 @@ class StreamingImageCaptionDataset(StreamingDataset):
                 caption = random.sample(caption, k=1)[0]
             out['drop_caption_mask'] = 1.0
 
-        tokenizer_out = self.tokenizer(caption,
-                                       padding='max_length',
-                                       max_length=self.tokenizer.model_max_length,
-                                       truncation=True,
-                                       return_tensors='pt')
-        out['captions'] = tokenizer_out['input_ids'].squeeze()
-        out['attention_mask'] = tokenizer_out['attention_mask'].squeeze()
+        if self.tokenizer:
+            tokenizer_out = self.tokenizer(caption,
+                                           padding='max_length',
+                                           max_length=self.tokenizer.model_max_length,
+                                           truncation=True,
+                                           return_tensors='pt')
+            out['captions'] = tokenizer_out['input_ids'].squeeze()
+            out['attention_mask'] = tokenizer_out['attention_mask'].squeeze()
+        else:
+            out['captions'] = caption
         return out
 
 
 def build_streaming_image_caption_dataloader(
     remote: Union[str, List],
-    local: Union[str, List],
     batch_size: int,
-    tokenizer_names_or_paths: Union[str, Tuple[str, ...]],
+    tokenizer: Optional[Union[transformers.PreTrainedTokenizer, MultiTokenizer]] = None,
+    local: Optional[Union[str, List]] = None,
     caption_drop_prob: float = 0.0,
     microcond_drop_prob: float = 0.0,
     resize_size: int = 256,
@@ -185,7 +190,9 @@ def build_streaming_image_caption_dataloader(
         remote (str, Sequence[str]): One or more remote directories (S3 or local filesystem) where dataset is stored.
         local (str, Sequence[str]): One or more local filesystem directories where dataset is cached during operation.
         batch_size (int): The batch size to use for both the ``StreamingDataset`` and ``DataLoader``.
-        tokenizer_names_or_paths (str, Tuple[str, ...]): The name(s) or path(s) of the tokenizer(s) to use.
+        tokenizer (transformers.PreTrainedTokenizer, MultiTokenizer): Tokenizer used for text input.
+            Should be the same tokenizer passed to the model being trained.
+            Can be accessed with model.tokenizer on Diffusion models. Default: ``None``.
         caption_drop_prob (float): The probability of dropping a caption. Default: ``0.0``.
         microcond_drop_prob (float): The probability of dropping microconditioning. Only relevant for SDXL. Default: ``0.0``.
         resize_size (int): The size to resize the image to. Default: ``256``.
@@ -214,10 +221,14 @@ def build_streaming_image_caption_dataloader(
         dataloader_kwargs = {}
 
     # Check types for remote and local
-    if isinstance(remote, str) and isinstance(local, str):
-        # Hacky... make remote and local lists to simplify downstream code
-        remote, local = [remote], [local]
-    elif isinstance(remote, Sequence) and isinstance(local, Sequence):
+
+    if isinstance(remote, str):
+        remote = [remote]
+    if isinstance(local, str):
+        local = [local]
+    if not local:
+        local = [_make_default_local_path(r) for r in remote]
+    if isinstance(remote, Sequence) and isinstance(local, Sequence):
         if len(remote) != len(local):
             ValueError(
                 f'remote and local Sequences must be the same length, got lengths {len(remote)} and {len(local)}')
@@ -246,7 +257,7 @@ def build_streaming_image_caption_dataloader(
 
     dataset = StreamingImageCaptionDataset(
         streams=streams,
-        tokenizer_names_or_paths=tokenizer_names_or_paths,
+        tokenizer=tokenizer,
         caption_drop_prob=caption_drop_prob,
         microcond_drop_prob=microcond_drop_prob,
         caption_selection=caption_selection,
@@ -268,3 +279,7 @@ def build_streaming_image_caption_dataloader(
     )
 
     return dataloader
+
+
+def _make_default_local_path(remote_path):
+    return str(Path(*['/tmp'] + list(Path(remote_path).parts[1:])))
