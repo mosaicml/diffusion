@@ -31,8 +31,16 @@ def evaluate(config: DictConfig) -> None:
     # The model to evaluate
     model: ComposerModel = hydra.utils.instantiate(config.model)
 
+    tokenizer = model.tokenizer if hasattr(model, 'tokenizer') else None
+
     # The dataloader to use for evaluation
-    eval_dataloader: DataLoader = hydra.utils.instantiate(config.eval_dataloader)
+    if tokenizer:
+        eval_dataloader = hydra.utils.instantiate(
+                                        config.eval_dataloader,
+                                        tokenizer=tokenizer)
+
+    else:
+        eval_dataloader: DataLoader = hydra.utils.instantiate(config.eval_dataloader)
 
     # The CLIPScores metric to use for evaluation
     clip_metric: CLIPScore = hydra.utils.instantiate(config.clip_metric)

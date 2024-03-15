@@ -73,11 +73,17 @@ def train(config: DictConfig) -> None:
     # Load train dataset. Currently this expects to load according to the datasetHparam method.
     # This means adding external datasets is currently not super easy. Will refactor or check for
     # upstream composer changes that could make this easier.
-    train_dataloader: Union[Iterable, DataSpec, Dict[str, Any]] = hydra.utils.instantiate(
-        config.dataset.train_dataset,
-        tokenizer=tokenizer,
-        batch_size=config.dataset.train_batch_size // dist.get_world_size(),
-    )
+    if tokenizer:
+        train_dataloader: Union[Iterable, DataSpec, Dict[str, Any]] = hydra.utils.instantiate(
+            config.dataset.train_dataset,
+            tokenizer=tokenizer,
+            batch_size=config.dataset.train_batch_size // dist.get_world_size(),
+        )
+    else:
+        train_dataloader: Union[Iterable, DataSpec, Dict[str, Any]] = hydra.utils.instantiate(
+            config.dataset.train_dataset,
+            batch_size=config.dataset.train_batch_size // dist.get_world_size(),
+        ) 
     # Need to sleep for a bit to avoid dataloader crash
     time.sleep(10)
 
@@ -89,11 +95,18 @@ def train(config: DictConfig) -> None:
         evaluators = []
         for eval_conf in config.dataset.evaluators.values():
             print(OmegaConf.to_yaml(eval_conf))
-            eval_dataloader = hydra.utils.instantiate(
-                eval_conf.eval_dataset,
-                tokenizer=tokenizer,
-                batch_size=config.dataset.eval_batch_size // dist.get_world_size(),
-            )
+            if tokenizer:
+                eval_dataloader = hydra.utils.instantiate(
+                    eval_conf.eval_dataset,
+                    tokenizer=tokenizer,
+                    batch_size=config.dataset.eval_batch_size // dist.get_world_size(),
+                )
+            else:
+                eval_dataloader = hydra.utils.instantiate(
+                    eval_conf.eval_dataset,
+                    batch_size=config.dataset.eval_batch_size // dist.get_world_size(),
+                )
+
             evaluator = hydra.utils.instantiate(eval_conf.evaluator, dataloader=eval_dataloader)
             # Need to sleep for a bit to avoid dataloader crash
             time.sleep(10)
@@ -102,9 +115,14 @@ def train(config: DictConfig) -> None:
         eval_set = evaluators
 
     else:
-        eval_set = hydra.utils.instantiate(config.dataset.eval_dataset,
-                                           tokenizer=model.tokenizer,
-                                           batch_size=config.dataset.eval_batch_size // dist.get_world_size())
+        if tokenizer:
+            eval_set = hydra.utils.instantiate(config.dataset.eval_dataset,
+                                            tokenizer=model.tokenizer,
+                                            batch_size=config.dataset.eval_batch_size // dist.get_world_size())
+        else:
+            eval_set = hydra.utils.instantiate(config.dataset.eval_dataset,
+                                batch_size=config.dataset.eval_batch_size // dist.get_world_size())
+
         # Need to sleep for a bit to avoid dataloader crash
         time.sleep(10)
 
