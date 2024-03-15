@@ -35,9 +35,7 @@ def evaluate(config: DictConfig) -> None:
 
     # The dataloader to use for evaluation
     if tokenizer:
-        eval_dataloader = hydra.utils.instantiate(
-                                        config.eval_dataloader,
-                                        tokenizer=tokenizer)
+        eval_dataloader = hydra.utils.instantiate(config.eval_dataloader, tokenizer=tokenizer)
 
     else:
         eval_dataloader: DataLoader = hydra.utils.instantiate(config.eval_dataloader)

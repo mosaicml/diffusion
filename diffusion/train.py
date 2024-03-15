@@ -83,7 +83,7 @@ def train(config: DictConfig) -> None:
         train_dataloader: Union[Iterable, DataSpec, Dict[str, Any]] = hydra.utils.instantiate(
             config.dataset.train_dataset,
             batch_size=config.dataset.train_batch_size // dist.get_world_size(),
-        ) 
+        )
     # Need to sleep for a bit to avoid dataloader crash
     time.sleep(10)
 
@@ -117,11 +117,11 @@ def train(config: DictConfig) -> None:
     else:
         if tokenizer:
             eval_set = hydra.utils.instantiate(config.dataset.eval_dataset,
-                                            tokenizer=model.tokenizer,
-                                            batch_size=config.dataset.eval_batch_size // dist.get_world_size())
+                                               tokenizer=model.tokenizer,
+                                               batch_size=config.dataset.eval_batch_size // dist.get_world_size())
         else:
             eval_set = hydra.utils.instantiate(config.dataset.eval_dataset,
-                                batch_size=config.dataset.eval_batch_size // dist.get_world_size())
+                                               batch_size=config.dataset.eval_batch_size // dist.get_world_size())
 
         # Need to sleep for a bit to avoid dataloader crash
         time.sleep(10)
