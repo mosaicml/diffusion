@@ -493,7 +493,6 @@ def _check_prompt_given(prompt, tokenized_prompts, prompt_embeds):
 
 def _create_unet_attention_mask(attention_mask):
     """Takes the union of multiple attention masks if given more than one mask."""
-    encoder_attention_mask = None
     if len(attention_mask.shape) == 2:
         return attention_mask
     elif len(attention_mask.shape) == 3:
