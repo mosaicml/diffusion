@@ -464,11 +464,12 @@ class StableDiffusion(ComposerModel):
         # duplicate text embeddings for each generation per prompt
         prompt_embeds = _duplicate_tensor(prompt_embeds, num_images_per_prompt)
 
-        if self.mask_pad_tokens:
+        if not self.mask_pad_tokens:
+            tokenized_pad_mask = None
+
+        if tokenized_pad_mask is not None:
             tokenized_pad_mask = _create_unet_attention_mask(tokenized_pad_mask)
             tokenized_pad_mask = _duplicate_tensor(tokenized_pad_mask, num_images_per_prompt)
-        else:
-            tokenized_pad_mask = None  # don't use attention mask in unet
 
         if self.sdxl and pooled_text_embeddings is not None:
             pooled_text_embeddings = _duplicate_tensor(pooled_text_embeddings, num_images_per_prompt)
@@ -507,5 +508,9 @@ def _create_unet_attention_mask(attention_mask):
 def _duplicate_tensor(tensor, num_images_per_prompt):
     """Duplicate tensor for multiple generations from a single prompt."""
     batch_size, seq_len = tensor.shape[:2]
-    tensor = tensor.repeat(1, num_images_per_prompt, 1)  # type: ignore
-    return tensor.view(batch_size * num_images_per_prompt, seq_len, -1).squeeze(-1)
+    tensor = tensor.repeat(1, num_images_per_prompt, *[
+        1,
+    ] * len(tensor.shape[2:]))
+    return tensor.view(batch_size * num_images_per_prompt, seq_len, *[
+        -1,
+    ] * len(tensor.shape[2:]))
