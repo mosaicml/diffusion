@@ -28,9 +28,6 @@ dataset:
     _target_: diffusion.datasets.image_caption.build_streaming_image_caption_dataloader
     remote:
       # Path to object store bucket(s)
-    local:
-      # Path to corresponding local dataset(s)
-    tokenizer_name_or_path: stabilityai/stable-diffusion-xl-base-1.0
     caption_drop_prob: 0.1
     caption_key: caption
     image_key: jpg
@@ -50,7 +47,6 @@ dataset:
   eval_dataset:
     _target_: diffusion.datasets.coco.coco_captions.build_streaming_cocoval_dataloader
     remote:  # Path to object store bucket
-    local: # Path to local dataset cache
     resize_size: 512
     prefetch_factor: 2
     num_workers: 8
