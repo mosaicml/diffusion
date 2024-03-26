@@ -47,10 +47,15 @@ def test_sd2_generate(guidance_scale, negative_prompt):
     assert output.shape == (1, 3, 8, 8)
 
 
-def test_sdxl_forward():
+@pytest.mark.parametrize('mask_pad_tokens', [True, False])
+def test_sdxl_forward(mask_pad_tokens):
     # fp16 vae does not run on cpu
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-    model = stable_diffusion_xl(pretrained=False, fsdp=False, encode_latents_in_fp16=False, use_xformers=False)
+    model = stable_diffusion_xl(pretrained=False,
+                                mask_pad_tokens=mask_pad_tokens,
+                                fsdp=False,
+                                encode_latents_in_fp16=False,
+                                use_xformers=False)
     batch_size = 1
     H = 16
     W = 16
@@ -77,13 +82,14 @@ def test_sdxl_forward():
 
 @pytest.mark.parametrize('guidance_scale', [0.0, 3.0])
 @pytest.mark.parametrize('negative_prompt', [None, 'so cool'])
-def test_sdxl_generate(guidance_scale, negative_prompt):
+@pytest.mark.parametrize('mask_pad_tokens', [True, False])
+def test_sdxl_generate(guidance_scale, negative_prompt, mask_pad_tokens):
     # fp16 vae does not run on cpu
     model = stable_diffusion_xl(pretrained=False,
                                 fsdp=False,
                                 encode_latents_in_fp16=False,
                                 use_xformers=False,
-                                mask_pad_tokens=True)
+                                mask_pad_tokens=mask_pad_tokens)
     output = model.generate(
         prompt='a cool doge',
         negative_prompt=negative_prompt,
