@@ -7,7 +7,7 @@ import logging
 import random
 from io import BytesIO
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence, Union
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 import transformers
