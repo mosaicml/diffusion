@@ -114,7 +114,7 @@ def stable_diffusion_2(
     else:
         # Use a custom autoencoder
         vae, latent_statistics = load_autoencoder(autoencoder_path, autoencoder_local_path, torch_dtype=precision)
-        if latent_statistics is None and latent_mean == 'latent_statistics' or latent_std == 'latent_statistics':
+        if latent_statistics is None and (latent_mean == 'latent_statistics' or latent_std == 'latent_statistics'):
             raise ValueError(
                 'Must specify latent scale when using a custom autoencoder without tracking latent statistics.')
         if isinstance(latent_mean, str) and latent_mean == 'latent_statistics':
@@ -293,7 +293,7 @@ def stable_diffusion_xl(
     else:
         # Use a custom autoencoder
         vae, latent_statistics = load_autoencoder(autoencoder_path, autoencoder_local_path, torch_dtype=precision)
-        if latent_statistics is None and latent_mean == 'latent_statistics' or latent_std == 'latent_statistics':
+        if latent_statistics is None and (latent_mean == 'latent_statistics' or latent_std == 'latent_statistics'):
             raise ValueError(
                 'Must specify latent scale when using a custom autoencoder without tracking latent statistics.')
         if isinstance(latent_mean, str) and latent_mean == 'latent_statistics':
