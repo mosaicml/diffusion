@@ -5,7 +5,7 @@
 
 import base64
 import io
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 from composer.utils.file_helpers import get_file
@@ -119,7 +119,12 @@ class StableDiffusionXLInference():
     """Inference endpoint class for Stable Diffusion XL.
 
     Args:
-        model_name (str): Name of the model to load. Default: 'stabilityai/stable-diffusion-xl-base-1.0'.
+        tokenizer_names (str, Tuple[str, ...]): HuggingFace name(s) of the tokenizer(s) to load.
+            Default: ``('stabilityai/stable-diffusion-xl-base-1.0/tokenizer',
+            'stabilityai/stable-diffusion-xl-base-1.0/tokenizer_2')``.
+        text_encoder_names (str, Tuple[str, ...]): HuggingFace name(s) of the text encoder(s) to load.
+            Default: ``('stabilityai/stable-diffusion-xl-base-1.0/text_encoder',
+            'stabilityai/stable-diffusion-xl-base-1.0/text_encoder_2')``.
         unet_model_name (str): Name of the UNet model to load. Default: 'stabilityai/stable-diffusion-xl-base-1.0'.
         vae_model_name (str): Name of the VAE model to load. Defaults to
             'madebyollin/sdxl-vae-fp16-fix' as the official VAE checkpoint (from
@@ -133,7 +138,13 @@ class StableDiffusionXLInference():
     """
 
     def __init__(self,
-                 model_name: str = 'stabilityai/stable-diffusion-xl-base-1.0',
+                 tokenizer_names: Union[str, Tuple[str,
+                                                   ...]] = ('stabilityai/stable-diffusion-xl-base-1.0/tokenizer',
+                                                            'stabilityai/stable-diffusion-xl-base-1.0/tokenizer_2'),
+                 text_encoder_names: Union[str,
+                                           Tuple[str,
+                                                 ...]] = ('stabilityai/stable-diffusion-xl-base-1.0/text_encoder',
+                                                          'stabilityai/stable-diffusion-xl-base-1.0/text_encoder_2'),
                  unet_model_name: str = 'stabilityai/stable-diffusion-xl-base-1.0',
                  vae_model_name: str = 'madebyollin/sdxl-vae-fp16-fix',
                  clip_qkv: Optional[float] = None,
@@ -144,7 +155,8 @@ class StableDiffusionXLInference():
         self.device = torch.cuda.current_device()
 
         model = stable_diffusion_xl(
-            model_name=model_name,
+            tokenizer_names=tokenizer_names,
+            text_encoder_names=text_encoder_names,
             unet_model_name=unet_model_name,
             vae_model_name=vae_model_name,
             clip_qkv=clip_qkv,
