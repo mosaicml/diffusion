@@ -3,9 +3,10 @@
 
 """Transforms for the training and eval dataset."""
 
+from typing import Tuple
+
 import torch
 import torchvision.transforms as transforms
-from torchvision.transforms import RandomCrop
 from torchvision.transforms.functional import crop
 
 
@@ -33,7 +34,7 @@ class RandomCropSquare:
 
     def __init__(self, size):
         self.size = size
-        self.random_crop = RandomCrop(size)
+        self.random_crop = transforms.RandomCrop(size)
 
     def __call__(self, img):
         # First, resize the image such that the smallest side is self.size while preserving aspect ratio.
@@ -47,17 +48,9 @@ class RandomCropSquare:
 class RandomCropAspectRatioTransorm:
     """Assigns an image to a pre-defined set of aspect ratio buckets, then resizes and crops to fit into the bucket."""
 
-    def __init__(self):
-        self.height_buckets = torch.tensor([
-            512, 512, 512, 512, 576, 576, 576, 640, 640, 704, 704, 704, 768, 768, 832, 832, 896, 896, 960, 960, 1024,
-            1024, 1088, 1088, 1152, 1152, 1216, 1280, 1344, 1408, 1472, 1536, 1600, 1664, 1728, 1792, 1856, 1920, 1984,
-            2048
-        ])
-        self.width_buckets = torch.tensor([
-            2048, 1984, 1920, 1856, 1792, 1728, 1664, 1600, 1536, 1472, 1408, 1344, 1344, 1280, 1216, 1152, 1152, 1088,
-            1088, 1024, 1024, 960, 960, 896, 896, 832, 832, 768, 768, 704, 704, 640, 640, 576, 576, 576, 512, 512, 512,
-            512
-        ])
+    def __init__(self, resize_size: Tuple[Tuple[int, int], ...]):
+        self.height_buckets = torch.tensor([size[0] for size in resize_size])
+        self.width_buckets = torch.tensor([size[1] for size in resize_size])
         self.aspect_ratio_buckets = self.height_buckets / self.width_buckets
 
     def __call__(self, img):
