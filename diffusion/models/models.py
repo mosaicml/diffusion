@@ -206,7 +206,7 @@ def stable_diffusion_xl(
     autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
     prediction_type: str = 'epsilon',
     latent_mean: Union[float, Tuple, str] = 0.0,
-    latent_std: Union[float, Tuple, str] = 0.13025,
+    latent_std: Union[float, Tuple, str] = 7.67754318618,
     offset_noise: Optional[float] = None,
     train_metrics: Optional[List] = None,
     val_metrics: Optional[List] = None,
