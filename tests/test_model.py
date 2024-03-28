@@ -10,6 +10,30 @@ import torch
 from diffusion.models.models import stable_diffusion_2, stable_diffusion_xl
 
 
+@pytest.mark.parametrize('latent_mean', [0.1, (0.1, 0.2, 0.3, 0.4)])
+@pytest.mark.parametrize('latent_std', [5.5, (1.1, 2.2, 3.3, 4.4)])
+def test_sd2_latent_scales(latent_mean, latent_std):
+    model = stable_diffusion_2(pretrained=False,
+                               fsdp=False,
+                               encode_latents_in_fp16=False,
+                               latent_mean=latent_mean,
+                               latent_std=latent_std)
+
+    if isinstance(latent_mean, float):
+        latent_mean_comp = [latent_mean] * 4
+    else:
+        latent_mean_comp = latent_mean
+    latent_mean_comp = torch.tensor(latent_mean_comp).view(1, -1, 1, 1).to(model.latent_mean.device)
+    if isinstance(latent_std, float):
+        latent_std_comp = [latent_std] * 4
+    else:
+        latent_std_comp = latent_std
+    latent_std_comp = torch.tensor(latent_std_comp).view(1, -1, 1, 1).to(model.latent_std.device)
+
+    torch.testing.assert_close(model.latent_mean, latent_mean_comp)
+    torch.testing.assert_close(model.latent_std, latent_std_comp)
+
+
 def test_sd2_forward():
     # fp16 vae does not run on cpu
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
@@ -45,6 +69,31 @@ def test_sd2_generate(guidance_scale, negative_prompt):
         progress_bar=False,
     )
     assert output.shape == (1, 3, 8, 8)
+
+
+@pytest.mark.parametrize('latent_mean', [0.1, (0.1, 0.2, 0.3, 0.4)])
+@pytest.mark.parametrize('latent_std', [5.5, (1.1, 2.2, 3.3, 4.4)])
+def test_sdxl_latent_scales(latent_mean, latent_std):
+    model = stable_diffusion_xl(pretrained=False,
+                                mask_pad_tokens=True,
+                                fsdp=False,
+                                encode_latents_in_fp16=False,
+                                use_xformers=False,
+                                latent_mean=latent_mean,
+                                latent_std=latent_std)
+    if isinstance(latent_mean, float):
+        latent_mean_comp = [latent_mean] * 4
+    else:
+        latent_mean_comp = latent_mean
+    latent_mean_comp = torch.tensor(latent_mean_comp).view(1, -1, 1, 1).to(model.latent_mean.device)
+    if isinstance(latent_std, float):
+        latent_std_comp = [latent_std] * 4
+    else:
+        latent_std_comp = latent_std
+    latent_std_comp = torch.tensor(latent_std_comp).view(1, -1, 1, 1).to(model.latent_std.device)
+
+    torch.testing.assert_close(model.latent_mean, latent_mean_comp)
+    torch.testing.assert_close(model.latent_std, latent_std_comp)
 
 
 @pytest.mark.parametrize('mask_pad_tokens', [True, False])
