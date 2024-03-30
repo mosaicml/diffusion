@@ -138,9 +138,9 @@ def stable_diffusion_2(
             unet_config['out_channels'] = vae.config['latent_channels']
         # Init the unet from the config
         unet = UNet2DConditionModel(**unet_config)
-    if type(latent_mean) is float:
+    if isinstance(latent_mean, float):
         latent_mean = (latent_mean,) * unet_config['in_channels']
-    if type(latent_std) is float:
+    if isinstance(latent_std, float):
         latent_std = (latent_std,) * unet_config['in_channels']
     assert isinstance(latent_mean, tuple) and isinstance(latent_std, tuple)
 
@@ -332,9 +332,9 @@ def stable_diffusion_xl(
                 layer = zero_module(layer)
         # Last conv block out projection
         unet.conv_out = zero_module(unet.conv_out)
-    if type(latent_mean) is float:
+    if isinstance(latent_mean, float):
         latent_mean = (latent_mean,) * unet_config['in_channels']
-    if type(latent_std) is float:
+    if isinstance(latent_std, float):
         latent_std = (latent_std,) * unet_config['in_channels']
     assert isinstance(latent_mean, tuple) and isinstance(latent_std, tuple)
 
