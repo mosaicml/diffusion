@@ -4,7 +4,6 @@
 """Constructors for diffusion models."""
 
 import logging
-import math
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -31,13 +30,24 @@ except:
 log = logging.getLogger(__name__)
 
 
+def _parse_latent_statistics(latent_stat: Union[float, Tuple, str]) -> Union[float, Tuple, str]:
+    if isinstance(latent_stat, str):
+        latent_stat = latent_stat.lower()
+        if latent_stat != 'latent_statistics':
+            raise ValueError(f'Invalid latent statistic {latent_stat}. Must be a float, tuple or "latent_statistics".')
+    elif type(latent_stat).__name__ == 'ListConfig' and not isinstance(latent_stat, float):
+        latent_stat = tuple(latent_stat)
+    return latent_stat
+
+
 def stable_diffusion_2(
     model_name: str = 'stabilityai/stable-diffusion-2-base',
     pretrained: bool = True,
     autoencoder_path: Optional[str] = None,
     autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
     prediction_type: str = 'epsilon',
-    latent_scale: Union[float, str] = 0.18215,
+    latent_mean: Union[float, Tuple, str] = 0.0,
+    latent_std: Union[float, Tuple, str] = 5.489980785067252,
     offset_noise: Optional[float] = None,
     train_metrics: Optional[List] = None,
     val_metrics: Optional[List] = None,
@@ -62,8 +72,12 @@ def stable_diffusion_2(
         autoencoder_local_path (optional, str): Path to autoencoder weights. Default: `/tmp/autoencoder_weights.pt`.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
-        latent_scale (float, str): The scale of the autoencoder latents. Either a float for the scaling value,
-            or `'latent_statistics'` to try to use the value from the autoencoder checkpoint. Defaults to `0.18215`.
+        latent_mean (float, list, str): The mean of the autoencoder latents. Either a float for a single value,
+            a tuple of means, or or `'latent_statistics'` to try to use the value from the autoencoder
+            checkpoint. Defaults to `0.0`.
+        latent_std (float, list, str): The std. dev. of the autoencoder latents. Either a float for a single value,
+            a tuple of std_devs, or or `'latent_statistics'` to try to use the value from the autoencoder
+            checkpoint. Defaults to `1/0.18215`.
         train_metrics (list, optional): List of metrics to compute during training. If None, defaults to
             [MeanSquaredError()].
         val_metrics (list, optional): List of metrics to compute during validation. If None, defaults to
@@ -78,10 +92,7 @@ def stable_diffusion_2(
         clip_qkv (float, optional): If not None, clip the qkv values to this value. Defaults to None.
         use_xformers (bool): Whether to use xformers for attention. Defaults to True.
     """
-    if isinstance(latent_scale, str):
-        latent_scale = latent_scale.lower()
-        if latent_scale != 'latent_statistics':
-            raise ValueError(f'Invalid latent scale {latent_scale}. Must be a float or "latent_statistics".')
+    latent_mean, latent_std = _parse_latent_statistics(latent_mean), _parse_latent_statistics(latent_std)
 
     if train_metrics is None:
         train_metrics = [MeanSquaredError()]
@@ -95,7 +106,7 @@ def stable_diffusion_2(
 
     # Make the autoencoder
     if autoencoder_path is None:
-        if latent_scale == 'latent_statistics':
+        if latent_mean == 'latent_statistics' or latent_std == 'latent_statistics':
             raise ValueError('Cannot use tracked latent_statistics when using the pretrained vae.')
         # Use the pretrained vae
         downsample_factor = 8
@@ -103,29 +114,35 @@ def stable_diffusion_2(
     else:
         # Use a custom autoencoder
         vae, latent_statistics = load_autoencoder(autoencoder_path, autoencoder_local_path, torch_dtype=precision)
-        if latent_statistics is not None and latent_scale == 'latent_statistics':
-            assert isinstance(latent_statistics['global_mean'], float)
-            assert isinstance(latent_statistics['global_std'], float)
-            second_moment = latent_statistics['global_mean']**2 + latent_statistics['global_std']**2
-            latent_scale = 1 / math.sqrt(second_moment)
-        else:
+        if latent_statistics is None and (latent_mean == 'latent_statistics' or latent_std == 'latent_statistics'):
             raise ValueError(
                 'Must specify latent scale when using a custom autoencoder without tracking latent statistics.')
+        if isinstance(latent_mean, str) and latent_mean == 'latent_statistics':
+            assert isinstance(latent_statistics, dict)
+            latent_mean = tuple(latent_statistics['latent_channel_means'])
+        if isinstance(latent_std, str) and latent_std == 'latent_statistics':
+            assert isinstance(latent_statistics, dict)
+            latent_std = tuple(latent_statistics['latent_channel_stds'])
         downsample_factor = 2**(len(vae.config['channel_multipliers']) - 1)
 
     # Make the unet
+    unet_config = PretrainedConfig.get_config_dict(model_name, subfolder='unet')[0]
     if pretrained:
         unet = UNet2DConditionModel.from_pretrained(model_name, subfolder='unet')
         if isinstance(vae, AutoEncoder) and vae.config['latent_channels'] != 4:
             raise ValueError(f'Pretrained unet has 4 latent channels but the vae has {vae.latent_channels}.')
     else:
-        unet_config = PretrainedConfig.get_config_dict(model_name, subfolder='unet')[0]
         if isinstance(vae, AutoEncoder):
             # Adapt the unet config to account for differing number of latent channels if necessary
             unet_config['in_channels'] = vae.config['latent_channels']
             unet_config['out_channels'] = vae.config['latent_channels']
         # Init the unet from the config
         unet = UNet2DConditionModel(**unet_config)
+    if isinstance(latent_mean, float):
+        latent_mean = (latent_mean,) * unet_config['in_channels']
+    if isinstance(latent_std, float):
+        latent_std = (latent_std,) * unet_config['in_channels']
+    assert isinstance(latent_mean, tuple) and isinstance(latent_std, tuple)
 
     # Make the noise schedulers
     noise_scheduler = DDPMScheduler.from_pretrained(model_name, subfolder='scheduler')
@@ -147,7 +164,8 @@ def stable_diffusion_2(
         noise_scheduler=noise_scheduler,
         inference_noise_scheduler=inference_noise_scheduler,
         prediction_type=prediction_type,
-        latent_scale=latent_scale,
+        latent_mean=latent_mean,
+        latent_std=latent_std,
         downsample_factor=downsample_factor,
         offset_noise=offset_noise,
         train_metrics=train_metrics,
@@ -187,7 +205,8 @@ def stable_diffusion_xl(
     autoencoder_path: Optional[str] = None,
     autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
     prediction_type: str = 'epsilon',
-    latent_scale: Union[float, str] = 0.13025,
+    latent_mean: Union[float, Tuple, str] = 0.0,
+    latent_std: Union[float, Tuple, str] = 7.67754318618,
     offset_noise: Optional[float] = None,
     train_metrics: Optional[List] = None,
     val_metrics: Optional[List] = None,
@@ -222,8 +241,12 @@ def stable_diffusion_xl(
         autoencoder_local_path (optional, str): Path to autoencoder weights. Default: `/tmp/autoencoder_weights.pt`.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
-        latent_scale (float, str): The scale of the autoencoder latents. Either a float for the scaling value,
-            or `'latent_statistics'` to try to use the value from the autoencoder checkpoint. Defaults to `0.13025`.
+        latent_mean (float, Tuple, str): The mean of the autoencoder latents. Either a float for a single value,
+            a tuple of means, or or `'latent_statistics'` to try to use the value from the autoencoder
+            checkpoint. Defaults to `0.0`.
+        latent_std (float, Tuple, str): The std. dev. of the autoencoder latents. Either a float for a single value,
+            a tuple of std_devs, or or `'latent_statistics'` to try to use the value from the autoencoder
+            checkpoint. Defaults to `1/0.13025`.
         offset_noise (float, optional): The scale of the offset noise. If not specified, offset noise will not
             be used. Default `None`.
         train_metrics (list, optional): List of metrics to compute during training. If None, defaults to
@@ -239,14 +262,12 @@ def stable_diffusion_xl(
             Default: ``None``.
         use_xformers (bool): Whether to use xformers for attention. Defaults to True.
     """
+    latent_mean, latent_std = _parse_latent_statistics(latent_mean), _parse_latent_statistics(latent_std)
+
     if (isinstance(tokenizer_names, tuple) or
             isinstance(text_encoder_names, tuple)) and len(tokenizer_names) != len(text_encoder_names):
         raise ValueError('Number of tokenizer_names and text_encoder_names must be equal')
 
-    if isinstance(latent_scale, str):
-        latent_scale = latent_scale.lower()
-        if latent_scale != 'latent_statistics':
-            raise ValueError(f'Invalid latent scale {latent_scale}. Must be a float or "latent_statistics".')
     if train_metrics is None:
         train_metrics = [MeanSquaredError()]
     if val_metrics is None:
@@ -261,7 +282,7 @@ def stable_diffusion_xl(
     precision = torch.float16 if encode_latents_in_fp16 else None
     # Make the autoencoder
     if autoencoder_path is None:
-        if latent_scale == 'latent_statistics':
+        if latent_mean == 'latent_statistics' or latent_std == 'latent_statistics':
             raise ValueError('Cannot use tracked latent_statistics when using the pretrained vae.')
         downsample_factor = 8
         # Use the pretrained vae
@@ -272,23 +293,24 @@ def stable_diffusion_xl(
     else:
         # Use a custom autoencoder
         vae, latent_statistics = load_autoencoder(autoencoder_path, autoencoder_local_path, torch_dtype=precision)
-        if latent_statistics is not None and latent_scale == 'latent_statistics':
-            assert isinstance(latent_statistics['global_mean'], float)
-            assert isinstance(latent_statistics['global_std'], float)
-            second_moment = latent_statistics['global_mean']**2 + latent_statistics['global_std']**2
-            latent_scale = 1 / math.sqrt(second_moment)
-        else:
+        if latent_statistics is None and (latent_mean == 'latent_statistics' or latent_std == 'latent_statistics'):
             raise ValueError(
                 'Must specify latent scale when using a custom autoencoder without tracking latent statistics.')
+        if isinstance(latent_mean, str) and latent_mean == 'latent_statistics':
+            assert isinstance(latent_statistics, dict)
+            latent_mean = tuple(latent_statistics['latent_channel_means'])
+        if isinstance(latent_std, str) and latent_std == 'latent_statistics':
+            assert isinstance(latent_statistics, dict)
+            latent_std = tuple(latent_statistics['latent_channel_stds'])
         downsample_factor = 2**(len(vae.config['channel_multipliers']) - 1)
 
     # Make the unet
+    unet_config = PretrainedConfig.get_config_dict(unet_model_name, subfolder='unet')[0]
     if pretrained:
         unet = UNet2DConditionModel.from_pretrained(unet_model_name, subfolder='unet')
         if isinstance(vae, AutoEncoder) and vae.config['latent_channels'] != 4:
             raise ValueError(f'Pretrained unet has 4 latent channels but the vae has {vae.latent_channels}.')
     else:
-        unet_config = PretrainedConfig.get_config_dict(unet_model_name, subfolder='unet')[0]
         if isinstance(vae, AutoEncoder):
             # Adapt the unet config to account for differing number of latent channels if necessary
             unet_config['in_channels'] = vae.config['latent_channels']
@@ -310,6 +332,11 @@ def stable_diffusion_xl(
                 layer = zero_module(layer)
         # Last conv block out projection
         unet.conv_out = zero_module(unet.conv_out)
+    if isinstance(latent_mean, float):
+        latent_mean = (latent_mean,) * unet_config['in_channels']
+    if isinstance(latent_std, float):
+        latent_std = (latent_std,) * unet_config['in_channels']
+    assert isinstance(latent_mean, tuple) and isinstance(latent_std, tuple)
 
     assert isinstance(unet, UNet2DConditionModel)
     if hasattr(unet, 'mid_block') and unet.mid_block is not None:
@@ -354,7 +381,8 @@ def stable_diffusion_xl(
         noise_scheduler=noise_scheduler,
         inference_noise_scheduler=inference_noise_scheduler,
         prediction_type=prediction_type,
-        latent_scale=latent_scale,
+        latent_mean=latent_mean,
+        latent_std=latent_std,
         downsample_factor=downsample_factor,
         offset_noise=offset_noise,
         train_metrics=train_metrics,
