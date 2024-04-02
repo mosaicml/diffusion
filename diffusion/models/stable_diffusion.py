@@ -4,7 +4,7 @@
 """Diffusion models."""
 
 from contextlib import nullcontext
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -40,8 +40,10 @@ class StableDiffusion(ComposerModel):
         loss_fn (torch.nn.Module): torch loss function. Default: `F.mse_loss`.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
-        latent_scale: (float): The scale of the latents. Defaults to `0.18215`, for the SD1/SD2 autoencoder.
-            If `sdxl` is True, defaults to `0.13025`, for the SDXL autoencoder.
+        latent_mean (Optional[tuple[float]]): The means of the latent space. If not specified, defaults to
+            4 * (0.0,). Default: `None`.
+        latent_std (Optional[tuple[float]]): The standard deviations of the latent space. If not specified,
+            defaults to 4 * (1/0.13025,) for SDXL, or 4 * (1/0.18215,) for non-SDXL. Default: `None`.
         downsample_factor (int): The factor by which the image is downsampled by the autoencoder. Default `8`.
         offset_noise (float, optional): The scale of the offset noise. If not specified, offset noise will not
             be used. Default `None`.
@@ -63,7 +65,7 @@ class StableDiffusion(ComposerModel):
             Default: `False`.
         encode_latents_in_fp16 (bool): whether to encode latents in fp16.
             Default: `False`.
-        mask_pad_tokens (bool): whether to mask pad tokens in cross attention.
+        mask_pad_tokens (bool): whether to mask pad tokens in unet cross attention.
             Default: `False`.
         sdxl (bool): Whether or not we're training SDXL. Default: `False`.
     """
@@ -77,7 +79,8 @@ class StableDiffusion(ComposerModel):
                  inference_noise_scheduler,
                  loss_fn=F.mse_loss,
                  prediction_type: str = 'epsilon',
-                 latent_scale: Optional[float] = None,
+                 latent_mean: Optional[Tuple[float]] = None,
+                 latent_std: Optional[Tuple[float]] = None,
                  downsample_factor: int = 8,
                  offset_noise: Optional[float] = None,
                  train_metrics: Optional[List] = None,
@@ -108,12 +111,12 @@ class StableDiffusion(ComposerModel):
         self.precomputed_latents = precomputed_latents
         self.mask_pad_tokens = mask_pad_tokens
         self.sdxl = sdxl
-        if self.sdxl and latent_scale is None:
-            self.latent_scale = 0.13025
-        elif latent_scale is None:
-            self.latent_scale = 0.18215
-        else:
-            self.latent_scale = latent_scale
+        if latent_mean is None:
+            self.latent_mean = 4 * (0.0)
+        if latent_std is None:
+            self.latent_std = 4 * (1 / 0.13025,) if self.sdxl else 4 * (1 / 0.18215,)
+        self.latent_mean = torch.tensor(latent_mean).view(1, -1, 1, 1)
+        self.latent_std = torch.tensor(latent_std).view(1, -1, 1, 1)
         self.train_metrics = train_metrics if train_metrics is not None else [MeanSquaredError()]
         self.val_metrics = val_metrics if val_metrics is not None else [MeanSquaredError()]
         self.text_encoder = text_encoder
@@ -138,6 +141,12 @@ class StableDiffusion(ComposerModel):
         # Optional rng generator
         self.rng_generator: Optional[torch.Generator] = None
 
+    def _apply(self, fn):
+        super(StableDiffusion, self)._apply(fn)
+        self.latent_mean = fn(self.latent_mean)
+        self.latent_std = fn(self.latent_std)
+        return self
+
     def set_rng_generator(self, rng_generator: torch.Generator):
         """Sets the rng generator for the model."""
         self.rng_generator = rng_generator
@@ -148,14 +157,7 @@ class StableDiffusion(ComposerModel):
             attention_mask = batch['attention_mask']  # mask for text encoders
             # text mask for U-Net
             if self.mask_pad_tokens:
-                if len(attention_mask.shape) == 2:
-                    encoder_attention_mask = attention_mask
-                elif len(attention_mask.shape) == 3:
-                    encoder_attention_mask = attention_mask[:, 0]
-                    for i in range(1, attention_mask.shape[1]):
-                        encoder_attention_mask |= attention_mask[:, i]
-                else:
-                    raise ValueError(f'attention_mask should have either 2 or 3 dimensions: {attention_mask.shape}')
+                encoder_attention_mask = _create_unet_attention_mask(attention_mask)
 
         # Use latents if specified and available. When specified, they might not exist during eval
         if self.precomputed_latents and self.image_latents_key in batch and self.text_latents_key in batch:
@@ -181,8 +183,8 @@ class StableDiffusion(ComposerModel):
                         raise RuntimeError('SDXL requires text encoder output to include a pooled text embedding')
                     text_pooled_embeds = text_encoder_out[1]
 
-            # Magical scaling number (See https://github.com/huggingface/diffusers/issues/437#issuecomment-1241827515)
-            latents *= self.latent_scale
+        # Scale the latents
+        latents = (latents - self.latent_mean) / self.latent_std
 
         # Zero dropped captions if needed
         if 'drop_caption_mask' in batch.keys():
@@ -437,7 +439,7 @@ class StableDiffusion(ComposerModel):
 
         # We now use the vae to decode the generated latents back into the image.
         # scale and decode the image latents with vae
-        latents = 1 / self.latent_scale * latents
+        latents = latents * self.latent_std + self.latent_mean
         image = self.vae.decode(latents).sample
         image = (image / 2 + 0.5).clamp(0, 1)
         return image.detach()  # (batch*num_images_per_prompt, channel, h, w)
@@ -469,22 +471,17 @@ class StableDiffusion(ComposerModel):
                 raise NotImplementedError('SDXL not yet supported with precomputed embeddings')
 
         # duplicate text embeddings for each generation per prompt
-        bs_embed, seq_len, _ = prompt_embeds.shape
-        prompt_embeds = prompt_embeds.repeat(1, num_images_per_prompt, 1)  # type: ignore
-        prompt_embeds = prompt_embeds.view(bs_embed * num_images_per_prompt, seq_len, -1)
+        prompt_embeds = _duplicate_tensor(prompt_embeds, num_images_per_prompt)
 
-        if self.mask_pad_tokens and tokenized_pad_mask is not None:
-            if len(tokenized_pad_mask.shape) == 3:
-                attention_mask = tokenized_pad_mask[:, 0]
-                for i in range(1, tokenized_pad_mask.shape[1]):
-                    attention_mask |= tokenized_pad_mask[:, i]
-                tokenized_pad_mask = attention_mask
-            tokenized_pad_mask = tokenized_pad_mask.repeat(1, num_images_per_prompt, 1)
-            tokenized_pad_mask = tokenized_pad_mask.view(bs_embed * num_images_per_prompt, seq_len)  # [B, 77]
+        if not self.mask_pad_tokens:
+            tokenized_pad_mask = None
+
+        if tokenized_pad_mask is not None:
+            tokenized_pad_mask = _create_unet_attention_mask(tokenized_pad_mask)
+            tokenized_pad_mask = _duplicate_tensor(tokenized_pad_mask, num_images_per_prompt)
 
         if self.sdxl and pooled_text_embeddings is not None:
-            pooled_text_embeddings = pooled_text_embeddings.repeat(1, num_images_per_prompt)
-            pooled_text_embeddings = pooled_text_embeddings.view(bs_embed * num_images_per_prompt, -1)
+            pooled_text_embeddings = _duplicate_tensor(pooled_text_embeddings, num_images_per_prompt)
         return prompt_embeds, pooled_text_embeddings, tokenized_pad_mask
 
 
@@ -502,3 +499,27 @@ def _check_prompt_lenths(prompt, negative_prompt):
 def _check_prompt_given(prompt, tokenized_prompts, prompt_embeds):
     if prompt is None and tokenized_prompts is None and prompt_embeds is None:
         raise ValueError('Must provide one of `prompt`, `tokenized_prompts`, or `prompt_embeds`')
+
+
+def _create_unet_attention_mask(attention_mask):
+    """Takes the union of multiple attention masks if given more than one mask."""
+    if len(attention_mask.shape) == 2:
+        return attention_mask
+    elif len(attention_mask.shape) == 3:
+        encoder_attention_mask = attention_mask[:, 0]
+        for i in range(1, attention_mask.shape[1]):
+            encoder_attention_mask |= attention_mask[:, i]
+        return encoder_attention_mask
+    else:
+        raise ValueError(f'attention_mask should have either 2 or 3 dimensions: {attention_mask.shape}')
+
+
+def _duplicate_tensor(tensor, num_images_per_prompt):
+    """Duplicate tensor for multiple generations from a single prompt."""
+    batch_size, seq_len = tensor.shape[:2]
+    tensor = tensor.repeat(1, num_images_per_prompt, *[
+        1,
+    ] * len(tensor.shape[2:]))
+    return tensor.view(batch_size * num_images_per_prompt, seq_len, *[
+        -1,
+    ] * len(tensor.shape[2:]))

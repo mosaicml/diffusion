@@ -21,7 +21,6 @@ dataset:
     remote: # Path(s) to object store bucket for training data
     local: # Path(s) to local training dataset cache
     batch_size: ${batch_size}
-    tokenizer_name_or_path: stabilityai/stable-diffusion-2-base
     caption_drop_prob: 0.1
     resize_size: ${image_size}
     image_key: image # Image key in the train dataset
@@ -43,7 +42,6 @@ dataset:
     local: # Path(s) to local eval dataset cache
     batch_size: ${batch_size}
     resize_size: ${image_size}
-    tokenizer_name_or_path: stabilityai/stable-diffusion-2-base
     caption_drop_prob: 0.0
     image_key: image # Image key in the eval dataset
     caption_key: caption # Caption key in the eval dataset
