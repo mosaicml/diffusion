@@ -3,7 +3,7 @@
 
 """Transforms for the training and eval dataset."""
 
-from typing import Tuple
+from typing import Optional, Tuple
 
 import torch
 import torchvision.transforms as transforms
@@ -46,17 +46,51 @@ class RandomCropSquare:
 
 
 class RandomCropAspectRatioTransorm:
-    """Assigns an image to a pre-defined set of aspect ratio buckets, then resizes and crops to fit into the bucket."""
+    """Assigns an image to a arbitrary set of aspect ratio buckets, then resizes and crops to fit into the bucket.
 
-    def __init__(self, resize_size: Tuple[Tuple[int, int], ...]):
+    Args:
+        resize_size (Tuple[Tuple[int, int], ...): A tuple of 2-tuple integers representing the aspect ratio buckets.
+            The format is ((height_bucket1, width_bucket1), (height_bucket2, width_bucket2), ...).
+        ar_bucket_boundaries (Tuple[float, ...], optional): Specifies the boundary points for bucket assignment. This
+            tuple should be of length len(resize_size) - 1. If set to ``None``, the bucket with the smallest distance
+            to the current sample's aspect ratio is selected. Default: ``None``
+    """
+
+    def __init__(
+        self,
+        resize_size: Tuple[Tuple[int, int], ...],
+        ar_bucket_boundaries: Optional[Tuple[float, ...]] = None,
+    ):
+
+        if ar_bucket_boundaries is not None and (len(resize_size) - 1 != len(ar_bucket_boundaries)):
+            raise ValueError(
+                f'Bucket boundaries ({len(ar_bucket_boundaries)}) must equal resize sizes ({len(resize_size)}) - 1')
+
         self.height_buckets = torch.tensor([size[0] for size in resize_size])
         self.width_buckets = torch.tensor([size[1] for size in resize_size])
         self.aspect_ratio_buckets = self.height_buckets / self.width_buckets
 
+        # If ar_bucket_boundaries is not None, add 0 and inf endpoints
+        self.ar_bucket_boundaries = (0.0, *ar_bucket_boundaries, float('inf')) if ar_bucket_boundaries else None
+
     def __call__(self, img):
         orig_w, orig_h = img.size
         orig_aspect_ratio = orig_h / orig_w
-        bucket_ind = torch.abs(self.aspect_ratio_buckets - orig_aspect_ratio).argmin()
+
+        # Assign sample to an aspect ratio bucket
+        bucket_ind = None
+        if self.ar_bucket_boundaries is None:
+            bucket_ind = torch.abs(self.aspect_ratio_buckets - orig_aspect_ratio).argmin()
+        else:
+            for i, (low, high) in enumerate(zip(self.ar_bucket_boundaries[:-1], self.ar_bucket_boundaries[1:])):
+                if (i < len(self.aspect_ratio_buckets) // 2) and (low <= orig_aspect_ratio < high):
+                    bucket_ind = i
+                elif (i == len(self.aspect_ratio_buckets) // 2) and (low <= orig_aspect_ratio <= high):
+                    bucket_ind = i
+                elif (i > len(self.aspect_ratio_buckets) // 2) and (low < orig_aspect_ratio <= high):
+                    bucket_ind = i
+
+        assert bucket_ind
         target_width, target_height = self.width_buckets[bucket_ind].item(), self.height_buckets[bucket_ind].item()
         target_aspect_ratio = target_height / target_width
 

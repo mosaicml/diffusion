@@ -174,6 +174,7 @@ def build_streaming_image_caption_dataloader(
     caption_drop_prob: float = 0.0,
     microcond_drop_prob: float = 0.0,
     resize_size: Union[int, Tuple[int, int], Tuple[Tuple[int, int], ...]] = 256,
+    ar_bucket_boundaries: Optional[Tuple[float, ...]] = None,
     caption_selection: str = 'first',
     transform: Optional[List[Callable]] = None,
     image_key: str = 'image',
@@ -194,16 +195,22 @@ def build_streaming_image_caption_dataloader(
             Should be the same tokenizer passed to the model being trained.
             Can be accessed with model.tokenizer on Diffusion models. Default: ``None``.
         caption_drop_prob (float): The probability of dropping a caption. Default: ``0.0``.
-        microcond_drop_prob (float): The probability of dropping microconditioning. Only relevant for SDXL. Default: ``0.0``.
+        microcond_drop_prob (float): The probability of dropping microconditioning. Only relevant for SDXL.
+            Default:``0.0``.
         resize_size (int, Tuple[int, int], Tuple[Tuple[int, int], ...): The size to resize the image to. Specify a
             tuple of tuples if using 'aspect_ratio' crop_type. Default: ``256``.
+        ar_bucket_boundaries (Tuple[float, ...], optional): When using ``crop_type='aspect_ratio'``, specifies the
+            boundary points for bucket assignment. This tuple should be of length len(resize_size) - 1. If set to
+            ``None``, the bucket with the smallest distance to the current sample's aspect ratio is selected.
+            Default: ``None``.
         caption_selection (str): If there are multiple captions, specifies how to select a single caption.
             'first' selects the first caption in the list and 'random' selects a random caption in the list.
             If there is only one caption, this argument is ignored. Default: ``'first'``.
         transform (Optional[Callable]): The transforms to apply to the image. Default: ``None``.
         image_key (str): Key associated with the image in the streaming dataset. Default: ``'image'``.
         caption_key (str): Key associated with the caption in the streaming dataset. Default: ``'caption'``.
-        crop_type (str, optional): Type of crop to perform, either ['square', 'random', 'aspect_ratio']. Default: ``'square'``.
+        crop_type (str, optional): Type of crop to perform, either ['square', 'random', 'aspect_ratio'].
+            Default: ``'square'``.
         zero_dropped_captions (bool): If True, zero out text embeddings for dropped captions. Default: ``True``.
         sdxl_conditioning (bool): Whether or not to include SDXL microconditioning in a sample. Default: `False`.
         streaming_kwargs (dict, optional): Additional arguments to pass to the ``StreamingDataset``. Default: ``None``.
@@ -250,7 +257,7 @@ def build_streaming_image_caption_dataloader(
     elif crop_type == 'random':
         crop = RandomCropSquare(resize_size)
     elif crop_type == 'aspect_ratio':
-        crop = RandomCropAspectRatioTransorm(resize_size)  # type: ignore
+        crop = RandomCropAspectRatioTransorm(resize_size, ar_bucket_boundaries)  # type: ignore
     else:
         crop = None
 
