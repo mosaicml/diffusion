@@ -78,10 +78,11 @@ class RandomCropAspectRatioTransorm:
         orig_aspect_ratio = orig_h / orig_w
 
         # Assign sample to an aspect ratio bucket
-        bucket_ind = None
+
         if self.ar_bucket_boundaries is None:
             bucket_ind = torch.abs(self.aspect_ratio_buckets - orig_aspect_ratio).argmin()
         else:
+            bucket_ind = None
             for i, (low, high) in enumerate(zip(self.ar_bucket_boundaries[:-1], self.ar_bucket_boundaries[1:])):
                 if (i < len(self.aspect_ratio_buckets) // 2) and (low <= orig_aspect_ratio < high):
                     bucket_ind = i
@@ -89,8 +90,8 @@ class RandomCropAspectRatioTransorm:
                     bucket_ind = i
                 elif (i > len(self.aspect_ratio_buckets) // 2) and (low < orig_aspect_ratio <= high):
                     bucket_ind = i
+            assert bucket_ind is not None, f'Sample with aspect ratio ({orig_aspect_ratio}) was not assigned to a bucket. Check the bucket boundaries'
 
-        assert bucket_ind
         target_width, target_height = self.width_buckets[bucket_ind].item(), self.height_buckets[bucket_ind].item()
         target_aspect_ratio = target_height / target_width
 
