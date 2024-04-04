@@ -50,10 +50,12 @@ class RandomCropAspectRatioTransorm:
 
     Args:
         resize_size (Tuple[Tuple[int, int], ...): A tuple of 2-tuple integers representing the aspect ratio buckets.
-            The format is ((height_bucket1, width_bucket1), (height_bucket2, width_bucket2), ...).
+            The format is ((height_bucket1, width_bucket1), (height_bucket2, width_bucket2), ...). These must be
+            ordered based on ascending aspect ratio.
         ar_bucket_boundaries (Tuple[float, ...], optional): Specifies the boundary points for bucket assignment. This
             tuple should be of length len(resize_size) - 1. If set to ``None``, the bucket with the smallest distance
-            to the current sample's aspect ratio is selected. Default: ``None``
+            to the current sample's aspect ratio is selected. These must be ordered based on ascending aspect ratio.
+            Default: ``None``
     """
 
     def __init__(
