@@ -50,6 +50,7 @@ class CleanFIDEvaluator:
         precision (str): The precision to use for evaluation. Default: ``'amp_fp16'``.
         prompts (List[str], optional): The prompts to use for image visualtization.
             Default: ``["A shiba inu wearing a blue sweater]``.
+        additional_generate_kwargs (Dict, optional): Additional keyword arguments to pass to the model.generate method.
 
     """
 
