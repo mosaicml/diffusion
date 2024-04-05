@@ -107,7 +107,13 @@ class CleanFIDEvaluator:
         self.clip_metric = self.clip_metric.to(self.device)
 
         # Predownload the CLIP model for computing clip-fid
-        _, _ = clip.load('ViT-B/32', device=self.device)
+        clip_url = 'https://openaipublic.azureedge.net/clip/models/40d365715913c9da98579312b702a82c18be219cc2a73407c4526f58eba950af/ViT-B-32.pt'
+        clip_name = os.path.basename(clip_url)
+        clip_path = os.path.expanduser('~/.cache/clip')
+        if dist.get_local_rank() == 0:
+            clip.clip._download(clip_url, clip_path)
+        with dist.local_rank_zero_download_and_wait(os.path.join(clip_path, clip_name)):
+            _, _ = clip.load('ViT-B/32', device=self.device)
 
     def _generate_images(self, guidance_scale: float):
         """Core image generation function. Generates images at a given guidance scale.
