@@ -5,7 +5,7 @@
 
 import json
 import os
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import clip
 import torch
@@ -69,7 +69,8 @@ class CleanFIDEvaluator:
                  output_dir: str = '/tmp/',
                  num_samples: Optional[int] = None,
                  precision: str = 'amp_fp16',
-                 prompts: Optional[List[str]] = None):
+                 prompts: Optional[List[str]] = None,
+                 additional_generate_kwargs: Optional[Dict] = None):
         self.model = model
         self.tokenizer: PreTrainedTokenizerBase = model.tokenizer
         self.eval_dataloader = eval_dataloader
@@ -86,6 +87,7 @@ class CleanFIDEvaluator:
         self.num_samples = num_samples if num_samples is not None else float('inf')
         self.precision = precision
         self.prompts = prompts if prompts is not None else ['A shiba inu wearing a blue sweater']
+        self.additional_generate_kwargs = additional_generate_kwargs if additional_generate_kwargs is not None else {}
         self.sdxl = model.sdxl
 
         # Init loggers
@@ -162,7 +164,8 @@ class CleanFIDEvaluator:
                                                        seed=seed,
                                                        crop_params=crop_params,
                                                        input_size_params=input_size_params,
-                                                       progress_bar=False)  # type: ignore
+                                                       progress_bar=False,
+                                                       **self.additional_generate_kwargs)  # type: ignore
             # Get the prompts from the tokens
             text_captions = self.tokenizer.batch_decode(captions, skip_special_tokens=True)
             self.clip_metric.update((generated_images * 255).to(torch.uint8), text_captions)
