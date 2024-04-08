@@ -116,7 +116,7 @@ class CleanFIDEvaluator:
         if dist.get_local_rank() == 0:
             clip.clip._download(clip_url, clip_path)
         with dist.local_rank_zero_download_and_wait(os.path.join(clip_path, clip_name)):
-            _, _ = clip.load('ViT-B/32', device=self.device)
+            clip.load('ViT-B/32', device=self.device)
 
     def _generate_images(self, guidance_scale: float):
         """Core image generation function. Generates images at a given guidance scale.
@@ -243,7 +243,8 @@ class CleanFIDEvaluator:
                                                        height=self.size,
                                                        width=self.size,
                                                        guidance_scale=guidance_scale,
-                                                       seed=self.seed)  # type: ignore
+                                                       seed=self.seed,
+                                                       **self.additional_generate_kwargs)  # type: ignore
         else:
             generated_images = []
         return generated_images
