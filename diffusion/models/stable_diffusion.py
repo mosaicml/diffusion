@@ -422,7 +422,8 @@ class StableDiffusion(ComposerModel):
                              t,
                              encoder_hidden_states=text_embeddings,
                              encoder_attention_mask=encoder_attn_mask,
-                             added_cond_kwargs=added_cond_kwargs).sample
+                             added_cond_kwargs=added_cond_kwargs,
+                             return_dict=False)[0]
 
             if do_classifier_free_guidance:
                 # perform guidance. Note this is only techincally correct for prediction_type 'epsilon'
@@ -440,7 +441,7 @@ class StableDiffusion(ComposerModel):
         # We now use the vae to decode the generated latents back into the image.
         # scale and decode the image latents with vae
         latents = latents * self.latent_std + self.latent_mean
-        image = self.vae.decode(latents).sample
+        image = self.vae._decode(latents, return_dict=False)[0]
         image = (image / 2 + 0.5).clamp(0, 1)
         return image.detach()  # (batch*num_images_per_prompt, channel, h, w)
 
