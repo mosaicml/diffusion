@@ -385,6 +385,7 @@ class StableDiffusion(ComposerModel):
             (batch_size, self.unet.config.in_channels, height // self.downsample_factor,
              width // self.downsample_factor),
             device=device,
+            dtype=self.unet.dtype,
             generator=rng_generator,
         )
 
