@@ -51,6 +51,8 @@ def stable_diffusion_2(
     offset_noise: Optional[float] = None,
     train_metrics: Optional[List] = None,
     val_metrics: Optional[List] = None,
+    quasirandomness: bool = False,
+    train_seed: int = 42,
     val_seed: int = 1138,
     precomputed_latents: bool = False,
     encode_latents_in_fp16: bool = True,
@@ -82,6 +84,10 @@ def stable_diffusion_2(
             [MeanSquaredError()].
         val_metrics (list, optional): List of metrics to compute during validation. If None, defaults to
             [MeanSquaredError()].
+        quasirandomness (bool): Whether to use quasirandomness for generating diffusion process noise.
+            Default: `False`.
+        train_seed (int): Seed to use for generating diffusion process noise during training if using
+            quasirandomness. Default: `42`.
         val_seed (int): Seed to use for generating evaluation images. Defaults to 1138.
         precomputed_latents (bool): Whether to use precomputed latents. Defaults to False.
         offset_noise (float, optional): The scale of the offset noise. If not specified, offset noise will not
@@ -170,6 +176,8 @@ def stable_diffusion_2(
         offset_noise=offset_noise,
         train_metrics=train_metrics,
         val_metrics=val_metrics,
+        quasirandomness=quasirandomness,
+        train_seed=train_seed,
         val_seed=val_seed,
         precomputed_latents=precomputed_latents,
         encode_latents_in_fp16=encode_latents_in_fp16,
@@ -210,6 +218,8 @@ def stable_diffusion_xl(
     offset_noise: Optional[float] = None,
     train_metrics: Optional[List] = None,
     val_metrics: Optional[List] = None,
+    quasirandomness: bool = False,
+    train_seed: int = 42,
     val_seed: int = 1138,
     precomputed_latents: bool = False,
     encode_latents_in_fp16: bool = True,
@@ -253,6 +263,10 @@ def stable_diffusion_xl(
             [MeanSquaredError()].
         val_metrics (list, optional): List of metrics to compute during validation. If None, defaults to
             [MeanSquaredError()].
+        quasirandomness (bool): Whether to use quasirandomness for generating diffusion process noise.
+            Default: `False`.
+        train_seed (int): Seed to use for generating diffusion process noise during training if using
+            quasirandomness. Default: `42`.
         val_seed (int): Seed to use for generating evaluation images. Defaults to 1138.
         precomputed_latents (bool): Whether to use precomputed latents. Defaults to False.
         encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
@@ -387,6 +401,8 @@ def stable_diffusion_xl(
         offset_noise=offset_noise,
         train_metrics=train_metrics,
         val_metrics=val_metrics,
+        quasirandomness=quasirandomness,
+        train_seed=train_seed,
         val_seed=val_seed,
         precomputed_latents=precomputed_latents,
         encode_latents_in_fp16=encode_latents_in_fp16,

@@ -9,6 +9,7 @@ from typing import List, Optional, Tuple
 import torch
 import torch.nn.functional as F
 from composer.models import ComposerModel
+from composer.utils import dist
 from torchmetrics import MeanSquaredError
 from tqdm.auto import tqdm
 
@@ -51,6 +52,10 @@ class StableDiffusion(ComposerModel):
             Default: `None`.
         val_metrics (list): List of torchmetrics to calculate during validation.
             Default: `None`.
+        quasirandomness (bool): Whether to use quasirandomness for generating diffusion process noise.
+            Default: `False`.
+        train_seed (int): Seed to use for generating diffusion process noise during training if using
+            quasirandomness. Default: `42`.
         val_seed (int): Seed to use for generating eval images. Default: `1138`.
         image_key (str): The name of the image inputs in the dataloader batch.
             Default: `image_tensor`.
@@ -85,6 +90,8 @@ class StableDiffusion(ComposerModel):
                  offset_noise: Optional[float] = None,
                  train_metrics: Optional[List] = None,
                  val_metrics: Optional[List] = None,
+                 quasirandomness: bool = False,
+                 train_seed: int = 42,
                  val_seed: int = 1138,
                  image_key: str = 'image',
                  text_key: str = 'captions',
@@ -105,6 +112,8 @@ class StableDiffusion(ComposerModel):
             raise ValueError(f'prediction type must be one of sample, epsilon, or v_prediction. Got {prediction_type}')
         self.downsample_factor = downsample_factor
         self.offset_noise = offset_noise
+        self.quasirandomness = quasirandomness
+        self.train_seed = train_seed
         self.val_seed = val_seed
         self.image_key = image_key
         self.image_latents_key = image_latents_key
@@ -140,12 +149,23 @@ class StableDiffusion(ComposerModel):
 
         # Optional rng generator
         self.rng_generator: Optional[torch.Generator] = None
+        if self.quasirandomness:
+            self.sobol_engine = torch.quasirandom.SobolEngine(dimension=1, scramble=True, seed=self.train_seed)
 
     def _apply(self, fn):
         super(StableDiffusion, self)._apply(fn)
         self.latent_mean = fn(self.latent_mean)
         self.latent_std = fn(self.latent_std)
         return self
+
+    def _generate_quasirandom_timesteps(self, latents: torch.Tensor):
+        # Generate a quasirandom sequence of timesteps equal to the global batch size
+        global_batch_size = latents.shape[0] * dist.get_world_size()
+        timesteps = (len(self.noise_scheduler) * self.sobol_engine.draw(global_batch_size)).squeeze().long()
+        # Get this device's subset of all the timesteps
+        idx_offset = dist.get_global_rank() * latents.shape[0]
+        timesteps = timesteps[idx_offset:idx_offset + latents.shape[0]]
+        return timesteps.to(latents.device)
 
     def set_rng_generator(self, rng_generator: torch.Generator):
         """Sets the rng generator for the model."""
@@ -193,10 +213,13 @@ class StableDiffusion(ComposerModel):
                 text_pooled_embeds *= batch['drop_caption_mask'].view(-1, 1)
 
         # Sample the diffusion timesteps
-        timesteps = torch.randint(0,
-                                  len(self.noise_scheduler), (latents.shape[0],),
-                                  device=latents.device,
-                                  generator=self.rng_generator)
+        if self.quasirandomness:
+            timesteps = self._generate_quasirandom_timesteps(latents)
+        else:
+            timesteps = torch.randint(0,
+                                      len(self.noise_scheduler), (latents.shape[0],),
+                                      device=latents.device,
+                                      generator=self.rng_generator)
         # Add noise to the inputs (forward diffusion)
         noise = torch.randn(*latents.shape, device=latents.device, generator=self.rng_generator)
         if self.offset_noise is not None:
