@@ -161,7 +161,8 @@ class StableDiffusion(ComposerModel):
     def _generate_quasirandom_timesteps(self, latents: torch.Tensor):
         # Generate a quasirandom sequence of timesteps equal to the global batch size
         global_batch_size = latents.shape[0] * dist.get_world_size()
-        timesteps = (len(self.noise_scheduler) * self.sobol_engine.draw(global_batch_size)).squeeze().long()
+        timesteps = (len(self.noise_scheduler) * self.sobol_engine.draw(global_batch_size)).squeeze()
+        timesteps = torch.floor(timesteps).long().clamp(0, len(self.noise_scheduler) - 1)
         # Get this device's subset of all the timesteps
         idx_offset = dist.get_global_rank() * latents.shape[0]
         timesteps = timesteps[idx_offset:idx_offset + latents.shape[0]]
