@@ -422,7 +422,8 @@ def stable_diffusion_xl(
                                                   trained_betas=None,
                                                   clip_sample=False,
                                                   set_alpha_to_one=False,
-                                                  prediction_type=prediction_type)
+                                                  prediction_type=prediction_type,
+                                                  rescale_betas_zero_snr=zero_terminal_snr)
     else:
         inference_noise_scheduler = EulerDiscreteScheduler(num_train_timesteps=1000,
                                                            beta_start=0.00085,
