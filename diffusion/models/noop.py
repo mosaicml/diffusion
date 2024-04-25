@@ -7,10 +7,11 @@ from typing import Any, Dict, Optional, Tuple, Union
 
 import torch
 import torch.nn.functional as F
+from composer.models.base import ComposerModel
 from torchmetrics import Metric
+
 from diffusion.models.text_encoder import MultiTokenizer
 
-from composer.models.base import ComposerModel
 
 class NoOpModel(ComposerModel):
     """No-op model used to measure dataloader throughput.
@@ -22,10 +23,10 @@ class NoOpModel(ComposerModel):
     """
 
     def __init__(
-            self,
-            tokenizer_names: Union[str, Tuple[str, ...]] = ('stabilityai/stable-diffusion-xl-base-1.0/tokenizer',
-                                                            'stabilityai/stable-diffusion-xl-base-1.0/tokenizer_2'),
-        ):
+        self,
+        tokenizer_names: Union[str, Tuple[str, ...]] = ('stabilityai/stable-diffusion-xl-base-1.0/tokenizer',
+                                                        'stabilityai/stable-diffusion-xl-base-1.0/tokenizer_2'),
+    ):
         super().__init__()
         self.weight = torch.nn.Linear(in_features=1, out_features=16)
         self.tokenizer = MultiTokenizer(tokenizer_names_or_paths=tokenizer_names)
