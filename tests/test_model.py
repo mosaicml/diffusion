@@ -150,3 +150,14 @@ def test_sdxl_generate(guidance_scale, negative_prompt, mask_pad_tokens):
         progress_bar=False,
     )
     assert output.shape == (1, 3, 16, 16)
+
+
+def test_quasirandomness():
+    # fp16 vae does not run on cpu
+    model = stable_diffusion_2(pretrained=False, fsdp=False, encode_latents_in_fp16=False, quasirandomness=True)
+    # Generate many quasi-random samples
+    fake_latents = torch.randn(2048, 4, 8, 8)
+    for i in range(10**3):
+        timesteps = model._generate_timesteps(fake_latents)
+        assert (timesteps >= 0).all()
+        assert (timesteps < 1000).all()

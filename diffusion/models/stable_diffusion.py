@@ -10,6 +10,7 @@ import torch
 import torch.nn.functional as F
 from composer.models import ComposerModel
 from composer.utils import dist
+from scipy.stats import qmc
 from torchmetrics import MeanSquaredError
 from tqdm.auto import tqdm
 
@@ -150,7 +151,7 @@ class StableDiffusion(ComposerModel):
         # Optional rng generator
         self.rng_generator: Optional[torch.Generator] = None
         if self.quasirandomness:
-            self.sobol_engine = torch.quasirandom.SobolEngine(dimension=1, scramble=True, seed=self.train_seed)
+            self.sobol = qmc.Sobol(d=1, scramble=True, seed=self.train_seed)
 
     def _apply(self, fn):
         super(StableDiffusion, self)._apply(fn)
@@ -158,15 +159,22 @@ class StableDiffusion(ComposerModel):
         self.latent_std = fn(self.latent_std)
         return self
 
-    def _generate_quasirandom_timesteps(self, latents: torch.Tensor):
-        # Generate a quasirandom sequence of timesteps equal to the global batch size
-        global_batch_size = latents.shape[0] * dist.get_world_size()
-        timesteps = (len(self.noise_scheduler) * self.sobol_engine.draw(global_batch_size)).squeeze()
-        timesteps = torch.floor(timesteps).long().clamp(0, len(self.noise_scheduler) - 1)
-        # Get this device's subset of all the timesteps
-        idx_offset = dist.get_global_rank() * latents.shape[0]
-        timesteps = timesteps[idx_offset:idx_offset + latents.shape[0]]
-        return timesteps.to(latents.device)
+    def _generate_timesteps(self, latents: torch.Tensor):
+        if self.quasirandomness:
+            # Generate a quasirandom sequence of timesteps equal to the global batch size
+            global_batch_size = latents.shape[0] * dist.get_world_size()
+            sampled_fractions = torch.tensor(self.sobol.random(global_batch_size), device=latents.device)
+            timesteps = (len(self.noise_scheduler) * sampled_fractions).squeeze()
+            timesteps = torch.floor(timesteps).long()
+            # Get this device's subset of all the timesteps
+            idx_offset = dist.get_global_rank() * latents.shape[0]
+            timesteps = timesteps[idx_offset:idx_offset + latents.shape[0]].to(latents.device)
+        else:
+            timesteps = torch.randint(0,
+                                      len(self.noise_scheduler), (latents.shape[0],),
+                                      device=latents.device,
+                                      generator=self.rng_generator)
+        return timesteps
 
     def set_rng_generator(self, rng_generator: torch.Generator):
         """Sets the rng generator for the model."""
@@ -214,13 +222,7 @@ class StableDiffusion(ComposerModel):
                 text_pooled_embeds *= batch['drop_caption_mask'].view(-1, 1)
 
         # Sample the diffusion timesteps
-        if self.quasirandomness:
-            timesteps = self._generate_quasirandom_timesteps(latents)
-        else:
-            timesteps = torch.randint(0,
-                                      len(self.noise_scheduler), (latents.shape[0],),
-                                      device=latents.device,
-                                      generator=self.rng_generator)
+        timesteps = self._generate_timesteps(latents)
         # Add noise to the inputs (forward diffusion)
         noise = torch.randn(*latents.shape, device=latents.device, generator=self.rng_generator)
         if self.offset_noise is not None:
