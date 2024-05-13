@@ -48,9 +48,13 @@ def stable_diffusion_2(
     prediction_type: str = 'epsilon',
     latent_mean: Union[float, Tuple, str] = 0.0,
     latent_std: Union[float, Tuple, str] = 5.489980785067252,
+    beta_schedule: str = 'scaled_linear',
+    zero_terminal_snr: bool = False,
     offset_noise: Optional[float] = None,
     train_metrics: Optional[List] = None,
     val_metrics: Optional[List] = None,
+    quasirandomness: bool = False,
+    train_seed: int = 42,
     val_seed: int = 1138,
     precomputed_latents: bool = False,
     encode_latents_in_fp16: bool = True,
@@ -78,10 +82,17 @@ def stable_diffusion_2(
         latent_std (float, list, str): The std. dev. of the autoencoder latents. Either a float for a single value,
             a tuple of std_devs, or or `'latent_statistics'` to try to use the value from the autoencoder
             checkpoint. Defaults to `1/0.18215`.
+        beta_schedule (str): The beta schedule to use. Must be one of 'scaled_linear', 'linear', or 'squaredcos_cap_v2'.
+            Default: `scaled_linear`.
+        zero_terminal_snr (bool): Whether to enforce zero terminal SNR. Default: `False`.
         train_metrics (list, optional): List of metrics to compute during training. If None, defaults to
             [MeanSquaredError()].
         val_metrics (list, optional): List of metrics to compute during validation. If None, defaults to
             [MeanSquaredError()].
+        quasirandomness (bool): Whether to use quasirandomness for generating diffusion process noise.
+            Default: `False`.
+        train_seed (int): Seed to use for generating diffusion process noise during training if using
+            quasirandomness. Default: `42`.
         val_seed (int): Seed to use for generating evaluation images. Defaults to 1138.
         precomputed_latents (bool): Whether to use precomputed latents. Defaults to False.
         offset_noise (float, optional): The scale of the offset noise. If not specified, offset noise will not
@@ -145,14 +156,26 @@ def stable_diffusion_2(
     assert isinstance(latent_mean, tuple) and isinstance(latent_std, tuple)
 
     # Make the noise schedulers
-    noise_scheduler = DDPMScheduler.from_pretrained(model_name, subfolder='scheduler')
-    inference_noise_scheduler = DDIMScheduler(num_train_timesteps=noise_scheduler.config.num_train_timesteps,
-                                              beta_start=noise_scheduler.config.beta_start,
-                                              beta_end=noise_scheduler.config.beta_end,
-                                              beta_schedule=noise_scheduler.config.beta_schedule,
-                                              trained_betas=noise_scheduler.config.trained_betas,
-                                              clip_sample=noise_scheduler.config.clip_sample,
-                                              set_alpha_to_one=noise_scheduler.config.set_alpha_to_one,
+    noise_scheduler = DDPMScheduler(num_train_timesteps=1000,
+                                    beta_start=0.00085,
+                                    beta_end=0.012,
+                                    beta_schedule=beta_schedule,
+                                    trained_betas=None,
+                                    variance_type='fixed_small',
+                                    clip_sample=False,
+                                    prediction_type=prediction_type,
+                                    sample_max_value=1.0,
+                                    timestep_spacing='leading',
+                                    steps_offset=1,
+                                    rescale_betas_zero_snr=zero_terminal_snr)
+
+    inference_noise_scheduler = DDIMScheduler(num_train_timesteps=1000,
+                                              beta_start=0.00085,
+                                              beta_end=0.012,
+                                              beta_schedule=beta_schedule,
+                                              trained_betas=None,
+                                              clip_sample=False,
+                                              set_alpha_to_one=False,
                                               prediction_type=prediction_type)
 
     # Make the composer model
@@ -170,6 +193,8 @@ def stable_diffusion_2(
         offset_noise=offset_noise,
         train_metrics=train_metrics,
         val_metrics=val_metrics,
+        quasirandomness=quasirandomness,
+        train_seed=train_seed,
         val_seed=val_seed,
         precomputed_latents=precomputed_latents,
         encode_latents_in_fp16=encode_latents_in_fp16,
@@ -207,9 +232,13 @@ def stable_diffusion_xl(
     prediction_type: str = 'epsilon',
     latent_mean: Union[float, Tuple, str] = 0.0,
     latent_std: Union[float, Tuple, str] = 7.67754318618,
+    beta_schedule: str = 'scaled_linear',
+    zero_terminal_snr: bool = False,
     offset_noise: Optional[float] = None,
     train_metrics: Optional[List] = None,
     val_metrics: Optional[List] = None,
+    quasirandomness: bool = False,
+    train_seed: int = 42,
     val_seed: int = 1138,
     precomputed_latents: bool = False,
     encode_latents_in_fp16: bool = True,
@@ -247,12 +276,19 @@ def stable_diffusion_xl(
         latent_std (float, Tuple, str): The std. dev. of the autoencoder latents. Either a float for a single value,
             a tuple of std_devs, or or `'latent_statistics'` to try to use the value from the autoencoder
             checkpoint. Defaults to `1/0.13025`.
+        beta_schedule (str): The beta schedule to use. Must be one of 'scaled_linear', 'linear', or 'squaredcos_cap_v2'.
+            Default: `scaled_linear`.
+        zero_terminal_snr (bool): Whether to enforce zero terminal SNR. Default: `False`.
         offset_noise (float, optional): The scale of the offset noise. If not specified, offset noise will not
             be used. Default `None`.
         train_metrics (list, optional): List of metrics to compute during training. If None, defaults to
             [MeanSquaredError()].
         val_metrics (list, optional): List of metrics to compute during validation. If None, defaults to
             [MeanSquaredError()].
+        quasirandomness (bool): Whether to use quasirandomness for generating diffusion process noise.
+            Default: `False`.
+        train_seed (int): Seed to use for generating diffusion process noise during training if using
+            quasirandomness. Default: `42`.
         val_seed (int): Seed to use for generating evaluation images. Defaults to 1138.
         precomputed_latents (bool): Whether to use precomputed latents. Defaults to False.
         encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
@@ -360,17 +396,40 @@ def stable_diffusion_xl(
                 resnet._fsdp_wrap = True
 
     # Make the noise schedulers
-    noise_scheduler = DDPMScheduler.from_pretrained(unet_model_name, subfolder='scheduler')
-    inference_noise_scheduler = EulerDiscreteScheduler(num_train_timesteps=1000,
-                                                       beta_start=0.00085,
-                                                       beta_end=0.012,
-                                                       beta_schedule='scaled_linear',
-                                                       trained_betas=None,
-                                                       prediction_type=prediction_type,
-                                                       interpolation_type='linear',
-                                                       use_karras_sigmas=False,
-                                                       timestep_spacing='leading',
-                                                       steps_offset=1)
+    noise_scheduler = DDPMScheduler(num_train_timesteps=1000,
+                                    beta_start=0.00085,
+                                    beta_end=0.012,
+                                    beta_schedule=beta_schedule,
+                                    trained_betas=None,
+                                    variance_type='fixed_small',
+                                    clip_sample=False,
+                                    prediction_type=prediction_type,
+                                    sample_max_value=1.0,
+                                    timestep_spacing='leading',
+                                    steps_offset=1,
+                                    rescale_betas_zero_snr=zero_terminal_snr)
+    if beta_schedule == 'squaredcos_cap_v2':
+        inference_noise_scheduler = DDIMScheduler(num_train_timesteps=1000,
+                                                  beta_start=0.00085,
+                                                  beta_end=0.012,
+                                                  beta_schedule=beta_schedule,
+                                                  trained_betas=None,
+                                                  clip_sample=False,
+                                                  set_alpha_to_one=False,
+                                                  prediction_type=prediction_type,
+                                                  rescale_betas_zero_snr=zero_terminal_snr)
+    else:
+        inference_noise_scheduler = EulerDiscreteScheduler(num_train_timesteps=1000,
+                                                           beta_start=0.00085,
+                                                           beta_end=0.012,
+                                                           beta_schedule=beta_schedule,
+                                                           trained_betas=None,
+                                                           prediction_type=prediction_type,
+                                                           interpolation_type='linear',
+                                                           use_karras_sigmas=False,
+                                                           timestep_spacing='leading',
+                                                           steps_offset=1,
+                                                           rescale_betas_zero_snr=zero_terminal_snr)
 
     # Make the composer model
     model = StableDiffusion(
@@ -387,6 +446,8 @@ def stable_diffusion_xl(
         offset_noise=offset_noise,
         train_metrics=train_metrics,
         val_metrics=val_metrics,
+        quasirandomness=quasirandomness,
+        train_seed=train_seed,
         val_seed=val_seed,
         precomputed_latents=precomputed_latents,
         encode_latents_in_fp16=encode_latents_in_fp16,
