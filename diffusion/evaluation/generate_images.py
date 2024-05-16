@@ -6,10 +6,12 @@
 import json
 import os
 from typing import Dict, Optional
+from urllib.parse import urlparse
 
-from composer import ComposerModel, Trainer
+import torch
 from composer.core import get_precision_context
 from composer.utils import dist
+from composer.utils.file_helpers import get_file
 from composer.utils.object_store import OCIObjectStore
 from torch.utils.data import DataLoader
 from torchvision.transforms.functional import to_pil_image
@@ -23,9 +25,11 @@ class ImageGenerator:
     """Image generator that generates images from a dataset and saves them.
 
     Args:
-        model (ComposerModel): The model to evaluate.
+        model (torch.nn.Module): The model to evaluate.
         dataloader (DataLoader): The dataloader to use the prompts from.
         load_path (str, optional): The path to load the model from. Default: ``None``.
+        local_checkpoint_path (str, optional): The local path to save the model checkpoint. Default: ``'/tmp/model.pt'``.
+        load_strict_model_weights (bool): Whether or not to strict load model weights. Default: ``True``.
         guidance_scale (float): The guidance scale to use for evaluation. Default: ``7.0``.
         height (int): The height of the generated images. Default: ``1024``.
         width (int): The width of the generated images. Default: ``1024``.
@@ -40,15 +44,16 @@ class ImageGenerator:
     """
 
     def __init__(self,
-                 model: ComposerModel,
+                 model: torch.nn.Module,
                  dataloader: DataLoader,
                  load_path: Optional[str] = None,
+                 local_checkpoint_path: str = '/tmp/model.pt',
+                 load_strict_model_weights: bool = True,
                  guidance_scale: float = 7.0,
                  height: int = 1024,
                  width: int = 1024,
                  batch_size: int = 1,
                  caption_key: str = 'caption',
-                 load_strict_model_weights: bool = True,
                  seed: int = 17,
                  output_bucket: Optional[str] = None,
                  output_prefix: Optional[str] = None,
@@ -57,6 +62,8 @@ class ImageGenerator:
         self.tokenizer: PreTrainedTokenizerBase = model.tokenizer
         self.dataloader = dataloader
         self.load_path = load_path
+        self.local_checkpoint_path = local_checkpoint_path
+        self.load_strict_model_weights = load_strict_model_weights
         self.guidance_scale = guidance_scale
         self.height = height
         self.width = width
@@ -66,19 +73,24 @@ class ImageGenerator:
         self.output_bucket = output_bucket
         self.output_prefix = output_prefix if output_prefix is not None else ''
         self.additional_generate_kwargs = additional_generate_kwargs if additional_generate_kwargs is not None else {}
-        self.sdxl = model.sdxl
 
-        # Object
+        # Object store for uploading images
         if self.output_bucket is not None:
+            parsed_remote_bucket = urlparse(self.output_bucket)
+            if parsed_remote_bucket.scheme != 'oci':
+                raise ValueError(f'Currently only OCI object stores are supported. Got {parsed_remote_bucket.scheme}.')
             self.object_store = OCIObjectStore(self.output_bucket.replace('oci://', ''), self.output_prefix)
 
-        # Load the model
-        Trainer(model=self.model,
-                load_path=self.load_path,
-                load_weights_only=True,
-                load_strict_model_weights=load_strict_model_weights,
-                eval_dataloader=self.dataloader,
-                seed=self.seed)
+        # Download the model checkpoint if needed
+        if self.load_path is not None:
+            get_file(path=self.load_path, destination=self.local_checkpoint_path, overwrite=True)
+            # Load the model
+            state_dict = torch.load(self.local_checkpoint_path)
+            for key in list(state_dict['state']['model'].keys()):
+                if 'val_metrics.' in key:
+                    del state_dict['state']['model'][key]
+            self.model.load_state_dict(state_dict['state']['model'], strict=self.load_strict_model_weights)
+            self.model = model.cuda().eval()
 
     def generate(self):
         """Core image generation function. Generates images at a given guidance scale.
