@@ -98,11 +98,11 @@ class ImageGenerator:
         # Partition the dataset across the ranks
         dataset_len = self.dataset.num_samples  # type: ignore
         samples_per_rank, remainder = divmod(dataset_len, dist.get_world_size())
-        start_idx = dist.get_local_rank() * samples_per_rank + min(remainder, dist.get_local_rank())
+        start_idx = dist.get_global_rank() * samples_per_rank + min(remainder, dist.get_global_rank())
         end_idx = start_idx + samples_per_rank
-        print(f'Rank {dist.get_local_rank()} processing samples {start_idx} to {end_idx} of {dataset_len} total.')
-        if dist.get_local_rank() < remainder:
+        if dist.get_global_rank() < remainder:
             end_idx += 1
+        print(f'Rank {dist.get_global_rank()} processing samples {start_idx} to {end_idx} of {dataset_len} total.')
         # Iterate over the dataset
         for sample_id in tqdm(range(start_idx, end_idx)):
             sample = self.dataset[sample_id]
