@@ -15,6 +15,7 @@ from composer.utils.file_helpers import get_file
 from composer.utils.object_store import OCIObjectStore
 from torch.utils.data import Dataset
 from torchvision.transforms.functional import to_pil_image
+from tqdm.auto import tqdm
 
 
 class ImageGenerator:
@@ -95,13 +96,15 @@ class ImageGenerator:
         """
         os.makedirs(os.path.join('/tmp', self.output_prefix), exist_ok=True)
         # Partition the dataset across the ranks
-        samples_per_rank, remainder = divmod(self.dataset.num_samples, dist.get_world_size())  # type: ignore
+        dataset_len = self.dataset.num_samples  # type: ignore
+        samples_per_rank, remainder = divmod(dataset_len, dist.get_world_size())
         start_idx = dist.get_local_rank() * samples_per_rank + min(remainder, dist.get_local_rank())
         end_idx = start_idx + samples_per_rank
+        print(f'Rank {dist.get_local_rank()} processing samples {start_idx} to {end_idx} of {dataset_len} total.')
         if dist.get_local_rank() < remainder:
             end_idx += 1
         # Iterate over the dataset
-        for sample_id in range(start_idx, end_idx):
+        for sample_id in tqdm(range(start_idx, end_idx)):
             sample = self.dataset[sample_id]
             caption = sample[self.caption_key]
             # Generate images from the captions
