@@ -34,6 +34,7 @@ class ImageGenerator:
         seed (int): The seed to use for generation. Default: ``17``.
         output_bucket (str, Optional): The remote to save images to. Default: ``None``.
         output_prefix (str, Optional): The prefix to save images to. Default: ``None``.
+        extra_keys (list, Optional): Extra keys from the dataset to include in the metadata. Default: ``None``.
         additional_generate_kwargs (Dict, optional): Additional keyword arguments to pass to the model.generate method.
 
     """
@@ -51,6 +52,7 @@ class ImageGenerator:
                  seed: int = 17,
                  output_bucket: Optional[str] = None,
                  output_prefix: Optional[str] = None,
+                 extra_keys: Optional[list] = None,
                  additional_generate_kwargs: Optional[Dict] = None):
         self.model = model
         self.dataset = dataset
@@ -64,6 +66,7 @@ class ImageGenerator:
         self.seed = seed
         self.output_bucket = output_bucket
         self.output_prefix = output_prefix if output_prefix is not None else ''
+        self.extra_keys = extra_keys if extra_keys is not None else []
         self.additional_generate_kwargs = additional_generate_kwargs if additional_generate_kwargs is not None else {}
 
         # Object store for uploading images
@@ -125,6 +128,8 @@ class ImageGenerator:
                 'guidance_scale': self.guidance_scale,
                 'seed': self.seed
             }
+            for key in self.extra_keys:
+                metadata[key] = sample[key]
             json.dump(metadata, open(f'{data_local_path}', 'w'))
             # Upload the image
             if self.output_bucket is not None:
