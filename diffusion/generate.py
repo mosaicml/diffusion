@@ -13,7 +13,7 @@ from composer.algorithms.low_precision_layernorm import apply_low_precision_laye
 from composer.core import Precision
 from composer.utils import reproducibility
 from omegaconf import DictConfig
-from torch.utils.data import DataLoader
+from torch.utils.data import Dataset
 
 from diffusion.evaluation.generate_images import ImageGenerator
 
@@ -31,12 +31,12 @@ def generate(config: DictConfig) -> None:
 
     tokenizer = model.tokenizer if hasattr(model, 'tokenizer') else None
 
-    # The dataloader to use for evaluation
+    # The dataset to use for evaluation
     if tokenizer:
-        dataloader = hydra.utils.instantiate(config.dataloader, tokenizer=tokenizer)
+        dataset = hydra.utils.instantiate(config.dataset)
 
     else:
-        dataloader: DataLoader = hydra.utils.instantiate(config.dataloader)
+        dataset: Dataset = hydra.utils.instantiate(config.dataset)
 
     # Build list of algorithms.
     algorithms: List[Algorithm] = []
@@ -69,7 +69,7 @@ def generate(config: DictConfig) -> None:
     image_generator: ImageGenerator = hydra.utils.instantiate(
         config.generator,
         model=model,
-        dataloader=dataloader,
+        dataset=dataset,
     )
 
     def generate_from_model():
