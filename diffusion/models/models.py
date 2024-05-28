@@ -234,6 +234,7 @@ def stable_diffusion_xl(
     latent_std: Union[float, Tuple, str] = 7.67754318618,
     beta_schedule: str = 'scaled_linear',
     zero_terminal_snr: bool = False,
+    use_karras_sigmas: bool = False,
     offset_noise: Optional[float] = None,
     train_metrics: Optional[List] = None,
     val_metrics: Optional[List] = None,
@@ -279,6 +280,7 @@ def stable_diffusion_xl(
         beta_schedule (str): The beta schedule to use. Must be one of 'scaled_linear', 'linear', or 'squaredcos_cap_v2'.
             Default: `scaled_linear`.
         zero_terminal_snr (bool): Whether to enforce zero terminal SNR. Default: `False`.
+        use_karras_sigmas (bool): Whether to use the Karras sigmas for the diffusion process noise. Default: `False`.
         offset_noise (float, optional): The scale of the offset noise. If not specified, offset noise will not
             be used. Default `None`.
         train_metrics (list, optional): List of metrics to compute during training. If None, defaults to
@@ -426,7 +428,7 @@ def stable_diffusion_xl(
                                                            trained_betas=None,
                                                            prediction_type=prediction_type,
                                                            interpolation_type='linear',
-                                                           use_karras_sigmas=False,
+                                                           use_karras_sigmas=use_karras_sigmas,
                                                            timestep_spacing='leading',
                                                            steps_offset=1,
                                                            rescale_betas_zero_snr=zero_terminal_snr)

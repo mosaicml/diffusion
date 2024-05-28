@@ -766,7 +766,7 @@ def load_autoencoder(load_path: str,
     """
     # Download the autoencoder weights and init them
     if dist.get_local_rank() == 0:
-        get_file(path=load_path, destination=local_path)
+        get_file(path=load_path, destination=local_path, overwrite=True)
     with dist.local_rank_zero_download_and_wait(local_path):
         # Load the autoencoder weights from the state dict
         state_dict = torch.load(local_path, map_location='cpu')
