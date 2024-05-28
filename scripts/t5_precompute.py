@@ -76,5 +76,3 @@ with torch.no_grad():
 
         writer.write(sample)
 writer.finish()
-
-
