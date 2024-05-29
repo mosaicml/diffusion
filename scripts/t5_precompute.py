@@ -5,7 +5,6 @@ from streaming import MDSWriter, StreamingDataset
 from transformers import AutoTokenizer, AutoModel, CLIPTextModel
 from tqdm import trange
 from argparse import ArgumentParser
-from composer.utils import dist
 
 # TODO: Implement batching? 10% faster (when using t5-only), but a lot more complicated code
 
@@ -16,19 +15,16 @@ arg_parser.add_argument('--subdir_paths', nargs='+', type=str, required=True, he
 args = arg_parser.parse_args()
 
 
-
+cache_dir = '/tmp/hf_files'
 # Instantiate tokenizers
 print('Building models')
-with dist.run_local_rank_zero_first():
-    t5_tokenizer = AutoTokenizer.from_pretrained('google/t5-v1_1-xxl')
-    clip_tokenizer = AutoTokenizer.from_pretrained('stabilityai/stable-diffusion-xl-base-1.0', subfolder='tokenizer')
+t5_tokenizer = AutoTokenizer.from_pretrained('google/t5-v1_1-xxl', cache_dir=cache_dir, local_files_only=True)
+clip_tokenizer = AutoTokenizer.from_pretrained('stabilityai/stable-diffusion-xl-base-1.0', subfolder='tokenizer', cache_dir=cache_dir, local_files_only=True)
 
-    t5_model = AutoModel.from_pretrained('google/t5-v1_1-xxl', torch_dtype=torch.float16)
-    clip_model = CLIPTextModel.from_pretrained('stabilityai/stable-diffusion-xl-base-1.0', subfolder='text_encoder', torch_dtype=torch.float16)
+print('Building models')
+t5_model = AutoModel.from_pretrained('google/t5-v1_1-xxl', torch_dtype=torch.float16, cache_dir=cache_dir, local_files_only=True).encoder.cuda().eval()
+clip_model = CLIPTextModel.from_pretrained('stabilityai/stable-diffusion-xl-base-1.0', subfolder='text_encoder', torch_dtype=torch.float16, cache_dir=cache_dir, local_files_only=True).cuda().eval()
 
-print('Moving models to GPUs')
-t5_model = t5_model.encoder.cuda().eval()
-clip_model = clip_model.cuda().eval()
 columns = None
 for subdir_path in args.subdir_paths:
     remote_src = os.path.join(args.remote_src_base, subdir_path)
