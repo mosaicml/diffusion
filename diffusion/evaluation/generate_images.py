@@ -79,9 +79,11 @@ class ImageGenerator:
 
         # Download the model checkpoint if needed
         if self.load_path is not None:
-            get_file(path=self.load_path, destination=self.local_checkpoint_path, overwrite=True)
-            # Load the model
-            state_dict = torch.load(self.local_checkpoint_path)
+            if dist.get_local_rank() == 0:
+                get_file(path=self.load_path, destination=self.local_checkpoint_path, overwrite=True)
+            with dist.local_rank_zero_download_and_wait(self.local_checkpoint_path):
+                # Load the model
+                state_dict = torch.load(self.local_checkpoint_path)
             for key in list(state_dict['state']['model'].keys()):
                 if 'val_metrics.' in key:
                     del state_dict['state']['model'][key]
