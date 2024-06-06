@@ -105,7 +105,7 @@ class StreamingTextLatentsDataset(StreamingDataset):
                 text_latent = np.frombuffer(sample[latent_key], dtype=np.float16).copy()
                 out[latent_key] = torch.from_numpy(text_latent).reshape(latent_shape)
                 print(i, len(sample[attention_key]))
-                attention_mask = np.frombuffer(sample[attention_key], dtype=[np.int64, np.bool_][i]).copy()
+                attention_mask = np.frombuffer(sample[attention_key], dtype=np.bool_).copy()
                 out[attention_key] = torch.from_numpy(attention_mask).reshape(latent_shape[0])
                 if latent_key == 'CLIP_LATENTS':
                     clip_pooled = np.frombuffer(sample['CLIP_POOLED_TEXT'], dtype=np.float16).copy()
