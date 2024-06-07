@@ -8,7 +8,6 @@ from diffusion.datasets.image_caption import StreamingImageCaptionDataset, build
 from diffusion.datasets.laion import StreamingLAIONDataset, build_streaming_laion_dataloader
 from diffusion.datasets.synthetic_image_caption import (SyntheticImageCaptionDataset,
                                                         build_synthetic_image_caption_dataloader)
-from diffusion.datasets.text_latents import StreamingTextLatentsDataset, build_streaming_text_latents_dataloader
 
 __all__ = [
     'build_streaming_laion_dataloader',
@@ -19,6 +18,4 @@ __all__ = [
     'StreamingImageCaptionDataset',
     'build_synthetic_image_caption_dataloader',
     'SyntheticImageCaptionDataset',
-    'build_streaming_text_latents_dataloader',
-    'StreamingTextLatentsDataset',
 ]

@@ -16,8 +16,9 @@ args = arg_parser.parse_args()
 
 
 cache_dir = '/tmp/hf_files'
+
 # Instantiate tokenizers
-print('Building models')
+print('Building tokenizers')
 t5_tokenizer = AutoTokenizer.from_pretrained('google/t5-v1_1-xxl', cache_dir=cache_dir, local_files_only=True)
 clip_tokenizer = AutoTokenizer.from_pretrained('stabilityai/stable-diffusion-xl-base-1.0', subfolder='tokenizer', cache_dir=cache_dir, local_files_only=True)
 
@@ -62,7 +63,7 @@ for subdir_path in args.subdir_paths:
                                     return_tensors='pt')
             tokenized_captions = t5_tokenizer_out['input_ids'].cuda()
             attention_masks = t5_tokenizer_out['attention_mask'].to(torch.bool).cuda()
-            sample['T5_ATTENTION_MASK'] = t5_tokenizer_out['attention_mask'].squeeze(0).numpy().tobytes()
+            sample['T5_ATTENTION_MASK'] = t5_tokenizer_out['attention_mask'].squeeze(0).to(torch.bool).numpy().tobytes()
             t5_out = t5_model(input_ids=tokenized_captions, attention_mask=attention_masks)
             sample['T5_LATENTS'] = t5_out[0].squeeze(0).cpu().numpy().tobytes()
 
