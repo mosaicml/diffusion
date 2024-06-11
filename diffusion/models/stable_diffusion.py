@@ -182,11 +182,9 @@ class StableDiffusion(ComposerModel):
 
     def forward(self, batch):
         latents, text_embeds, text_pooled_embeds, attention_mask, encoder_attention_mask = None, None, None, None, None
-        if 'attention_mask' in batch:
+        if 'attention_mask' in batch and self.mask_pad_tokens:
             attention_mask = batch['attention_mask']  # mask for text encoders
-            # text mask for U-Net
-            if self.mask_pad_tokens:
-                encoder_attention_mask = _create_unet_attention_mask(attention_mask)
+            encoder_attention_mask = _create_unet_attention_mask(attention_mask)  # text mask for U-Net
 
         # Use latents if specified and available. When specified, they might not exist during eval
         if self.precomputed_latents and self.image_latents_key in batch and self.text_latents_key in batch:
@@ -484,7 +482,10 @@ class StableDiffusion(ComposerModel):
                                                truncation=True,
                                                return_tensors='pt')
                 tokenized_prompts = tokenized_out['input_ids']
-                tokenized_pad_mask = tokenized_out['attention_mask']
+                if self.mask_pad_tokens:
+                    tokenized_pad_mask = tokenized_out['attention_mask']
+                else:
+                    tokenized_pad_mask = None
             if tokenized_pad_mask is not None:
                 tokenized_pad_mask = tokenized_pad_mask.to(device)
             text_encoder_out = self.text_encoder(tokenized_prompts.to(device), attention_mask=tokenized_pad_mask)
