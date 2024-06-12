@@ -19,6 +19,7 @@ from diffusion.models.pixel_diffusion import PixelDiffusion
 from diffusion.models.stable_diffusion import StableDiffusion
 from diffusion.models.text_encoder import MultiTextEncoder, MultiTokenizer
 from diffusion.schedulers.schedulers import ContinuousTimeScheduler
+from diffusion.schedulers.utils import shift_noise_schedule
 
 try:
     import xformers  # type: ignore
@@ -236,6 +237,7 @@ def stable_diffusion_xl(
     zero_terminal_snr: bool = False,
     use_karras_sigmas: bool = False,
     offset_noise: Optional[float] = None,
+    scheduler_shift_resolution: int = 256,
     train_metrics: Optional[List] = None,
     val_metrics: Optional[List] = None,
     quasirandomness: bool = False,
@@ -283,6 +285,7 @@ def stable_diffusion_xl(
         use_karras_sigmas (bool): Whether to use the Karras sigmas for the diffusion process noise. Default: `False`.
         offset_noise (float, optional): The scale of the offset noise. If not specified, offset noise will not
             be used. Default `None`.
+        scheduler_shift_resolution (int): The resolution to shift the noise scheduler to. Default: `256`.
         train_metrics (list, optional): List of metrics to compute during training. If None, defaults to
             [MeanSquaredError()].
         val_metrics (list, optional): List of metrics to compute during validation. If None, defaults to
@@ -432,6 +435,14 @@ def stable_diffusion_xl(
                                                            timestep_spacing='leading',
                                                            steps_offset=1,
                                                            rescale_betas_zero_snr=zero_terminal_snr)
+
+    # Shift noise scheduler to correct for resolution changes
+    noise_scheduler = shift_noise_schedule(noise_scheduler,
+                                           base_dim=32,
+                                           shift_dim=scheduler_shift_resolution // downsample_factor)
+    inference_noise_scheduler = shift_noise_schedule(inference_noise_scheduler,
+                                                     base_dim=32,
+                                                     shift_dim=scheduler_shift_resolution // downsample_factor)
 
     # Make the composer model
     model = StableDiffusion(
