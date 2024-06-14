@@ -12,6 +12,8 @@ from streaming import Stream, StreamingDataset
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
+from diffusion.datasets.utils import make_streams
+
 log = logging.getLogger(__name__)
 
 # Disable PIL max image size limit
@@ -93,6 +95,9 @@ def build_streaming_image_dataloader(
     transform: Optional[List[Callable]] = None,
     image_key: str = 'image',
     image_output_key: Optional[str] = 'image',
+    proportion: Optional[list] = None,
+    repeat: Optional[list] = None,
+    choose: Optional[list] = None,
     streaming_kwargs: Optional[Dict] = None,
     dataloader_kwargs: Optional[Dict] = None,
 ):
@@ -106,6 +111,9 @@ def build_streaming_image_dataloader(
         image_key (str): Key associated with the image in the streaming dataset. Default: ``'image'``.
         image_output_key (optional, str): Optional output key for the image. If none, the value of `image_key` will
             be used. Default: ``image``.
+        proportion (list, optional): Specifies how to sample this Stream relative to other Streams. Default: ``None``.
+        repeat (list, optional): Specifies the degree to which a Stream is upsampled or downsampled. Default: ``None``.
+        choose (list, optional): Specifies the number of samples to choose from a Stream. Default: ``None``.
         streaming_kwargs (dict, optional): Additional arguments to pass to the ``StreamingDataset``. Default: ``None``.
         dataloader_kwargs (dict, optional): Additional arguments to pass to the ``DataLoader``. Default: ``None``.
     """
@@ -115,21 +123,8 @@ def build_streaming_image_dataloader(
     if dataloader_kwargs is None:
         dataloader_kwargs = {}
 
-    # Check types for remote and local
-    if isinstance(remote, str) and isinstance(local, str):
-        remote, local = [remote], [local]
-    elif isinstance(remote, Sequence) and isinstance(local, Sequence):
-        if len(remote) != len(local):
-            raise ValueError(
-                f'remote and local Sequences must be the same length, got lengths {len(remote)} and {len(local)}')
-    else:
-        raise ValueError(
-            f'remote and local must be both Strings or Sequences, got types {type(remote)} and {type(local)}.')
-
-    # Create a Stream for each (remote, local) pair
-    streams = []
-    for r, l in zip(remote, local):
-        streams.append(Stream(remote=r, local=l))
+    # Set up streams
+    streams = make_streams(remote, local=local, proportion=proportion, repeat=repeat, choose=choose)
 
     if transform is None:
         transform = [transforms.ToTensor()]
