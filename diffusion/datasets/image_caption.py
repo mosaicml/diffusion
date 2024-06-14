@@ -182,6 +182,9 @@ def build_streaming_image_caption_dataloader(
     crop_type: Optional[str] = 'square',
     zero_dropped_captions: bool = True,
     sdxl_conditioning: bool = False,
+    proportion: Optional[list] = None,
+    repeat: Optional[list] = None,
+    choose: Optional[list] = None,
     streaming_kwargs: Optional[Dict] = None,
     dataloader_kwargs: Optional[Dict] = None,
 ):
@@ -213,6 +216,9 @@ def build_streaming_image_caption_dataloader(
             Default: ``'square'``.
         zero_dropped_captions (bool): If True, zero out text embeddings for dropped captions. Default: ``True``.
         sdxl_conditioning (bool): Whether or not to include SDXL microconditioning in a sample. Default: `False`.
+        proportion (list, optional): Specifies how to sample this Stream relative to other Streams. Default: ``None``.
+        repeat (list, optional): Specifies the degree to which a Stream is upsampled or downsampled. Default: ``None``.
+        choose (list, optional): Specifies the number of samples to choose from a Stream. Default: ``None``.
         streaming_kwargs (dict, optional): Additional arguments to pass to the ``StreamingDataset``. Default: ``None``.
         dataloader_kwargs (dict, optional): Additional arguments to pass to the ``DataLoader``. Default: ``None``.
     """
@@ -246,10 +252,27 @@ def build_streaming_image_caption_dataloader(
     else:
         ValueError(f'remote and local must be both Strings or Sequences, got types {type(remote)} and {type(local)}.')
 
+    # Set the stream weights
+    if proportion is not None:
+        if len(proportion) != len(remote):
+            raise ValueError(f'proportion must have the same length as remote, got {len(proportion)} and {len(remote)}')
+    else:
+        proportion = [None] * len(remote)
+    if repeat is not None:
+        if len(repeat) != len(remote):
+            raise ValueError(f'repeat must have the same length as remote, got {len(repeat)} and {len(remote)}')
+    else:
+        repeat = [None] * len(remote)
+    if choose is not None:
+        if len(choose) != len(remote):
+            raise ValueError(f'choose must have the same length as remote, got {len(choose)} and {len(remote)}')
+    else:
+        choose = [None] * len(remote)
+
     # Create a Stream for each (remote, local) pair
     streams = []
-    for r, l in zip(remote, local):
-        streams.append(Stream(remote=r, local=l))
+    for i, (r, l) in enumerate(zip(remote, local)):
+        streams.append(Stream(remote=r, local=l, proportion=proportion[i], repeat=repeat[i], choose=choose[i]))
 
     # Set the crop to apply
     if crop_type == 'square':
