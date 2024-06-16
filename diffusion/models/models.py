@@ -502,10 +502,16 @@ def text_to_image_transformer(
                                                         'stabilityai/stable-diffusion-xl-base-1.0/tokenizer_2'),
         text_encoder_names: Union[str, Tuple[str, ...]] = ('stabilityai/stable-diffusion-xl-base-1.0/text_encoder',
                                                            'stabilityai/stable-diffusion-xl-base-1.0/text_encoder_2'),
-        unet_model_name: str = 'stabilityai/stable-diffusion-xl-base-1.0',
         vae_model_name: str = 'madebyollin/sdxl-vae-fp16-fix',
         autoencoder_path: Optional[str] = None,
         autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
+        num_features: int = 1152,
+        num_heads: int = 16,
+        num_layers: int = 28,
+        input_max_sequence_length: int = 1024,
+        conditioning_features: int = 768,
+        conditioning_max_sequence_length: int = 77,
+        patch_size: int = 2,
         prediction_type: str = 'epsilon',
         latent_mean: Union[float, Tuple, str] = 0.0,
         latent_std: Union[float, Tuple, str] = 7.67754318618,
@@ -528,6 +534,7 @@ def text_to_image_transformer(
         if latent_mean == 'latent_statistics' or latent_std == 'latent_statistics':
             raise ValueError('Cannot use tracked latent_statistics when using the pretrained vae.')
         downsample_factor = 8
+        autoencoder_channels = 4
         # Use the pretrained vae
         try:
             vae = AutoencoderKL.from_pretrained(vae_model_name, subfolder='vae', torch_dtype=precision)
@@ -546,6 +553,7 @@ def text_to_image_transformer(
             assert isinstance(latent_statistics, dict)
             latent_std = tuple(latent_statistics['latent_channel_stds'])
         downsample_factor = 2**(len(vae.config['channel_multipliers']) - 1)
+        autoencoder_channels = vae.config['latent_channels']
 
     # Make the noise schedulers
     noise_scheduler = DDPMScheduler(num_train_timesteps=1000,
@@ -573,14 +581,14 @@ def text_to_image_transformer(
                                                        rescale_betas_zero_snr=zero_terminal_snr)
 
     # Make the transformer model
-    transformer = DiffusionTransformer(num_features=256,
-                                       num_heads=4,
-                                       num_layers=4,
-                                       input_features=16,
-                                       input_max_sequence_length=1024,
+    transformer = DiffusionTransformer(num_features=num_features,
+                                       num_heads=num_heads,
+                                       num_layers=num_layers,
+                                       input_features=autoencoder_channels * (patch_size ** 2),
+                                       input_max_sequence_length=input_max_sequence_length,
                                        input_dimension=2,
-                                       conditioning_features=768,
-                                       conditioning_max_sequence_length=77,
+                                       conditioning_features=conditioning_features,
+                                       conditioning_max_sequence_length=conditioning_max_sequence_length,
                                        conditioning_dimension=1,
                                        expansion_factor=4)
     # Make the composer model
@@ -593,9 +601,9 @@ def text_to_image_transformer(
                                    prediction_type=prediction_type,
                                    latent_mean=latent_mean,
                                    latent_std=latent_std,
-                                   patch_size=2,
-                                   downsample_factor=8,
-                                   latent_channels=4,
+                                   patch_size=patch_size,
+                                   downsample_factor=downsample_factor,
+                                   latent_channels=autoencoder_channels,
                                    image_key='image',
                                    caption_key='captions',
                                    caption_mask_key='attention_mask')
