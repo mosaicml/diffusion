@@ -584,7 +584,7 @@ def text_to_image_transformer(
     transformer = DiffusionTransformer(num_features=num_features,
                                        num_heads=num_heads,
                                        num_layers=num_layers,
-                                       input_features=autoencoder_channels * (patch_size ** 2),
+                                       input_features=autoencoder_channels * (patch_size**2),
                                        input_max_sequence_length=input_max_sequence_length,
                                        input_dimension=2,
                                        conditioning_features=conditioning_features,

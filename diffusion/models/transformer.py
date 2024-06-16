@@ -353,7 +353,9 @@ class ComposerTextToImageDiT(ComposerModel):
         self.rng_generator = rng_generator
 
     def flops_per_batch(self, batch):
-        batch_size, input_seq_len = batch[self.image_key].shape[0:2]
+        batch_size = batch[self.image_key].shape[0]
+        height, width = batch[self.image_key].shape[2:]
+        input_seq_len = height * width / self.patch_size**2
         cond_seq_len = batch[self.caption_key].shape[1]
         seq_len = input_seq_len + cond_seq_len
         # Calulate forward flops excluding attention
