@@ -138,7 +138,7 @@ class DiffusionTransformer(nn.Module):
                  input_dimension: int = 2,
                  conditioning_features: int = 1024,
                  conditioning_max_sequence_length: int = 77,
-                 conditioning_dimension: int = 2,
+                 conditioning_dimension: int = 1,
                  expansion_factor: int = 4):
         super().__init__()
         # Params for the network architecture
@@ -250,51 +250,85 @@ class DiffusionTransformer(nn.Module):
         return y
 
 
-class ComposerDiffusionTransformer(ComposerModel):
-    """Diffusion transformer ComposerModel.
+class ComposerTextToImageDiT(ComposerModel):
+    """ComposerModel for text to image with a diffusion transformer.
 
     Args:
         model (DiffusionTransformer): Core diffusion model.
+        autoencoder (torch.nn.Module): HuggingFace or compatible vae.
+            must support `.encode()` and `decode()` functions.
+        text_encoder (torch.nn.Module): HuggingFace CLIP or LLM text enoder.
+        tokenizer (transformers.PreTrainedTokenizer): Tokenizer used for
+            text_encoder. For a `CLIPTextModel` this will be the
+            `CLIPTokenizer` from HuggingFace transformers.
+        noise_scheduler (diffusers.SchedulerMixin): HuggingFace diffusers
+            noise scheduler. Used during the forward diffusion process (training).
+        inference_noise_scheduler (diffusers.SchedulerMixin): HuggingFace diffusers
+            noise scheduler. Used during the backward diffusion process (inference).
         prediction_type (str): The type of prediction to use. Currently `epsilon`, `v_prediction` are supported.
-        T_max (int): The maximum number of timesteps. Default: 1000.
-        input_key (str): The name of the inputs in the dataloader batch. Default: `input`.
-        input_coords_key (str): The name of the input coordinates in the dataloader batch. Default: `input_coords`.
-        input_mask_key (str): The name of the input mask in the dataloader batch. Default: `input_mask`.
-        conditioning_key (str): The name of the conditioning info in the dataloader batch. Default: `conditioning`.
-        conditioning_coords_key (str): The name of the conditioning coordinates in the dataloader batch. Default: `conditioning_coords`.
-        conditioning_mask_key (str): The name of the conditioning mask in the dataloader batch. Default: `conditioning_mask`.
+        latent_mean (Optional[tuple[float]]): The means of the latent space. If not specified, defaults to
+            4 * (0.0,). Default: `None`.
+        latent_std (Optional[tuple[float]]): The standard deviations of the latent space. If not specified,
+            defaults to 4 * (1/0.13025,). Default: `None`.
+        patch_size (int): The size of the patches in the image latents. Default: `2`.
+        downsample_factor (int): The factor by which the image is downsampled by the autoencoder. Default `8`.
+        latent_channels (int): The number of channels in the autoencoder latent space. Default: `4`.
+        image_key (str): The name of the images in the dataloader batch. Default: `image`.
+        caption_key (str): The name of the caption in the dataloader batch. Default: `caption`.
+        caption_mask_key (str): The name of the caption mask in the dataloader batch. Default: `caption_mask`.
     """
 
     def __init__(
         self,
         model: DiffusionTransformer,
+        autoencoder: torch.nn.Module,
+        text_encoder: torch.nn.Module,
+        tokenizer,
+        noise_scheduler,
+        inference_noise_scheduler,
         prediction_type: str = 'epsilon',
-        T_max: int = 1000,
-        input_key: str = 'input',
-        input_coords_key: str = 'input_coords',
-        input_mask_key: str = 'input_mask',
-        conditioning_key: str = 'conditioning',
-        conditioning_coords_key: str = 'conditioning_coords',
-        conditioning_mask_key: str = 'conditioning_mask',
+        latent_mean: Optional[tuple[float]] = None,
+        latent_std: Optional[tuple[float]] = None,
+        patch_size: int = 2,
+        downsample_factor: int = 8,
+        latent_channels: int = 4,
+        image_key: str = 'image',
+        caption_key: str = 'caption',
+        caption_mask_key: str = 'caption_mask',
     ):
         super().__init__()
         self.model = model
-        self.model._fsdp_wrap = True
-
-        # Diffusion parameters
+        self.autoencoder = autoencoder
+        self.text_encoder = text_encoder
+        self.tokenizer = tokenizer
+        self.noise_scheduler = noise_scheduler
+        self.inference_scheduler = inference_noise_scheduler
         self.prediction_type = prediction_type.lower()
         if self.prediction_type not in ['epsilon', 'v_prediction']:
             raise ValueError(f'Unrecognized prediction type {self.prediction_type}')
-        self.T_max = T_max
+        if latent_mean is None:
+            self.latent_mean = 4 * (0.0)
+        if latent_std is None:
+            self.latent_std = 4 * (1 / 0.18215,)
+        self.latent_mean = torch.tensor(latent_mean).view(1, -1, 1, 1)
+        self.latent_std = torch.tensor(latent_std).view(1, -1, 1, 1)
+        self.patch_size = patch_size
+        self.downsample_factor = downsample_factor
+        self.latent_channels = latent_channels
+        self.image_key = image_key
+        self.caption_key = caption_key
+        self.caption_mask_key = caption_mask_key
 
-        # Set up input keys
-        self.input_key = input_key
-        self.input_coords_key = input_coords_key
-        self.input_mask_key = input_mask_key
-        # Set up conditioning keys
-        self.conditioning_key = conditioning_key
-        self.conditioning_coords_key = conditioning_coords_key
-        self.conditioning_mask_key = conditioning_mask_key
+        # freeze text_encoder during diffusion training and use half precision
+        self.autoencoder.requires_grad_(False)
+        self.text_encoder.requires_grad_(False)
+        self.autoencoder = self.autoencoder.half()
+        self.text_encoder = self.text_encoder.half()
+
+        # Only FSDP wrap models we are training
+        self.model._fsdp_wrap = True
+        self.autoencoder._fsdp_wrap = False
+        self.text_encoder._fsdp_wrap = False
 
         # Params for MFU computation, subtract off the embedding params
         self.n_params = sum(p.numel() for p in self.model.parameters())
@@ -308,13 +342,19 @@ class ComposerDiffusionTransformer(ComposerModel):
         # Optional rng generator
         self.rng_generator: Optional[torch.Generator] = None
 
+    def _apply(self, fn):
+        super(ComposerTextToImageDiT, self)._apply(fn)
+        self.latent_mean = fn(self.latent_mean)
+        self.latent_std = fn(self.latent_std)
+        return self
+
     def set_rng_generator(self, rng_generator: torch.Generator):
         """Sets the rng generator for the model."""
         self.rng_generator = rng_generator
 
     def flops_per_batch(self, batch):
-        batch_size, input_seq_len = batch[self.input_key].shape[0:2]
-        cond_seq_len = batch[self.conditioning_key].shape[1]
+        batch_size, input_seq_len = batch[self.image_key].shape[0:2]
+        cond_seq_len = batch[self.caption_key].shape[1]
         seq_len = input_seq_len + cond_seq_len
         # Calulate forward flops excluding attention
         param_flops = 2 * self.n_params * batch_size * seq_len
@@ -322,57 +362,92 @@ class ComposerDiffusionTransformer(ComposerModel):
         attention_flops = 4 * self.model.num_layers * seq_len**2 * self.model.num_features * batch_size
         return 3 * param_flops + 3 * attention_flops
 
+    def patchify(self, latents):
+        # Assume img is a tensor of shape [B, C, H, W]
+        B, C, H, W = latents.shape
+        assert H % self.patch_size == 0 and W % self.patch_size == 0, 'Image dimensions must be divisible by patch_size'
+        # Reshape and permute to get non-overlapping patches
+        num_H_patches = H // self.patch_size
+        num_W_patches = W // self.patch_size
+        patches = latents.reshape(B, C, num_H_patches, self.patch_size, num_W_patches, self.patch_size)
+        patches = patches.permute(0, 2, 4, 1, 3, 5).reshape(B, -1, C * self.patch_size * self.patch_size)
+        # Generate coordinates for each patch
+        coords = torch.tensor([(i, j) for i in range(num_H_patches) for j in range(num_W_patches)])
+        coords = coords.unsqueeze(0).expand(B, -1, -1).reshape(B, -1, 2)
+        return patches, coords
+
+    def unpatchify(self, patches, coords):
+        # Assume patches is a tensor of shape [num_patches, C * patch_size * patch_size]
+        C = patches.shape[1] // (self.patch_size * self.patch_size)
+        # Calculate the height and width of the original image from the coordinates
+        H = coords[:, 0].max() * self.patch_size + self.patch_size
+        W = coords[:, 1].max() * self.patch_size + self.patch_size
+        # Initialize an empty tensor for the reconstructed image
+        img = torch.zeros((C, H, W), device=patches.device, dtype=patches.dtype)
+        # Iterate over the patches and their coordinates
+        for patch, (y, x) in zip(patches, self.patch_size * coords):
+            # Reshape the patch to [C, patch_size, patch_size]
+            patch = patch.view(C, self.patch_size, self.patch_size)
+            # Place the patch in the corresponding location in the image
+            img[:, y:y + self.patch_size, x:x + self.patch_size] = patch
+        return img
+
     def diffusion_forward_process(self, inputs: torch.Tensor):
         """Diffusion forward process."""
         # Sample a timestep for every element in the batch
-        timesteps = self.T_max * torch.rand(inputs.shape[0], device=inputs.device, generator=self.rng_generator)
+        timesteps = torch.randint(0,
+                                  len(self.noise_scheduler), (inputs.shape[0],),
+                                  device=inputs.device,
+                                  generator=self.rng_generator)
         # Generate the noise, applied to the whole input sequence
         noise = torch.randn(*inputs.shape, device=inputs.device, generator=self.rng_generator)
-        # Add the noise to the latents according to the natural schedule
-        cos_t = torch.cos(timesteps * torch.pi / (2 * self.T_max)).view(-1, 1, 1)
-        sin_t = torch.sin(timesteps * torch.pi / (2 * self.T_max)).view(-1, 1, 1)
-        noised_inputs = cos_t * inputs + sin_t * noise
+        # Add the noise to the latents according to the schedule
+        noised_inputs = self.noise_scheduler.add_noise(inputs, noise, timesteps)
+        # Generate the targets
         if self.prediction_type == 'epsilon':
-            # Get the (epsilon) targets
             targets = noise
+        elif self.prediction_type == 'sample':
+            targets = inputs
         elif self.prediction_type == 'v_prediction':
-            # Get the (velocity) targets
-            targets = -sin_t * inputs + cos_t * noise
+            targets = self.noise_scheduler.get_velocity(inputs, noise, timesteps)
         else:
-            raise ValueError(f'Unrecognized prediction type {self.prediction_type}')
-        # TODO: Implement other prediction types
+            raise ValueError(
+                f'prediction type must be one of sample, epsilon, or v_prediction. Got {self.prediction_type}')
         return noised_inputs, targets, timesteps
 
     def forward(self, batch):
         # Get the inputs
-        inputs = batch[self.input_key]
-        inputs_coords = batch[self.input_coords_key]
-        inputs_mask = batch[self.input_mask_key]
-        # Get the conditioning
-        conditioning = batch[self.conditioning_key]
-        conditioning_coords = batch[self.conditioning_coords_key]
-        conditioning_mask = batch[self.conditioning_mask_key]
+        image, caption, caption_mask = batch[self.image_key], batch[self.caption_key], batch[self.caption_mask_key]
+        # Get the text embeddings and image latents
+        with torch.cuda.amp.autocast(enabled=False):
+            latents = self.autoencoder.encode(image.half())['latent_dist'].sample().data
+            text_encoder_out = self.text_encoder(caption, attention_mask=caption_mask)
+            text_embeddings = text_encoder_out[0]
+        # Make the text embedding coords
+        text_embeddings_coords = torch.arange(text_embeddings.shape[1], device=text_embeddings.device)
+        text_embeddings_coords = text_embeddings_coords.unsqueeze(0).expand(text_embeddings.shape[0], -1).unsqueeze(-1)
+        # Zero dropped captions if needed
+        if 'drop_caption_mask' in batch.keys():
+            text_embeddings *= batch['drop_caption_mask'].view(-1, 1, 1)
+        # Scale and patchify the latents
+        latents = (latents - self.latent_mean) / self.latent_std
+        latent_patches, latent_coords = self.patchify(latents)
         # Diffusion forward process
-        noised_inputs, targets, timesteps = self.diffusion_forward_process(inputs)
+        noised_inputs, targets, timesteps = self.diffusion_forward_process(latent_patches)
         # Forward through the model
         model_out = self.model(noised_inputs,
-                               inputs_coords,
+                               latent_coords,
                                timesteps,
-                               conditioning=conditioning,
-                               conditioning_coords=conditioning_coords,
-                               input_mask=inputs_mask,
-                               conditioning_mask=conditioning_mask)
+                               conditioning=text_embeddings,
+                               conditioning_coords=text_embeddings_coords,
+                               input_mask=None,
+                               conditioning_mask=caption_mask)
         return {'predictions': model_out, 'targets': targets, 'timesteps': timesteps}
 
     def loss(self, outputs, batch):
         """MSE loss between outputs and targets."""
-        losses = {}
-        # Need to mask out elements in the loss that are not present in the input
-        mask = batch[self.input_mask_key]  # (B, T1), 1 if included, 0 otherwise.
-        loss = (outputs['predictions'] - outputs['targets'])**2  # (B, T1, C)
-        loss = loss.mean(dim=2)  # (B, T1)
-        losses['total'] = (loss * mask).sum() / mask.sum()
-        return losses
+        loss = F.mse_loss(outputs['predictions'], outputs['targets'])
+        return loss
 
     def eval_forward(self, batch, outputs=None):
         # Skip this if outputs have already been computed, e.g. during training
@@ -393,32 +468,38 @@ class ComposerDiffusionTransformer(ComposerModel):
         else:
             raise ValueError(f'Unrecognized metric {metric.__class__.__name__}')
 
-    def update_inputs(self, inputs, predictions, t, delta_t):
-        """Gets the input update."""
-        angle = t * torch.pi / (2 * self.T_max)
-        cos_t = torch.cos(angle).view(-1, 1, 1)
-        sin_t = torch.sin(angle).view(-1, 1, 1)
-        if self.prediction_type == 'epsilon':
-            if angle == torch.pi / 2:
-                # Optimal update here is to do nothing.
-                pass
-            elif torch.abs(torch.pi / 2 - angle) < 1e-4:
-                # Need to avoid instability near t = T_max
-                inputs = inputs - (predictions - sin_t * inputs)
-            else:
-                inputs = inputs - (predictions - sin_t * inputs) * delta_t / cos_t
-        elif self.prediction_type == 'v_prediction':
-            inputs = inputs - delta_t * predictions
-        return inputs
+    def combine_attention_masks(self, attention_mask):
+        if len(attention_mask.shape) == 2:
+            return attention_mask
+        elif len(attention_mask.shape) == 3:
+            encoder_attention_mask = attention_mask[:, 0]
+            for i in range(1, attention_mask.shape[1]):
+                encoder_attention_mask |= attention_mask[:, i]
+            return encoder_attention_mask
+        else:
+            raise ValueError(f'attention_mask should have either 2 or 3 dimensions: {attention_mask.shape}')
+
+    def embed_prompt(self, prompt):
+        with torch.cuda.amp.autocast(enabled=False):
+            tokenized_out = self.tokenizer(prompt,
+                                           padding='max_length',
+                                           max_length=self.tokenizer.model_max_length,
+                                           truncation=True,
+                                           return_tensors='pt')
+            tokenized_prompts = tokenized_out['input_ids'].to(self.text_encoder.device)
+            prompt_mask = tokenized_out['attention_mask'].to(self.text_encoder.device)
+            text_embeddings = self.text_encoder(tokenized_prompts, attention_mask=prompt_mask)[0]
+            prompt_mask = self.combine_attention_masks(prompt_mask)
+        return text_embeddings, prompt_mask
 
     def generate(self,
-                 input_coords: torch.Tensor,
-                 input_mask: torch.Tensor,
-                 conditioning: torch.Tensor,
-                 conditioning_coords: torch.Tensor,
-                 conditioning_mask: torch.Tensor,
+                 prompt: Optional[list] = None,
+                 negative_prompt: Optional[list] = None,
+                 height: Optional[int] = None,
+                 width: Optional[int] = None,
                  guidance_scale: float = 7.0,
-                 num_timesteps: int = 50,
+                 rescaled_guidance: Optional[float] = None,
+                 num_inference_steps: int = 50,
                  progress_bar: bool = True,
                  seed: Optional[int] = None):
         """Generate from the model."""
@@ -427,38 +508,70 @@ class ComposerDiffusionTransformer(ComposerModel):
         rng_generator = torch.Generator(device=device)
         if seed:
             rng_generator = rng_generator.manual_seed(seed)
-        # From the input coordinates, generate a noisy input sequence
-        inputs = torch.randn(*input_coords.shape[:-1],
-                             self.model.input_features,
-                             device=device,
-                             generator=rng_generator)
+
+        # Get the text embeddings
+        if prompt is not None:
+            text_embeddings, prompt_mask = self.embed_prompt(prompt)
+            text_embeddings_coords = torch.arange(text_embeddings.shape[1], device=text_embeddings.device)
+            text_embeddings_coords = text_embeddings_coords.unsqueeze(0).expand(text_embeddings.shape[0], -1)
+            text_embeddings_coords = text_embeddings_coords.unsqueeze(-1)
+        else:
+            raise ValueError('Prompt must be specified')
+        if negative_prompt is not None:
+            negative_text_embeddings, negative_prompt_mask = self.embed_prompt(negative_prompt)
+        else:
+            negative_text_embeddings = torch.zeros_like(text_embeddings)
+            negative_prompt_mask = torch.zeros_like(prompt_mask)
+        negative_text_embeddings_coords = torch.arange(negative_text_embeddings.shape[1],
+                                                       device=negative_text_embeddings.device)
+        negative_text_embeddings_coords = negative_text_embeddings_coords.unsqueeze(0).expand(
+            negative_text_embeddings.shape[0], -1)
+        negative_text_embeddings_coords = negative_text_embeddings_coords.unsqueeze(-1)
+
+        # Generate initial noise
+        latent_height = height // self.downsample_factor
+        latent_width = width // self.downsample_factor
+        latents = torch.randn(text_embeddings.shape[0],
+                              self.latent_channels,
+                              latent_height,
+                              latent_width,
+                              device=device)
+        latent_patches, latent_coords = self.patchify(latents)
+
         # Set up for CFG
-        input_coords = torch.cat([input_coords, input_coords], dim=0)
-        input_mask = torch.cat([input_mask, input_mask], dim=0).to(device)
-        conditioning = torch.cat([torch.zeros_like(conditioning), conditioning], dim=0).to(device)
-        conditioning_coords = torch.cat([conditioning_coords, conditioning_coords], dim=0)
-        conditioning_mask = torch.cat([torch.zeros_like(conditioning_mask), conditioning_mask], dim=0).to(device)
-        # Make the timesteps
-        timesteps = torch.linspace(self.T_max, 0, num_timesteps + 1, device=device)
-        time_deltas = -torch.diff(timesteps) * (torch.pi / (2 * self.T_max))
-        timesteps = timesteps[:-1]
+        text_embeddings = torch.cat([text_embeddings, negative_text_embeddings], dim=0)
+        text_embeddings_coords = torch.cat([text_embeddings_coords, negative_text_embeddings_coords], dim=0)
+        text_embeddings_mask = torch.cat([prompt_mask, negative_prompt_mask], dim=0)
+        latent_coords_input = torch.cat([latent_coords] * 2)
+
+        # Prep for reverse process
+        self.inference_scheduler.set_timesteps(num_inference_steps)
+        # scale the initial noise by the standard deviation required by the scheduler
+        latent_patches = latent_patches * self.inference_scheduler.init_noise_sigma
+
         # backward diffusion process
-        for i, t in enumerate(tqdm(timesteps, disable=not progress_bar)):
-            # Expand t to the batch size
-            t = t * torch.ones(inputs.shape[0], device=device)
-            # Duplicate the inputs for CFG
-            doubled_inputs = torch.cat([inputs, inputs], dim=0)
+        for t in tqdm(self.inference_scheduler.timesteps, disable=not progress_bar):
+            latent_patches_input = torch.cat([latent_patches] * 2)
+            latent_patches_input = self.inference_scheduler.scale_model_input(latent_patches_input, t)
             # Get the model prediction
-            model_out = self.model(doubled_inputs,
-                                   input_coords,
-                                   t,
-                                   conditioning=conditioning,
-                                   conditioning_coords=conditioning_coords,
-                                   input_mask=input_mask,
-                                   conditioning_mask=conditioning_mask)
+            model_out = self.model(latent_patches_input,
+                                   latent_coords_input,
+                                   t.unsqueeze(0),
+                                   conditioning=text_embeddings,
+                                   conditioning_coords=text_embeddings_coords,
+                                   input_mask=None,
+                                   conditioning_mask=text_embeddings_mask)
             # Do CFG
             pred_uncond, pred_cond = model_out.chunk(2, dim=0)
             pred = pred_uncond + guidance_scale * (pred_cond - pred_uncond)
             # Update the inputs
-            inputs = self.update_inputs(inputs, pred, t, time_deltas[i])
-        return inputs
+            latent_patches = self.inference_scheduler.step(pred, t, latent_patches, generator=rng_generator).prev_sample
+        # Unpatchify the latents
+        latents = [self.unpatchify(latent_patches[i], latent_coords[i]) for i in range(latent_patches.shape[0])]
+        latents = torch.stack(latents)
+        # Scale the latents back to the original scale
+        latents = latents * self.latent_std + self.latent_mean
+        # Decode the latents
+        image = self.autoencoder.decode(latents).sample
+        image = (image / 2 + 0.5).clamp(0, 1)
+        return image.detach()  # (batch*num_images_per_prompt, channel, h, w)

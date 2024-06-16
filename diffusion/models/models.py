@@ -18,6 +18,7 @@ from diffusion.models.layers import ClippedAttnProcessor2_0, ClippedXFormersAttn
 from diffusion.models.pixel_diffusion import PixelDiffusion
 from diffusion.models.stable_diffusion import StableDiffusion
 from diffusion.models.text_encoder import MultiTextEncoder, MultiTokenizer
+from diffusion.models.transformer import ComposerTextToImageDiT, DiffusionTransformer
 from diffusion.schedulers.schedulers import ContinuousTimeScheduler
 from diffusion.schedulers.utils import shift_noise_schedule
 
@@ -493,6 +494,114 @@ def stable_diffusion_xl(
         log.info('Using %s with clip_val %.1f' % (attn_processor.__class__, clip_qkv))
         model.unet.set_attn_processor(attn_processor)
 
+    return model
+
+
+def text_to_image_transformer(
+        tokenizer_names: Union[str, Tuple[str, ...]] = ('stabilityai/stable-diffusion-xl-base-1.0/tokenizer',
+                                                        'stabilityai/stable-diffusion-xl-base-1.0/tokenizer_2'),
+        text_encoder_names: Union[str, Tuple[str, ...]] = ('stabilityai/stable-diffusion-xl-base-1.0/text_encoder',
+                                                           'stabilityai/stable-diffusion-xl-base-1.0/text_encoder_2'),
+        unet_model_name: str = 'stabilityai/stable-diffusion-xl-base-1.0',
+        vae_model_name: str = 'madebyollin/sdxl-vae-fp16-fix',
+        autoencoder_path: Optional[str] = None,
+        autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
+        prediction_type: str = 'epsilon',
+        latent_mean: Union[float, Tuple, str] = 0.0,
+        latent_std: Union[float, Tuple, str] = 7.67754318618,
+        beta_schedule: str = 'scaled_linear',
+        zero_terminal_snr: bool = False,
+        use_karras_sigmas: bool = False):
+    latent_mean, latent_std = _parse_latent_statistics(latent_mean), _parse_latent_statistics(latent_std)
+
+    if (isinstance(tokenizer_names, tuple) or
+            isinstance(text_encoder_names, tuple)) and len(tokenizer_names) != len(text_encoder_names):
+        raise ValueError('Number of tokenizer_names and text_encoder_names must be equal')
+
+    # Make the tokenizer and text encoder
+    tokenizer = MultiTokenizer(tokenizer_names_or_paths=tokenizer_names)
+    text_encoder = MultiTextEncoder(model_names=text_encoder_names, encode_latents_in_fp16=True, pretrained_sdxl=False)
+
+    precision = torch.float16
+    # Make the autoencoder
+    if autoencoder_path is None:
+        if latent_mean == 'latent_statistics' or latent_std == 'latent_statistics':
+            raise ValueError('Cannot use tracked latent_statistics when using the pretrained vae.')
+        downsample_factor = 8
+        # Use the pretrained vae
+        try:
+            vae = AutoencoderKL.from_pretrained(vae_model_name, subfolder='vae', torch_dtype=precision)
+        except:  # for handling SDXL vae fp16 fixed checkpoint
+            vae = AutoencoderKL.from_pretrained(vae_model_name, torch_dtype=precision)
+    else:
+        # Use a custom autoencoder
+        vae, latent_statistics = load_autoencoder(autoencoder_path, autoencoder_local_path, torch_dtype=precision)
+        if latent_statistics is None and (latent_mean == 'latent_statistics' or latent_std == 'latent_statistics'):
+            raise ValueError(
+                'Must specify latent scale when using a custom autoencoder without tracking latent statistics.')
+        if isinstance(latent_mean, str) and latent_mean == 'latent_statistics':
+            assert isinstance(latent_statistics, dict)
+            latent_mean = tuple(latent_statistics['latent_channel_means'])
+        if isinstance(latent_std, str) and latent_std == 'latent_statistics':
+            assert isinstance(latent_statistics, dict)
+            latent_std = tuple(latent_statistics['latent_channel_stds'])
+        downsample_factor = 2**(len(vae.config['channel_multipliers']) - 1)
+
+    # Make the noise schedulers
+    noise_scheduler = DDPMScheduler(num_train_timesteps=1000,
+                                    beta_start=0.0000085,
+                                    beta_end=0.012,
+                                    beta_schedule=beta_schedule,
+                                    trained_betas=None,
+                                    variance_type='fixed_small',
+                                    clip_sample=False,
+                                    prediction_type=prediction_type,
+                                    sample_max_value=1.0,
+                                    timestep_spacing='leading',
+                                    steps_offset=1,
+                                    rescale_betas_zero_snr=zero_terminal_snr)
+    inference_noise_scheduler = EulerDiscreteScheduler(num_train_timesteps=1000,
+                                                       beta_start=0.0000085,
+                                                       beta_end=0.012,
+                                                       beta_schedule=beta_schedule,
+                                                       trained_betas=None,
+                                                       prediction_type=prediction_type,
+                                                       interpolation_type='linear',
+                                                       use_karras_sigmas=use_karras_sigmas,
+                                                       timestep_spacing='leading',
+                                                       steps_offset=1,
+                                                       rescale_betas_zero_snr=zero_terminal_snr)
+
+    # Make the transformer model
+    transformer = DiffusionTransformer(num_features=256,
+                                       num_heads=4,
+                                       num_layers=4,
+                                       input_features=16,
+                                       input_max_sequence_length=1024,
+                                       input_dimension=2,
+                                       conditioning_features=768,
+                                       conditioning_max_sequence_length=77,
+                                       conditioning_dimension=1,
+                                       expansion_factor=4)
+    # Make the composer model
+    model = ComposerTextToImageDiT(model=transformer,
+                                   autoencoder=vae,
+                                   text_encoder=text_encoder,
+                                   tokenizer=tokenizer,
+                                   noise_scheduler=noise_scheduler,
+                                   inference_noise_scheduler=inference_noise_scheduler,
+                                   prediction_type=prediction_type,
+                                   latent_mean=latent_mean,
+                                   latent_std=latent_std,
+                                   patch_size=2,
+                                   downsample_factor=8,
+                                   latent_channels=4,
+                                   image_key='image',
+                                   caption_key='captions',
+                                   caption_mask_key='attention_mask')
+
+    if torch.cuda.is_available():
+        model = DeviceGPU().module_to_device(model)
     return model
 
 
