@@ -20,6 +20,7 @@ from omegaconf import DictConfig, OmegaConf
 from torch.optim import Optimizer
 
 from diffusion.models.autoencoder import ComposerAutoEncoder, ComposerDiffusersAutoEncoder
+from diffusion.models.transformer import ComposerTextToImageDiT
 
 
 def make_autoencoder_optimizer(config: DictConfig, model: ComposerModel) -> Optimizer:
@@ -50,6 +51,32 @@ def make_autoencoder_optimizer(config: DictConfig, model: ComposerModel) -> Opti
     return optimizer
 
 
+def make_transformer_optimizer(config: DictConfig, model: ComposerModel) -> Optimizer:
+    """Configures the optimizer for use with a transformer model."""
+    print('Configuring optimizer for transformer')
+    assert isinstance(model, ComposerTextToImageDiT)
+
+    # Turn off weight decay for the positional embeddings
+    no_decay = ['bias', 'layer_norm', 'position_embedding']
+    params_with_no_decay = []
+    params_with_decay = []
+    for name, param in model.named_parameters():
+        if any(nd in name for nd in no_decay):
+            print(f'No decay: {name}')
+            params_with_no_decay.append(param)
+        else:
+            params_with_decay.append(param)
+    no_decay_dict = dict(config.optimizer.items())
+    no_decay_dict['params'] = params_with_no_decay
+    no_decay_dict['weight_decay'] = 0.0
+
+    decay_dict = dict(config.optimizer.items())
+    decay_dict['params'] = params_with_decay
+
+    optimizer = hydra.utils.instantiate(config.optimizer, [no_decay_dict, decay_dict])
+    return optimizer
+
+
 def train(config: DictConfig) -> None:
     """Train a model.
 
@@ -62,10 +89,14 @@ def train(config: DictConfig) -> None:
 
     model: ComposerModel = hydra.utils.instantiate(config.model)
 
-    # Check if this is training an autoencoder. If so, the optimizer needs different param groups
     if hasattr(model, 'autoencoder_loss'):
+        # Check if this is training an autoencoder. If so, the optimizer needs different param groups
         optimizer = make_autoencoder_optimizer(config, model)
         tokenizer = None
+    elif isinstance(model, ComposerTextToImageDiT):
+        # Check if this is training a transformer. If so, the optimizer needs different param groups
+        optimizer = make_transformer_optimizer(config, model)
+        tokenizer = model.tokenizer
     else:
         optimizer = hydra.utils.instantiate(config.optimizer, params=model.parameters())
         tokenizer = model.tokenizer
