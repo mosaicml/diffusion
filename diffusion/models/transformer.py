@@ -48,8 +48,8 @@ class SelfAttention(nn.Module):
         # Linear layer to get q, k, and v
         self.qkv = nn.Linear(self.num_features, 3 * self.num_features)
         # QK layernorms
-        self.q_norm = nn.LayerNorm(self.num_features, elementwise_affine=False, eps=1e-6)
-        self.k_norm = nn.LayerNorm(self.num_features, elementwise_affine=False, eps=1e-6)
+        self.q_norm = nn.LayerNorm(self.num_features, elementwise_affine=True, eps=1e-6)
+        self.k_norm = nn.LayerNorm(self.num_features, elementwise_affine=True, eps=1e-6)
         # Linear layer to get the output
         self.output_layer = nn.Linear(self.num_features, self.num_features)
         # Initialize all biases to zero
@@ -90,10 +90,10 @@ class DiTBlock(nn.Module):
         self.num_heads = num_heads
         self.expansion_factor = expansion_factor
         # Layer norm before the self attention
-        self.layer_norm_1 = nn.LayerNorm(self.num_features, elementwise_affine=False, eps=1e-6)
+        self.layer_norm_1 = nn.LayerNorm(self.num_features, elementwise_affine=True, eps=1e-6)
         self.attention = SelfAttention(self.num_features, self.num_heads)
         # Layer norm before the MLP
-        self.layer_norm_2 = nn.LayerNorm(self.num_features, elementwise_affine=False, eps=1e-6)
+        self.layer_norm_2 = nn.LayerNorm(self.num_features, elementwise_affine=True, eps=1e-6)
         # MLP layers. The MLP expands and then contracts the features.
         self.linear_1 = nn.Linear(self.num_features, self.expansion_factor * self.num_features)
         self.nonlinearity = nn.GELU(approximate='tanh')
@@ -174,7 +174,7 @@ class DiffusionTransformer(nn.Module):
             for _ in range(self.num_layers)
         ])
         # Output projection layer
-        self.final_norm = nn.LayerNorm(self.num_features, elementwise_affine=False, eps=1e-6)
+        self.final_norm = nn.LayerNorm(self.num_features, elementwise_affine=True, eps=1e-6)
         self.final_linear = nn.Linear(self.num_features, self.input_features)
         # Init the output layer to zero
         nn.init.zeros_(self.final_linear.weight)
@@ -304,7 +304,7 @@ class ComposerTextToImageDiT(ComposerModel):
         self.noise_scheduler = noise_scheduler
         self.inference_scheduler = inference_noise_scheduler
         self.prediction_type = prediction_type.lower()
-        if self.prediction_type not in ['epsilon', 'v_prediction']:
+        if self.prediction_type not in ['epsilon', 'sample', 'v_prediction']:
             raise ValueError(f'Unrecognized prediction type {self.prediction_type}')
         if latent_mean is None:
             self.latent_mean = 4 * (0.0)
@@ -497,8 +497,8 @@ class ComposerTextToImageDiT(ComposerModel):
     def generate(self,
                  prompt: Optional[list] = None,
                  negative_prompt: Optional[list] = None,
-                 height: Optional[int] = None,
-                 width: Optional[int] = None,
+                 height: int = 256,
+                 width: int = 256,
                  guidance_scale: float = 7.0,
                  rescaled_guidance: Optional[float] = None,
                  num_inference_steps: int = 50,
