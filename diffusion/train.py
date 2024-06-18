@@ -62,7 +62,7 @@ def make_transformer_optimizer(config: DictConfig, model: ComposerModel) -> Opti
     params_with_decay = []
     for name, param in model.named_parameters():
         if any(nd in name for nd in no_decay):
-            print(f'No decay: {name}')
+            #print(f'No decay: {name}')
             params_with_no_decay.append(param)
         else:
             params_with_decay.append(param)

@@ -57,7 +57,6 @@ class SelfAttention(nn.Module):
         nn.init.zeros_(self.output_layer.bias)
         # Init the standard deviation of the weights to 0.02
         nn.init.normal_(self.qkv.weight, std=0.02)
-        nn.init.normal_(self.output_layer.weight, std=0.02)
 
     def forward(self, x, mask=None):
         # Get the shape of the input
@@ -101,9 +100,6 @@ class DiTBlock(nn.Module):
         # Initialize all biases to zero
         nn.init.zeros_(self.linear_1.bias)
         nn.init.zeros_(self.linear_2.bias)
-        # Initialize the linear layer weights to have a standard deviation of 0.02
-        nn.init.normal_(self.linear_1.weight, std=0.02)
-        nn.init.normal_(self.linear_2.weight, std=0.02)
         # AdaLN MLP
         self.adaLN_mlp_linear = nn.Linear(self.num_features, 6 * self.num_features, bias=True)
         # Initialize the modulations to zero. This will ensure the block acts as identity at initialization
@@ -124,6 +120,17 @@ class DiTBlock(nn.Module):
         y = mods[5] * self.linear_2(y)
         x = x + y
         return x
+
+
+def get_multidimensional_position_embeddings(position_embeddings, coords):
+    """Position embeddings are shape (D, T, F). Coords are shape (B, S, D)."""
+    B, S, D = coords.shape
+    F = position_embeddings.shape[2]
+    coords = coords.reshape(B * S, D)
+    sequenced_embeddings = [position_embeddings[d, coords[:, d]] for d in range(D)]
+    sequenced_embeddings = torch.stack(sequenced_embeddings, dim=-1)
+    sequenced_embeddings = sequenced_embeddings.view(B, S, F, D)
+    return sequenced_embeddings  # (B, S, F, D)
 
 
 class DiffusionTransformer(nn.Module):
@@ -197,15 +204,11 @@ class DiffusionTransformer(nn.Module):
         # TODO: Fix embeddings, fix embedding norms
         # Embed the timestep
         t = timestep_embedding(t, self.num_features)
-
         # Embed the input
         y = self.input_embedding(x)  # (B, T1, C)
         # Get the input position embeddings and add them to the input
-        input_grid = torch.arange(self.input_dimension).view(1, 1, self.input_dimension).expand(
-            y.shape[0], y.shape[1], self.input_dimension)
-        y_position_embeddings = self.input_position_embedding[input_grid,
-                                                              input_coords, :]  # (B, T1, input_dimension, C)
-        y_position_embeddings = y_position_embeddings.sum(dim=2)  # (B, T1, C)
+        y_position_embeddings = get_multidimensional_position_embeddings(self.input_position_embedding, input_coords)
+        y_position_embeddings = y_position_embeddings.sum(dim=-1)  # (B, T1, C)
         y = y + y_position_embeddings  # (B, T1, C)
         if input_mask is None:
             mask = torch.ones(x.shape[0], x.shape[1], device=x.device)
@@ -217,11 +220,9 @@ class DiffusionTransformer(nn.Module):
             # Embed the conditioning
             c = self.conditioning_embedding(conditioning)  # (B, T2, C)
             # Get the conditioning position embeddings and add them to the conditioning
-            c_grid = torch.arange(self.conditioning_dimension).view(1, 1, self.conditioning_dimension).expand(
-                c.shape[0], c.shape[1], self.conditioning_dimension)
-            c_position_embeddings = self.conditioning_position_embedding[
-                c_grid, conditioning_coords, :]  # (B, T2, conditioning_dimension, C)
-            c_position_embeddings = c_position_embeddings.sum(dim=2)  # (B, T2, C)
+            c_position_embeddings = get_multidimensional_position_embeddings(self.conditioning_position_embedding,
+                                                                             conditioning_coords)
+            c_position_embeddings = c_position_embeddings.sum(dim=-1)  # (B, T2, C)
             c = c + c_position_embeddings  # (B, T2, C)
             # Concatenate the input and conditioning sequences
             y = torch.cat([y, c], dim=1)  # (B, T1 + T2, C)
@@ -248,6 +249,40 @@ class DiffusionTransformer(nn.Module):
         y = modulate(self.final_norm(y), mods[0], mods[1])
         y = self.final_linear(y)
         return y
+
+
+def patchify(latents, patch_size):
+    """Converts a tensor of shape [B, C, H, W] to patches of shape [B, num_patches, C * patch_size * patch_size]."""
+    # Assume img is a tensor of shape [B, C, H, W]
+    B, C, H, W = latents.shape
+    assert H % patch_size == 0 and W % patch_size == 0, 'Image dimensions must be divisible by patch_size'
+    # Reshape and permute to get non-overlapping patches
+    num_H_patches = H // patch_size
+    num_W_patches = W // patch_size
+    patches = latents.reshape(B, C, num_H_patches, patch_size, num_W_patches, patch_size)
+    patches = patches.permute(0, 2, 4, 1, 3, 5).reshape(B, -1, C * patch_size * patch_size)
+    # Generate coordinates for each patch
+    coords = torch.tensor([(i, j) for i in range(num_H_patches) for j in range(num_W_patches)])
+    coords = coords.unsqueeze(0).expand(B, -1, -1).reshape(B, -1, 2)
+    return patches, coords
+
+
+def unpatchify(patches, coords, patch_size):
+    """Converts a tensor of shape [num_patches, C * patch_size * patch_size] to an image of shape [C, H, W]."""
+    # Assume patches is a tensor of shape [num_patches, C * patch_size * patch_size]
+    C = patches.shape[1] // (patch_size * patch_size)
+    # Calculate the height and width of the original image from the coordinates
+    H = coords[:, 0].max() * patch_size + patch_size
+    W = coords[:, 1].max() * patch_size + patch_size
+    # Initialize an empty tensor for the reconstructed image
+    img = torch.zeros((C, H, W), device=patches.device, dtype=patches.dtype)
+    # Iterate over the patches and their coordinates
+    for patch, (y, x) in zip(patches, patch_size * coords):
+        # Reshape the patch to [C, patch_size, patch_size]
+        patch = patch.view(C, patch_size, patch_size)
+        # Place the patch in the corresponding location in the image
+        img[:, y:y + patch_size, x:x + patch_size] = patch
+    return img
 
 
 class ComposerTextToImageDiT(ComposerModel):
@@ -364,36 +399,6 @@ class ComposerTextToImageDiT(ComposerModel):
         attention_flops = 4 * self.model.num_layers * seq_len**2 * self.model.num_features * batch_size
         return 3 * param_flops + 3 * attention_flops
 
-    def patchify(self, latents):
-        # Assume img is a tensor of shape [B, C, H, W]
-        B, C, H, W = latents.shape
-        assert H % self.patch_size == 0 and W % self.patch_size == 0, 'Image dimensions must be divisible by patch_size'
-        # Reshape and permute to get non-overlapping patches
-        num_H_patches = H // self.patch_size
-        num_W_patches = W // self.patch_size
-        patches = latents.reshape(B, C, num_H_patches, self.patch_size, num_W_patches, self.patch_size)
-        patches = patches.permute(0, 2, 4, 1, 3, 5).reshape(B, -1, C * self.patch_size * self.patch_size)
-        # Generate coordinates for each patch
-        coords = torch.tensor([(i, j) for i in range(num_H_patches) for j in range(num_W_patches)])
-        coords = coords.unsqueeze(0).expand(B, -1, -1).reshape(B, -1, 2)
-        return patches, coords
-
-    def unpatchify(self, patches, coords):
-        # Assume patches is a tensor of shape [num_patches, C * patch_size * patch_size]
-        C = patches.shape[1] // (self.patch_size * self.patch_size)
-        # Calculate the height and width of the original image from the coordinates
-        H = coords[:, 0].max() * self.patch_size + self.patch_size
-        W = coords[:, 1].max() * self.patch_size + self.patch_size
-        # Initialize an empty tensor for the reconstructed image
-        img = torch.zeros((C, H, W), device=patches.device, dtype=patches.dtype)
-        # Iterate over the patches and their coordinates
-        for patch, (y, x) in zip(patches, self.patch_size * coords):
-            # Reshape the patch to [C, patch_size, patch_size]
-            patch = patch.view(C, self.patch_size, self.patch_size)
-            # Place the patch in the corresponding location in the image
-            img[:, y:y + self.patch_size, x:x + self.patch_size] = patch
-        return img
-
     def diffusion_forward_process(self, inputs: torch.Tensor):
         """Diffusion forward process."""
         # Sample a timestep for every element in the batch
@@ -433,7 +438,7 @@ class ComposerTextToImageDiT(ComposerModel):
             text_embeddings *= batch['drop_caption_mask'].view(-1, 1, 1)
         # Scale and patchify the latents
         latents = (latents - self.latent_mean) / self.latent_std
-        latent_patches, latent_coords = self.patchify(latents)
+        latent_patches, latent_coords = patchify(latents, self.patch_size)
         # Diffusion forward process
         noised_inputs, targets, timesteps = self.diffusion_forward_process(latent_patches)
         # Forward through the model
@@ -538,13 +543,13 @@ class ComposerTextToImageDiT(ComposerModel):
                               latent_height,
                               latent_width,
                               device=device)
-        latent_patches, latent_coords = self.patchify(latents)
+        latent_patches, latent_coords = patchify(latents, self.patch_size)
 
         # Set up for CFG
         text_embeddings = torch.cat([text_embeddings, negative_text_embeddings], dim=0)
         text_embeddings_coords = torch.cat([text_embeddings_coords, negative_text_embeddings_coords], dim=0)
         text_embeddings_mask = torch.cat([prompt_mask, negative_prompt_mask], dim=0)
-        latent_coords_input = torch.cat([latent_coords] * 2)
+        latent_coords_input = torch.cat([latent_coords, latent_coords], dim=0)
 
         # Prep for reverse process
         self.inference_scheduler.set_timesteps(num_inference_steps)
@@ -553,7 +558,7 @@ class ComposerTextToImageDiT(ComposerModel):
 
         # backward diffusion process
         for t in tqdm(self.inference_scheduler.timesteps, disable=not progress_bar):
-            latent_patches_input = torch.cat([latent_patches] * 2)
+            latent_patches_input = torch.cat([latent_patches, latent_patches], dim=0)
             latent_patches_input = self.inference_scheduler.scale_model_input(latent_patches_input, t)
             # Get the model prediction
             model_out = self.model(latent_patches_input,
@@ -564,12 +569,14 @@ class ComposerTextToImageDiT(ComposerModel):
                                    input_mask=None,
                                    conditioning_mask=text_embeddings_mask)
             # Do CFG
-            pred_uncond, pred_cond = model_out.chunk(2, dim=0)
+            pred_cond, pred_uncond = model_out.chunk(2, dim=0)
             pred = pred_uncond + guidance_scale * (pred_cond - pred_uncond)
             # Update the inputs
             latent_patches = self.inference_scheduler.step(pred, t, latent_patches, generator=rng_generator).prev_sample
         # Unpatchify the latents
-        latents = [self.unpatchify(latent_patches[i], latent_coords[i]) for i in range(latent_patches.shape[0])]
+        latents = [
+            unpatchify(latent_patches[i], latent_coords[i], self.patch_size) for i in range(latent_patches.shape[0])
+        ]
         latents = torch.stack(latents)
         # Scale the latents back to the original scale
         latents = latents * self.latent_std + self.latent_mean
