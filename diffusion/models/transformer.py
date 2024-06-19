@@ -38,90 +38,6 @@ def timestep_embedding(timesteps, dim, max_period=10000):
     return embedding
 
 
-class SelfAttention(nn.Module):
-    """Standard self attention layer that supports masking."""
-
-    def __init__(self, num_features, num_heads):
-        super().__init__()
-        self.num_features = num_features
-        self.num_heads = num_heads
-        # Linear layer to get q, k, and v
-        self.qkv = nn.Linear(self.num_features, 3 * self.num_features)
-        # QK layernorms
-        self.q_norm = nn.LayerNorm(self.num_features, elementwise_affine=True, eps=1e-6)
-        self.k_norm = nn.LayerNorm(self.num_features, elementwise_affine=True, eps=1e-6)
-        # Linear layer to get the output
-        self.output_layer = nn.Linear(self.num_features, self.num_features)
-        # Initialize all biases to zero
-        nn.init.zeros_(self.qkv.bias)
-        nn.init.zeros_(self.output_layer.bias)
-        # Init the standard deviation of the weights to 0.02
-        nn.init.normal_(self.qkv.weight, std=0.02)
-
-    def forward(self, x, mask=None):
-        # Get the shape of the input
-        B, T, C = x.size()
-        # Calculate the query, key, and values all in one go
-        q, k, v = self.qkv(x).chunk(3, dim=-1)
-        q = self.q_norm(q)
-        k = self.k_norm(k)
-        # After this, q, k, and v will have shape (B, T, C)
-        # Reshape the query, key, and values for multi-head attention
-        # Also want to swap the sequence length and the head dimension for later matmuls
-        q = q.view(B, T, self.num_heads, C // self.num_heads).transpose(1, 2)
-        k = k.view(B, T, self.num_heads, C // self.num_heads).transpose(1, 2)
-        v = v.view(B, T, self.num_heads, C // self.num_heads).transpose(1, 2)
-        # Native torch attention
-        attention_out = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)  # (B, H, T, C/H)
-        # Swap the sequence length and the head dimension back and get rid of num_heads.
-        attention_out = attention_out.transpose(1, 2).contiguous().view(B, T, C)  # (B, T, C)
-        # Final linear layer to get the output
-        out = self.output_layer(attention_out)
-        return out
-
-
-class DiTBlock(nn.Module):
-    """Transformer block that supports masking."""
-
-    def __init__(self, num_features, num_heads, expansion_factor=4):
-        super().__init__()
-        self.num_features = num_features
-        self.num_heads = num_heads
-        self.expansion_factor = expansion_factor
-        # Layer norm before the self attention
-        self.layer_norm_1 = nn.LayerNorm(self.num_features, elementwise_affine=True, eps=1e-6)
-        self.attention = SelfAttention(self.num_features, self.num_heads)
-        # Layer norm before the MLP
-        self.layer_norm_2 = nn.LayerNorm(self.num_features, elementwise_affine=True, eps=1e-6)
-        # MLP layers. The MLP expands and then contracts the features.
-        self.linear_1 = nn.Linear(self.num_features, self.expansion_factor * self.num_features)
-        self.nonlinearity = nn.GELU(approximate='tanh')
-        self.linear_2 = nn.Linear(self.expansion_factor * self.num_features, self.num_features)
-        # Initialize all biases to zero
-        nn.init.zeros_(self.linear_1.bias)
-        nn.init.zeros_(self.linear_2.bias)
-        # AdaLN MLP
-        self.adaLN_mlp_linear = nn.Linear(self.num_features, 6 * self.num_features, bias=True)
-        # Initialize the modulations to zero. This will ensure the block acts as identity at initialization
-        nn.init.zeros_(self.adaLN_mlp_linear.weight)
-        nn.init.zeros_(self.adaLN_mlp_linear.bias)
-        self.adaLN_mlp = nn.Sequential(nn.SiLU(), self.adaLN_mlp_linear)
-
-    def forward(self, x, c, mask=None):
-        # Calculate the modulations. Each is shape (B, num_features).
-        mods = self.adaLN_mlp(c).unsqueeze(1).chunk(6, dim=2)
-        # Forward, with modulations
-        y = modulate(self.layer_norm_1(x), mods[0], mods[1])
-        y = mods[2] * self.attention(y, mask=mask)
-        x = x + y
-        y = modulate(self.layer_norm_2(x), mods[3], mods[4])
-        y = self.linear_1(y)
-        y = self.nonlinearity(y)
-        y = mods[5] * self.linear_2(y)
-        x = x + y
-        return x
-
-
 def get_multidimensional_position_embeddings(position_embeddings, coords):
     """Position embeddings are shape (D, T, F). Coords are shape (B, S, D)."""
     B, S, D = coords.shape
@@ -131,6 +47,180 @@ def get_multidimensional_position_embeddings(position_embeddings, coords):
     sequenced_embeddings = torch.stack(sequenced_embeddings, dim=-1)
     sequenced_embeddings = sequenced_embeddings.view(B, S, F, D)
     return sequenced_embeddings  # (B, S, F, D)
+
+
+def patchify(latents, patch_size):
+    """Converts a tensor of shape [B, C, H, W] to patches of shape [B, num_patches, C * patch_size * patch_size]."""
+    # Assume img is a tensor of shape [B, C, H, W]
+    B, C, H, W = latents.shape
+    assert H % patch_size == 0 and W % patch_size == 0, 'Image dimensions must be divisible by patch_size'
+    # Reshape and permute to get non-overlapping patches
+    num_H_patches = H // patch_size
+    num_W_patches = W // patch_size
+    patches = latents.reshape(B, C, num_H_patches, patch_size, num_W_patches, patch_size)
+    patches = patches.permute(0, 2, 4, 1, 3, 5).reshape(B, -1, C * patch_size * patch_size)
+    # Generate coordinates for each patch
+    coords = torch.tensor([(i, j) for i in range(num_H_patches) for j in range(num_W_patches)])
+    coords = coords.unsqueeze(0).expand(B, -1, -1).reshape(B, -1, 2)
+    return patches, coords
+
+
+def unpatchify(patches, coords, patch_size):
+    """Converts a tensor of shape [num_patches, C * patch_size * patch_size] to an image of shape [C, H, W]."""
+    # Assume patches is a tensor of shape [num_patches, C * patch_size * patch_size]
+    C = patches.shape[1] // (patch_size * patch_size)
+    # Calculate the height and width of the original image from the coordinates
+    H = coords[:, 0].max() * patch_size + patch_size
+    W = coords[:, 1].max() * patch_size + patch_size
+    # Initialize an empty tensor for the reconstructed image
+    img = torch.zeros((C, H, W), device=patches.device, dtype=patches.dtype)
+    # Iterate over the patches and their coordinates
+    for patch, (y, x) in zip(patches, patch_size * coords):
+        # Reshape the patch to [C, patch_size, patch_size]
+        patch = patch.view(C, patch_size, patch_size)
+        # Place the patch in the corresponding location in the image
+        img[:, y:y + patch_size, x:x + patch_size] = patch
+    return img
+
+
+class PreAttentionBlock(nn.Module):
+    """Block to compute QKV before attention."""
+
+    def __init__(self, num_features):
+        super().__init__()
+        self.num_features = num_features
+
+        # AdaLN MLP for pre-attention. Initialized to zero so modulation acts as identity at initialization.
+        self.adaLN_mlp_linear = nn.Linear(self.num_features, 2 * self.num_features, bias=True)
+        nn.init.zeros_(self.adaLN_mlp_linear.weight)
+        nn.init.zeros_(self.adaLN_mlp_linear.bias)
+        self.adaLN_mlp = nn.Sequential(nn.SiLU(), self.adaLN_mlp_linear)
+        # Input layernorm
+        self.input_norm = nn.LayerNorm(self.num_features, elementwise_affine=True, eps=1e-6)
+        # Linear layer to get q, k, and v
+        self.qkv = nn.Linear(self.num_features, 3 * self.num_features)
+        # QK layernorms. Original MMDiT used RMSNorm here.
+        self.q_norm = nn.LayerNorm(self.num_features, elementwise_affine=True, eps=1e-6)
+        self.k_norm = nn.LayerNorm(self.num_features, elementwise_affine=True, eps=1e-6)
+        # Initialize all biases to zero
+        nn.init.zeros_(self.qkv.bias)
+        # Init the standard deviation of the weights to 0.02 as is tradition
+        nn.init.normal_(self.qkv.weight, std=0.02)
+
+    def forward(self, x, t):
+        # Calculate the modulations
+        mods = self.adaLN_mlp(t).unsqueeze(1).chunk(2, dim=2)
+        # Forward, with modulations
+        x = modulate(self.input_norm(x), mods[0], mods[1])
+        # Calculate the query, key, and values all in one go
+        q, k, v = self.qkv(x).chunk(3, dim=-1)
+        q = self.q_norm(q)
+        k = self.k_norm(k)
+        return q, k, v
+
+
+class SelfAttention(nn.Module):
+    """Standard self attention layer that supports masking."""
+
+    def __init__(self, num_features, num_heads):
+        super().__init__()
+        self.num_features = num_features
+        self.num_heads = num_heads
+
+    def forward(self, q, k, v, mask=None):
+        # Get the shape of the inputs
+        B, T, C = v.size()
+        # Reshape the query, key, and values for multi-head attention
+        q = q.view(B, T, self.num_heads, C // self.num_heads).transpose(1, 2)
+        k = k.view(B, T, self.num_heads, C // self.num_heads).transpose(1, 2)
+        v = v.view(B, T, self.num_heads, C // self.num_heads).transpose(1, 2)
+        # Native torch attention
+        attention_out = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)  # (B, H, T, C/H)
+        # Swap the sequence length and the head dimension back and get rid of num_heads.
+        attention_out = attention_out.transpose(1, 2).contiguous().view(B, T, C)  # (B, T, C)
+        return attention_out
+
+
+class PostAttentionBlock(nn.Module):
+    """Block to postprocess V after attention."""
+
+    def __init__(self, num_features, expansion_factor=4):
+        super().__init__()
+        self.num_features = num_features
+        self.expansion_factor = expansion_factor
+        # AdaLN MLP for post-attention. Initialized to zero so modulation acts as identity at initialization.
+        self.adaLN_mlp_linear = nn.Linear(self.num_features, 4 * self.num_features, bias=True)
+        nn.init.zeros_(self.adaLN_mlp_linear.weight)
+        nn.init.zeros_(self.adaLN_mlp_linear.bias)
+        self.adaLN_mlp = nn.Sequential(nn.SiLU(), self.adaLN_mlp_linear)
+        # Linear layer to process v
+        self.linear_v = nn.Linear(self.num_features, self.num_features)
+        # Layernorm for the output
+        self.output_norm = nn.LayerNorm(self.num_features, elementwise_affine=True, eps=1e-6)
+        # Transformer style MLP layers
+        self.linear_1 = nn.Linear(self.num_features, self.expansion_factor * self.num_features)
+        self.nonlinearity = nn.GELU(approximate='tanh')
+        self.linear_2 = nn.Linear(self.expansion_factor * self.num_features, self.num_features)
+        # Initialize all biases to zero
+        nn.init.zeros_(self.linear_1.bias)
+        nn.init.zeros_(self.linear_2.bias)
+        # Output MLP
+        self.output_mlp = nn.Sequential(self.linear_1, self.nonlinearity, self.linear_2)
+
+    def forward(self, v, x, t):
+        """Forward takes v from self attention and the original sequence x with scalar conditioning t."""
+        # Calculate the modulations
+        mods = self.adaLN_mlp(t).unsqueeze(1).chunk(4, dim=2)
+        # Postprocess v with linear + gating modulation
+        y = mods[0] * self.linear_v(v)
+        y = x + y
+        # Adaptive layernorm
+        y = modulate(self.output_norm(y), mods[1], mods[2])
+        # Output MLP
+        y = self.output_mlp(y)
+        # Gating modulation for the output
+        y = mods[3] * y
+        y = x + y
+        return y
+
+
+class MMDiTBlock(nn.Module):
+    """Transformer block that supports masking, multimodal attention, and adaptive norms."""
+
+    def __init__(self, num_features, num_heads, expansion_factor=4, is_last=False):
+        super().__init__()
+        self.num_features = num_features
+        self.num_heads = num_heads
+        self.expansion_factor = expansion_factor
+        self.is_last = is_last
+        # Pre-attention blocks for two modalities
+        self.pre_attention_block_1 = PreAttentionBlock(self.num_features)
+        self.pre_attention_block_2 = PreAttentionBlock(self.num_features)
+        # Self-attention
+        self.attention = SelfAttention(self.num_features, self.num_heads)
+        # Post-attention blocks for two modalities
+        self.post_attention_block_1 = PostAttentionBlock(self.num_features, self.expansion_factor)
+        if not self.is_last:
+            self.post_attention_block_2 = PostAttentionBlock(self.num_features, self.expansion_factor)
+
+    def forward(self, x1, x2, t, mask=None):
+        # Pre-attention for the two modalities
+        q1, k1, v1 = self.pre_attention_block_1(x1, t)
+        q2, k2, v2 = self.pre_attention_block_2(x2, t)
+        # Concat q, k, v along the sequence dimension
+        q = torch.cat([q1, q2], dim=1)
+        k = torch.cat([k1, k2], dim=1)
+        v = torch.cat([v1, v2], dim=1)
+        # Self-attention
+        v = self.attention(q, k, v, mask=mask)
+        # Split the attention output back into the two modalities
+        seq_len_1, seq_len_2 = x1.size(1), x2.size(1)
+        y1, y2 = v.split([seq_len_1, seq_len_2], dim=1)
+        # Post-attention for the two modalities
+        y1 = self.post_attention_block_1(y1, x1, t)
+        if not self.is_last:
+            y2 = self.post_attention_block_2(y2, x2, t)
+        return y1, y2
 
 
 class DiffusionTransformer(nn.Module):
@@ -177,9 +267,12 @@ class DiffusionTransformer(nn.Module):
         self.conditioning_position_embedding = torch.nn.Parameter(conditioning_position_embedding, requires_grad=True)
         # Transformer blocks
         self.transformer_blocks = nn.ModuleList([
-            DiTBlock(self.num_features, self.num_heads, expansion_factor=self.expansion_factor)
-            for _ in range(self.num_layers)
+            MMDiTBlock(self.num_features, self.num_heads, expansion_factor=self.expansion_factor)
+            for _ in range(self.num_layers - 1)
         ])
+        # Turn off post attn layers for conditioning sequence in final block
+        self.transformer_blocks.append(
+            MMDiTBlock(self.num_features, self.num_heads, expansion_factor=self.expansion_factor, is_last=True))
         # Output projection layer
         self.final_norm = nn.LayerNorm(self.num_features, elementwise_affine=True, eps=1e-6)
         self.final_linear = nn.Linear(self.num_features, self.input_features)
@@ -194,12 +287,12 @@ class DiffusionTransformer(nn.Module):
         self.adaLN_mlp = nn.Sequential(nn.SiLU(), self.adaLN_mlp_linear)
 
     def fsdp_wrap_fn(self, module):
-        if isinstance(module, DiTBlock):
+        if isinstance(module, MMDiTBlock):
             return True
         return False
 
     def activation_checkpointing_fn(self, module):
-        if isinstance(module, DiTBlock):
+        if isinstance(module, MMDiTBlock):
             return True
         return False
 
@@ -207,8 +300,8 @@ class DiffusionTransformer(nn.Module):
                 x,
                 input_coords,
                 t,
-                conditioning=None,
-                conditioning_coords=None,
+                conditioning,
+                conditioning_coords,
                 input_mask=None,
                 conditioning_mask=None,
                 constant_conditioning=None):
@@ -228,21 +321,17 @@ class DiffusionTransformer(nn.Module):
         else:
             mask = input_mask
 
-        if conditioning is not None:
-            assert conditioning_coords is not None
-            # Embed the conditioning
-            c = self.conditioning_embedding(conditioning)  # (B, T2, C)
-            # Get the conditioning position embeddings and add them to the conditioning
-            c_position_embeddings = get_multidimensional_position_embeddings(self.conditioning_position_embedding,
-                                                                             conditioning_coords)
-            c_position_embeddings = c_position_embeddings.sum(dim=-1)  # (B, T2, C)
-            c = c + c_position_embeddings  # (B, T2, C)
-            # Concatenate the input and conditioning sequences
-            y = torch.cat([y, c], dim=1)  # (B, T1 + T2, C)
-            # Concatenate the masks
-            if conditioning_mask is None:
-                conditioning_mask = torch.ones(conditioning.shape[0], conditioning.shape[1], device=conditioning.device)
-            mask = torch.cat([mask, conditioning_mask], dim=1)  # (B, T1 + T2)
+        # Embed the conditioning
+        c = self.conditioning_embedding(conditioning)  # (B, T2, C)
+        # Get the conditioning position embeddings and add them to the conditioning
+        c_position_embeddings = get_multidimensional_position_embeddings(self.conditioning_position_embedding,
+                                                                         conditioning_coords)
+        c_position_embeddings = c_position_embeddings.sum(dim=-1)  # (B, T2, C)
+        c = c + c_position_embeddings  # (B, T2, C)
+        # Concatenate the masks
+        if conditioning_mask is None:
+            conditioning_mask = torch.ones(conditioning.shape[0], conditioning.shape[1], device=conditioning.device)
+        mask = torch.cat([mask, conditioning_mask], dim=1)  # (B, T1 + T2)
 
         # Expand the mask to the right shape
         mask = mask.bool()
@@ -254,9 +343,7 @@ class DiffusionTransformer(nn.Module):
 
         # Pass through the transformer blocks
         for block in self.transformer_blocks:
-            y = block(y, t, mask=mask)
-        # Throw away the conditioning tokens
-        y = y[:, 0:x.shape[1], :]
+            y, c = block(y, c, t, mask=mask)
         # Pass through the output layers to get the right number of elements
         mods = self.adaLN_mlp(t).unsqueeze(1).chunk(2, dim=2)
         y = modulate(self.final_norm(y), mods[0], mods[1])
@@ -264,41 +351,7 @@ class DiffusionTransformer(nn.Module):
         return y
 
 
-def patchify(latents, patch_size):
-    """Converts a tensor of shape [B, C, H, W] to patches of shape [B, num_patches, C * patch_size * patch_size]."""
-    # Assume img is a tensor of shape [B, C, H, W]
-    B, C, H, W = latents.shape
-    assert H % patch_size == 0 and W % patch_size == 0, 'Image dimensions must be divisible by patch_size'
-    # Reshape and permute to get non-overlapping patches
-    num_H_patches = H // patch_size
-    num_W_patches = W // patch_size
-    patches = latents.reshape(B, C, num_H_patches, patch_size, num_W_patches, patch_size)
-    patches = patches.permute(0, 2, 4, 1, 3, 5).reshape(B, -1, C * patch_size * patch_size)
-    # Generate coordinates for each patch
-    coords = torch.tensor([(i, j) for i in range(num_H_patches) for j in range(num_W_patches)])
-    coords = coords.unsqueeze(0).expand(B, -1, -1).reshape(B, -1, 2)
-    return patches, coords
-
-
-def unpatchify(patches, coords, patch_size):
-    """Converts a tensor of shape [num_patches, C * patch_size * patch_size] to an image of shape [C, H, W]."""
-    # Assume patches is a tensor of shape [num_patches, C * patch_size * patch_size]
-    C = patches.shape[1] // (patch_size * patch_size)
-    # Calculate the height and width of the original image from the coordinates
-    H = coords[:, 0].max() * patch_size + patch_size
-    W = coords[:, 1].max() * patch_size + patch_size
-    # Initialize an empty tensor for the reconstructed image
-    img = torch.zeros((C, H, W), device=patches.device, dtype=patches.dtype)
-    # Iterate over the patches and their coordinates
-    for patch, (y, x) in zip(patches, patch_size * coords):
-        # Reshape the patch to [C, patch_size, patch_size]
-        patch = patch.view(C, patch_size, patch_size)
-        # Place the patch in the corresponding location in the image
-        img[:, y:y + patch_size, x:x + patch_size] = patch
-    return img
-
-
-class ComposerTextToImageDiT(ComposerModel):
+class ComposerTextToImageMMDiT(ComposerModel):
     """ComposerModel for text to image with a diffusion transformer.
 
     Args:
@@ -381,14 +434,20 @@ class ComposerTextToImageDiT(ComposerModel):
         self.autoencoder._fsdp_wrap = False
         self.text_encoder._fsdp_wrap = False
 
-        # Params for MFU computation
+        # Param counts relevant for MFU computation
         # First calc the AdaLN params separately
         self.adaLN_params = sum(p.numel() for n, p in self.model.named_parameters() if 'adaLN_mlp_linear' in n)
-        self.n_params = sum(p.numel() for p in self.model.parameters())
-        self.n_params -= self.adaLN_params
-        # Subtract off the embedding params
-        self.n_params -= self.model.input_position_embedding.numel()
-        self.n_params -= self.model.conditioning_position_embedding.numel()
+        # For MFU calc we must be careful to prevent double counting of MMDiT flops.
+        # Here, count the number of params applied to each sequence element.
+        # Last block must be handled differently since post attn layers don't run on conditioning sequence
+        self.n_seq_params_per_block = self.model.num_features**2 * (4 + 2 * self.model.expansion_factor)
+        self.n_seq_params = self.n_seq_params_per_block * (self.model.num_layers - 1)
+        self.n_seq_params += 3 * (self.model.num_features**2)
+        self.n_last_layer_params = self.model.num_features**2 * (1 + 2 * self.model.expansion_factor)
+        # Params only on the input sequence
+        self.n_input_params = self.model.input_features * self.model.num_features
+        # Params only on the conditioning sequence
+        self.n_cond_params = self.model.conditioning_features * self.model.num_features
 
         # Set up metrics
         self.train_metrics = [MeanSquaredError()]
@@ -398,7 +457,7 @@ class ComposerTextToImageDiT(ComposerModel):
         self.rng_generator: Optional[torch.Generator] = None
 
     def _apply(self, fn):
-        super(ComposerTextToImageDiT, self)._apply(fn)
+        super(ComposerTextToImageMMDiT, self)._apply(fn)
         self.latent_mean = fn(self.latent_mean)
         self.latent_std = fn(self.latent_std)
         return self
@@ -413,8 +472,14 @@ class ComposerTextToImageDiT(ComposerModel):
         input_seq_len = height * width / (self.patch_size**2 * self.downsample_factor**2)
         cond_seq_len = batch[self.caption_key].shape[1]
         seq_len = input_seq_len + cond_seq_len
-        # Calulate forward flops excluding attention
-        param_flops = 2 * self.n_params * batch_size * seq_len
+        # Calulate forward flops on full sequence excluding attention
+        param_flops = 2 * self.n_seq_params * batch_size * seq_len
+        # Last block contributes a bit less than other blocks
+        param_flops += 2 * self.n_last_layer_params * batch_size * input_seq_len
+        # Include input sequence params (comparatively small)
+        param_flops += 2 * self.n_input_params * batch_size * input_seq_len
+        # Include conditioning sequence params (comparatively small)
+        param_flops += 2 * self.n_cond_params * batch_size * cond_seq_len
         # Include flops from adaln
         param_flops += 2 * self.adaLN_params * batch_size
         # Calculate flops for attention layers

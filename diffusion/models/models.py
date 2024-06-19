@@ -18,7 +18,7 @@ from diffusion.models.layers import ClippedAttnProcessor2_0, ClippedXFormersAttn
 from diffusion.models.pixel_diffusion import PixelDiffusion
 from diffusion.models.stable_diffusion import StableDiffusion
 from diffusion.models.text_encoder import MultiTextEncoder, MultiTokenizer
-from diffusion.models.transformer import ComposerTextToImageDiT, DiffusionTransformer
+from diffusion.models.transformer import ComposerTextToImageMMDiT, DiffusionTransformer
 from diffusion.schedulers.schedulers import ContinuousTimeScheduler
 from diffusion.schedulers.utils import shift_noise_schedule
 
@@ -518,6 +518,7 @@ def text_to_image_transformer(
         beta_schedule: str = 'scaled_linear',
         zero_terminal_snr: bool = False,
         use_karras_sigmas: bool = False):
+    """Text to image transformer training setup."""
     latent_mean, latent_std = _parse_latent_statistics(latent_mean), _parse_latent_statistics(latent_std)
 
     if (isinstance(tokenizer_names, tuple) or
@@ -554,6 +555,12 @@ def text_to_image_transformer(
             latent_std = tuple(latent_statistics['latent_channel_stds'])
         downsample_factor = 2**(len(vae.config['channel_multipliers']) - 1)
         autoencoder_channels = vae.config['latent_channels']
+    assert isinstance(vae, torch.nn.Module)
+    if isinstance(latent_mean, float):
+        latent_mean = (latent_mean,) * autoencoder_channels
+    if isinstance(latent_std, float):
+        latent_std = (latent_std,) * autoencoder_channels
+    assert isinstance(latent_mean, tuple) and isinstance(latent_std, tuple)
 
     # Make the noise schedulers
     noise_scheduler = DDPMScheduler(num_train_timesteps=1000,
@@ -592,21 +599,21 @@ def text_to_image_transformer(
                                        conditioning_dimension=1,
                                        expansion_factor=4)
     # Make the composer model
-    model = ComposerTextToImageDiT(model=transformer,
-                                   autoencoder=vae,
-                                   text_encoder=text_encoder,
-                                   tokenizer=tokenizer,
-                                   noise_scheduler=noise_scheduler,
-                                   inference_noise_scheduler=inference_noise_scheduler,
-                                   prediction_type=prediction_type,
-                                   latent_mean=latent_mean,
-                                   latent_std=latent_std,
-                                   patch_size=patch_size,
-                                   downsample_factor=downsample_factor,
-                                   latent_channels=autoencoder_channels,
-                                   image_key='image',
-                                   caption_key='captions',
-                                   caption_mask_key='attention_mask')
+    model = ComposerTextToImageMMDiT(model=transformer,
+                                     autoencoder=vae,
+                                     text_encoder=text_encoder,
+                                     tokenizer=tokenizer,
+                                     noise_scheduler=noise_scheduler,
+                                     inference_noise_scheduler=inference_noise_scheduler,
+                                     prediction_type=prediction_type,
+                                     latent_mean=latent_mean,
+                                     latent_std=latent_std,
+                                     patch_size=patch_size,
+                                     downsample_factor=downsample_factor,
+                                     latent_channels=autoencoder_channels,
+                                     image_key='image',
+                                     caption_key='captions',
+                                     caption_mask_key='attention_mask')
 
     if torch.cuda.is_available():
         model = DeviceGPU().module_to_device(model)

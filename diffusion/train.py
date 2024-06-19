@@ -20,7 +20,7 @@ from omegaconf import DictConfig, OmegaConf
 from torch.optim import Optimizer
 
 from diffusion.models.autoencoder import ComposerAutoEncoder, ComposerDiffusersAutoEncoder
-from diffusion.models.transformer import ComposerTextToImageDiT
+from diffusion.models.transformer import ComposerTextToImageMMDiT
 
 
 def make_autoencoder_optimizer(config: DictConfig, model: ComposerModel) -> Optimizer:
@@ -54,10 +54,10 @@ def make_autoencoder_optimizer(config: DictConfig, model: ComposerModel) -> Opti
 def make_transformer_optimizer(config: DictConfig, model: ComposerModel) -> Optimizer:
     """Configures the optimizer for use with a transformer model."""
     print('Configuring optimizer for transformer')
-    assert isinstance(model, ComposerTextToImageDiT)
+    assert isinstance(model, ComposerTextToImageMMDiT)
 
     # Turn off weight decay for the positional embeddings
-    no_decay = ['bias', 'layer_norm', 'position_embedding']
+    no_decay = ['bias', 'norm', 'position_embedding']
     params_with_no_decay = []
     params_with_decay = []
     for name, param in model.named_parameters():
@@ -93,7 +93,7 @@ def train(config: DictConfig) -> None:
         # Check if this is training an autoencoder. If so, the optimizer needs different param groups
         optimizer = make_autoencoder_optimizer(config, model)
         tokenizer = None
-    elif isinstance(model, ComposerTextToImageDiT):
+    elif isinstance(model, ComposerTextToImageMMDiT):
         # Check if this is training a transformer. If so, the optimizer needs different param groups
         optimizer = make_transformer_optimizer(config, model)
         tokenizer = model.tokenizer
