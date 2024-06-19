@@ -193,6 +193,16 @@ class DiffusionTransformer(nn.Module):
         nn.init.zeros_(self.adaLN_mlp_linear.bias)
         self.adaLN_mlp = nn.Sequential(nn.SiLU(), self.adaLN_mlp_linear)
 
+    def fsdp_wrap_fn(self, module):
+        if isinstance(module, DiTBlock):
+            return True
+        return False
+
+    def activation_checkpointing_fn(self, module):
+        if isinstance(module, DiTBlock):
+            return True
+        return False
+
     def forward(self,
                 x,
                 input_coords,
@@ -200,10 +210,13 @@ class DiffusionTransformer(nn.Module):
                 conditioning=None,
                 conditioning_coords=None,
                 input_mask=None,
-                conditioning_mask=None):
-        # TODO: Fix embeddings, fix embedding norms
+                conditioning_mask=None,
+                constant_conditioning=None):
         # Embed the timestep
         t = timestep_embedding(t, self.num_features)
+        # Optionally add constant conditioning
+        if constant_conditioning is not None:
+            t = t + constant_conditioning
         # Embed the input
         y = self.input_embedding(x)  # (B, T1, C)
         # Get the input position embeddings and add them to the input
@@ -354,6 +367,9 @@ class ComposerTextToImageDiT(ComposerModel):
         self.caption_key = caption_key
         self.caption_mask_key = caption_mask_key
 
+        # Projection layer for the pooled text embeddings
+        self.pooled_projection_layer = nn.Linear(self.model.conditioning_features, self.model.num_features)
+
         # freeze text_encoder during diffusion training and use half precision
         self.autoencoder.requires_grad_(False)
         self.text_encoder.requires_grad_(False)
@@ -365,8 +381,12 @@ class ComposerTextToImageDiT(ComposerModel):
         self.autoencoder._fsdp_wrap = False
         self.text_encoder._fsdp_wrap = False
 
-        # Params for MFU computation, subtract off the embedding params
+        # Params for MFU computation
+        # First calc the AdaLN params separately
+        self.adaLN_params = sum(p.numel() for n, p in self.model.named_parameters() if 'adaLN_mlp_linear' in n)
         self.n_params = sum(p.numel() for p in self.model.parameters())
+        self.n_params -= self.adaLN_params
+        # Subtract off the embedding params
         self.n_params -= self.model.input_position_embedding.numel()
         self.n_params -= self.model.conditioning_position_embedding.numel()
 
@@ -395,6 +415,8 @@ class ComposerTextToImageDiT(ComposerModel):
         seq_len = input_seq_len + cond_seq_len
         # Calulate forward flops excluding attention
         param_flops = 2 * self.n_params * batch_size * seq_len
+        # Include flops from adaln
+        param_flops += 2 * self.adaLN_params * batch_size
         # Calculate flops for attention layers
         attention_flops = 4 * self.model.num_layers * seq_len**2 * self.model.num_features * batch_size
         return 3 * param_flops + 3 * attention_flops
@@ -430,12 +452,16 @@ class ComposerTextToImageDiT(ComposerModel):
             latents = self.autoencoder.encode(image.half())['latent_dist'].sample().data
             text_encoder_out = self.text_encoder(caption, attention_mask=caption_mask)
             text_embeddings = text_encoder_out[0]
+            pooled_text_embeddings = text_encoder_out[1]
         # Make the text embedding coords
         text_embeddings_coords = torch.arange(text_embeddings.shape[1], device=text_embeddings.device)
         text_embeddings_coords = text_embeddings_coords.unsqueeze(0).expand(text_embeddings.shape[0], -1).unsqueeze(-1)
+        # Project the text embeddings
+        pooled_text_embeddings = self.pooled_projection_layer(pooled_text_embeddings)
         # Zero dropped captions if needed
         if 'drop_caption_mask' in batch.keys():
             text_embeddings *= batch['drop_caption_mask'].view(-1, 1, 1)
+            pooled_text_embeddings *= batch['drop_caption_mask'].view(-1, 1)
         # Scale and patchify the latents
         latents = (latents - self.latent_mean) / self.latent_std
         latent_patches, latent_coords = patchify(latents, self.patch_size)
@@ -448,7 +474,8 @@ class ComposerTextToImageDiT(ComposerModel):
                                conditioning=text_embeddings,
                                conditioning_coords=text_embeddings_coords,
                                input_mask=None,
-                               conditioning_mask=caption_mask)
+                               conditioning_mask=caption_mask,
+                               constant_conditioning=pooled_text_embeddings)
         return {'predictions': model_out, 'targets': targets, 'timesteps': timesteps}
 
     def loss(self, outputs, batch):
@@ -499,6 +526,7 @@ class ComposerTextToImageDiT(ComposerModel):
             prompt_mask = self.combine_attention_masks(prompt_mask)
         return text_embeddings, prompt_mask
 
+    @torch.no_grad()
     def generate(self,
                  prompt: Optional[list] = None,
                  negative_prompt: Optional[list] = None,
@@ -563,7 +591,7 @@ class ComposerTextToImageDiT(ComposerModel):
             # Get the model prediction
             model_out = self.model(latent_patches_input,
                                    latent_coords_input,
-                                   t.unsqueeze(0),
+                                   t.unsqueeze(0).to(device),
                                    conditioning=text_embeddings,
                                    conditioning_coords=text_embeddings_coords,
                                    input_mask=None,
