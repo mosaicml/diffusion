@@ -336,8 +336,7 @@ class DiffusionTransformer(nn.Module):
         # Expand the mask to the right shape
         mask = mask.bool()
         mask = mask.unsqueeze(-1) & mask.unsqueeze(1)  # (B, T1 + T2, T1 + T2)
-        identity = torch.eye(mask.shape[1], device=mask.device,
-                             dtype=mask.dtype).unsqueeze(0).expand(mask.shape[0], -1, -1)
+        identity = torch.eye(mask.shape[1], device=mask.device, dtype=mask.dtype).unsqueeze(0)
         mask = mask | identity
         mask = mask.unsqueeze(1)  # (B, 1, T1 + T2, T1 + T2)
 
@@ -396,6 +395,7 @@ class ComposerTextToImageMMDiT(ComposerModel):
         image_key: str = 'image',
         caption_key: str = 'caption',
         caption_mask_key: str = 'caption_mask',
+        use_pooled_embedding: bool = False,
     ):
         super().__init__()
         self.model = model
@@ -419,9 +419,11 @@ class ComposerTextToImageMMDiT(ComposerModel):
         self.image_key = image_key
         self.caption_key = caption_key
         self.caption_mask_key = caption_mask_key
+        self.use_pooled_embedding = use_pooled_embedding
 
         # Projection layer for the pooled text embeddings
-        self.pooled_projection_layer = nn.Linear(self.model.conditioning_features, self.model.num_features)
+        if self.use_pooled_embedding:
+            self.pooled_projection_layer = nn.Linear(self.model.conditioning_features, self.model.num_features)
 
         # freeze text_encoder during diffusion training and use half precision
         self.autoencoder.requires_grad_(False)
@@ -432,7 +434,7 @@ class ComposerTextToImageMMDiT(ComposerModel):
         # Only FSDP wrap models we are training
         self.model._fsdp_wrap = True
         self.autoencoder._fsdp_wrap = False
-        self.text_encoder._fsdp_wrap = False
+        self.text_encoder._fsdp_wrap = True
 
         # Param counts relevant for MFU computation
         # First calc the AdaLN params separately
@@ -512,21 +514,33 @@ class ComposerTextToImageMMDiT(ComposerModel):
     def forward(self, batch):
         # Get the inputs
         image, caption, caption_mask = batch[self.image_key], batch[self.caption_key], batch[self.caption_mask_key]
+        
         # Get the text embeddings and image latents
         with torch.cuda.amp.autocast(enabled=False):
             latents = self.autoencoder.encode(image.half())['latent_dist'].sample().data
             text_encoder_out = self.text_encoder(caption, attention_mask=caption_mask)
             text_embeddings = text_encoder_out[0]
+            # Ensure text embeddings are not longer than the model can handle
+            if text_embeddings.shape[1] > self.model.conditioning_max_sequence_length:
+                text_embeddings = text_embeddings[:, :self.model.conditioning_max_sequence_length]
+                caption_mask = caption_mask[:, :self.model.conditioning_max_sequence_length]
+
+        # Optionally use pooled embeddings
+        if self.use_pooled_embedding:
             pooled_text_embeddings = text_encoder_out[1]
+            pooled_text_embeddings = self.pooled_projection_layer(pooled_text_embeddings)
+        else:
+            pooled_text_embeddings = None
+
         # Make the text embedding coords
         text_embeddings_coords = torch.arange(text_embeddings.shape[1], device=text_embeddings.device)
         text_embeddings_coords = text_embeddings_coords.unsqueeze(0).expand(text_embeddings.shape[0], -1).unsqueeze(-1)
         # Project the text embeddings
-        pooled_text_embeddings = self.pooled_projection_layer(pooled_text_embeddings)
         # Zero dropped captions if needed
         if 'drop_caption_mask' in batch.keys():
             text_embeddings *= batch['drop_caption_mask'].view(-1, 1, 1)
-            pooled_text_embeddings *= batch['drop_caption_mask'].view(-1, 1)
+            if self.use_pooled_embedding:
+                pooled_text_embeddings *= batch['drop_caption_mask'].view(-1, 1)
         # Scale and patchify the latents
         latents = (latents - self.latent_mean) / self.latent_std
         latent_patches, latent_coords = patchify(latents, self.patch_size)
@@ -648,6 +662,12 @@ class ComposerTextToImageMMDiT(ComposerModel):
         self.inference_scheduler.set_timesteps(num_inference_steps)
         # scale the initial noise by the standard deviation required by the scheduler
         latent_patches = latent_patches * self.inference_scheduler.init_noise_sigma
+
+        # Ensure text embeddings, mask, and coords are not longer than the model can handle
+        if text_embeddings.shape[1] > self.model.conditioning_max_sequence_length:
+            text_embeddings = text_embeddings[:, :self.model.conditioning_max_sequence_length]
+            text_embeddings_coords = text_embeddings_coords[:, :self.model.conditioning_max_sequence_length]
+            text_embeddings_mask = text_embeddings_mask[:, :self.model.conditioning_max_sequence_length]
 
         # backward diffusion process
         for t in tqdm(self.inference_scheduler.timesteps, disable=not progress_bar):
