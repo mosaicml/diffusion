@@ -10,6 +10,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from PIL import Image
 from streaming import Stream, StreamingDataset
 from torch.utils.data import DataLoader
@@ -119,12 +120,12 @@ class StreamingTextLatentsDataset(StreamingDataset):
                 out[latent_key] = torch.zeros(latent_shape, dtype=torch.float16)
                 out[attention_key] = torch.zeros(latent_shape[0])
                 if latent_key == 'CLIP_LATENTS':
-                    out['CLIP_POOLED'] = torch.zeros(latent_shape[0])
+                    out['CLIP_POOLED'] = torch.zeros(latent_shape[1])
             else:
                 text_latent = np.frombuffer(sample[latent_key], dtype=np.float16).copy()
                 out[latent_key] = torch.from_numpy(text_latent).reshape(latent_shape)
                 attention_mask = np.frombuffer(sample[attention_key], dtype=np.bool_).copy()
-                out[attention_key] = torch.from_numpy(attention_mask).reshape(latent_shape[0])
+                out[attention_key] = torch.from_numpy(attention_mask).to(dtype=torch.float).reshape(-1) #.reshape(latent_shape[0])
                 if latent_key == 'CLIP_LATENTS':
                     clip_pooled = np.frombuffer(sample['CLIP_POOLED_TEXT'], dtype=np.float16).copy()
                     out['CLIP_POOLED'] = torch.from_numpy(clip_pooled).reshape(latent_shape[1])
