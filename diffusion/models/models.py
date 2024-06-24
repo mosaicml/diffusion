@@ -498,26 +498,26 @@ def stable_diffusion_xl(
 
 
 def text_to_image_transformer(
-        tokenizer_names: Union[str, Tuple[str, ...]] = ('stabilityai/stable-diffusion-xl-base-1.0/tokenizer',
-                                                        'stabilityai/stable-diffusion-xl-base-1.0/tokenizer_2'),
-        text_encoder_names: Union[str, Tuple[str, ...]] = ('stabilityai/stable-diffusion-xl-base-1.0/text_encoder',
-                                                           'stabilityai/stable-diffusion-xl-base-1.0/text_encoder_2'),
-        vae_model_name: str = 'madebyollin/sdxl-vae-fp16-fix',
-        autoencoder_path: Optional[str] = None,
-        autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
-        num_features: int = 1152,
-        num_heads: int = 16,
-        num_layers: int = 28,
-        input_max_sequence_length: int = 1024,
-        conditioning_features: int = 768,
-        conditioning_max_sequence_length: int = 77,
-        patch_size: int = 2,
-        prediction_type: str = 'epsilon',
-        latent_mean: Union[float, Tuple, str] = 0.0,
-        latent_std: Union[float, Tuple, str] = 7.67754318618,
-        beta_schedule: str = 'scaled_linear',
-        zero_terminal_snr: bool = False,
-        use_karras_sigmas: bool = False):
+    tokenizer_names: Union[str, Tuple[str, ...]] = ('stabilityai/stable-diffusion-xl-base-1.0/tokenizer',
+                                                    'stabilityai/stable-diffusion-xl-base-1.0/tokenizer_2'),
+    text_encoder_names: Union[str, Tuple[str, ...]] = ('stabilityai/stable-diffusion-xl-base-1.0/text_encoder',
+                                                       'stabilityai/stable-diffusion-xl-base-1.0/text_encoder_2'),
+    vae_model_name: str = 'madebyollin/sdxl-vae-fp16-fix',
+    autoencoder_path: Optional[str] = None,
+    autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
+    num_features: int = 1152,
+    num_heads: int = 16,
+    num_layers: int = 28,
+    input_max_sequence_length: int = 1024,
+    conditioning_features: int = 768,
+    conditioning_max_sequence_length: int = 77,
+    patch_size: int = 2,
+    latent_mean: Union[float, Tuple, str] = 0.0,
+    latent_std: Union[float, Tuple, str] = 7.67754318618,
+    timestep_mean: float = 0.0,
+    timestep_std: float = 1.0,
+    timestep_shift: float = 1.0,
+):
     """Text to image transformer training setup."""
     latent_mean, latent_std = _parse_latent_statistics(latent_mean), _parse_latent_statistics(latent_std)
 
@@ -562,31 +562,6 @@ def text_to_image_transformer(
         latent_std = (latent_std,) * autoencoder_channels
     assert isinstance(latent_mean, tuple) and isinstance(latent_std, tuple)
 
-    # Make the noise schedulers
-    noise_scheduler = DDPMScheduler(num_train_timesteps=1000,
-                                    beta_start=0.0000085,
-                                    beta_end=0.012,
-                                    beta_schedule=beta_schedule,
-                                    trained_betas=None,
-                                    variance_type='fixed_small',
-                                    clip_sample=False,
-                                    prediction_type=prediction_type,
-                                    sample_max_value=1.0,
-                                    timestep_spacing='leading',
-                                    steps_offset=1,
-                                    rescale_betas_zero_snr=zero_terminal_snr)
-    inference_noise_scheduler = EulerDiscreteScheduler(num_train_timesteps=1000,
-                                                       beta_start=0.0000085,
-                                                       beta_end=0.012,
-                                                       beta_schedule=beta_schedule,
-                                                       trained_betas=None,
-                                                       prediction_type=prediction_type,
-                                                       interpolation_type='linear',
-                                                       use_karras_sigmas=use_karras_sigmas,
-                                                       timestep_spacing='leading',
-                                                       steps_offset=1,
-                                                       rescale_betas_zero_snr=zero_terminal_snr)
-
     # Make the transformer model
     transformer = DiffusionTransformer(num_features=num_features,
                                        num_heads=num_heads,
@@ -603,14 +578,14 @@ def text_to_image_transformer(
                                      autoencoder=vae,
                                      text_encoder=text_encoder,
                                      tokenizer=tokenizer,
-                                     noise_scheduler=noise_scheduler,
-                                     inference_noise_scheduler=inference_noise_scheduler,
-                                     prediction_type=prediction_type,
                                      latent_mean=latent_mean,
                                      latent_std=latent_std,
                                      patch_size=patch_size,
                                      downsample_factor=downsample_factor,
                                      latent_channels=autoencoder_channels,
+                                     timestep_mean=timestep_mean,
+                                     timestep_std=timestep_std,
+                                     timestep_shift=timestep_shift,
                                      image_key='image',
                                      caption_key='captions',
                                      caption_mask_key='attention_mask')

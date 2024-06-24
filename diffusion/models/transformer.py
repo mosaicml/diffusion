@@ -19,25 +19,6 @@ def modulate(x, shift, scale):
     return x * (1.0 + scale) + shift
 
 
-def timestep_embedding(timesteps, dim, max_period=10000):
-    """Create sinusoidal timestep embeddings.
-
-    :param timesteps: a 1-D Tensor of N indices, one per batch element.
-                      These may be fractional.
-    :param dim: the dimension of the output.
-    :param max_period: controls the minimum frequency of the embeddings.
-    :return: an [N x dim] Tensor of positional embeddings.
-    """
-    half = dim // 2
-    freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) /
-                      half).to(device=timesteps.device)
-    args = timesteps[:, None].float() * freqs[None]
-    embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
-    if dim % 2:
-        embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
-    return embedding
-
-
 def get_multidimensional_position_embeddings(position_embeddings, coords):
     """Position embeddings are shape (D, T, F). Coords are shape (B, S, D)."""
     B, S, D = coords.shape
@@ -81,6 +62,56 @@ def unpatchify(patches, coords, patch_size):
         # Place the patch in the corresponding location in the image
         img[:, y:y + patch_size, x:x + patch_size] = patch
     return img
+
+
+class ScalarEmbedding(nn.Module):
+    """Embedding block for scalars."""
+
+    def __init__(self, num_features, sinusoidal_embedding_dim=256):
+        super().__init__()
+        self.num_features = num_features
+        self.sinusoidal_embedding_dim = sinusoidal_embedding_dim
+        self.linear_1 = nn.Linear(self.sinusoidal_embedding_dim, self.num_features)
+        self.linear_2 = nn.Linear(self.num_features, self.num_features)
+        self.mlp = nn.Sequential(self.linear_1, nn.SiLU(), self.linear_2)
+
+    @staticmethod
+    def timestep_embedding(timesteps, dim, max_period=10000):
+        """Create sinusoidal timestep embeddings.
+
+        :param timesteps: a 1-D Tensor of N indices, one per batch element.
+                        These may be fractional.
+        :param dim: the dimension of the output.
+        :param max_period: controls the minimum frequency of the embeddings.
+        :return: an [N x dim] Tensor of positional embeddings.
+        """
+        half = dim // 2
+        freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) /
+                          half).to(device=timesteps.device)
+        args = timesteps[:, None].float() * freqs[None]
+        embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
+        if dim % 2:
+            embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
+        return embedding
+
+    def forward(self, x):
+        sinusoidal_embedding = self.timestep_embedding(x, self.sinusoidal_embedding_dim)
+        return self.mlp(sinusoidal_embedding)
+
+
+class VectorEmbedding(nn.Module):
+    """Embedding block for vectors."""
+
+    def __init__(self, input_features, num_features):
+        super().__init__()
+        self.input_features = input_features
+        self.num_features = num_features
+        self.linear_1 = nn.Linear(self.input_features, self.num_features)
+        self.linear_2 = nn.Linear(self.num_features, self.num_features)
+        self.mlp = nn.Sequential(self.linear_1, nn.SiLU(), self.linear_2)
+
+    def forward(self, x):
+        return self.mlp(x)
 
 
 class PreAttentionBlock(nn.Module):
@@ -252,6 +283,8 @@ class DiffusionTransformer(nn.Module):
         self.conditioning_dimension = conditioning_dimension
         self.conditioning_max_sequence_length = conditioning_max_sequence_length
 
+        # Embedding block for the timestep
+        self.timestep_embedding = ScalarEmbedding(self.num_features)
         # Projection layer for the input sequence
         self.input_embedding = nn.Linear(self.input_features, self.num_features)
         # Embedding layer for the input sequence
@@ -306,8 +339,8 @@ class DiffusionTransformer(nn.Module):
                 conditioning_mask=None,
                 constant_conditioning=None):
         # Embed the timestep
-        t = timestep_embedding(t, self.num_features)
-        # Optionally add constant conditioning
+        t = self.timestep_embedding(t)
+        # Optionally add constant conditioning. This assumes it has been embedded already.
         if constant_conditioning is not None:
             t = t + constant_conditioning
         # Embed the input
@@ -384,29 +417,24 @@ class ComposerTextToImageMMDiT(ComposerModel):
         autoencoder: torch.nn.Module,
         text_encoder: torch.nn.Module,
         tokenizer,
-        noise_scheduler,
-        inference_noise_scheduler,
-        prediction_type: str = 'epsilon',
         latent_mean: Optional[tuple[float]] = None,
         latent_std: Optional[tuple[float]] = None,
         patch_size: int = 2,
         downsample_factor: int = 8,
         latent_channels: int = 4,
+        timestep_mean: float = 0.0,
+        timestep_std: float = 1.0,
+        timestep_shift: float = 1.0,
         image_key: str = 'image',
         caption_key: str = 'caption',
         caption_mask_key: str = 'caption_mask',
-        use_pooled_embedding: bool = False,
+        pooled_embedding_features: int = 768,
     ):
         super().__init__()
         self.model = model
         self.autoencoder = autoencoder
         self.text_encoder = text_encoder
         self.tokenizer = tokenizer
-        self.noise_scheduler = noise_scheduler
-        self.inference_scheduler = inference_noise_scheduler
-        self.prediction_type = prediction_type.lower()
-        if self.prediction_type not in ['epsilon', 'sample', 'v_prediction']:
-            raise ValueError(f'Unrecognized prediction type {self.prediction_type}')
         if latent_mean is None:
             self.latent_mean = 4 * (0.0)
         if latent_std is None:
@@ -416,14 +444,16 @@ class ComposerTextToImageMMDiT(ComposerModel):
         self.patch_size = patch_size
         self.downsample_factor = downsample_factor
         self.latent_channels = latent_channels
+        self.timestep_mean = timestep_mean
+        self.timestep_std = timestep_std
+        self.timestep_shift = timestep_shift
         self.image_key = image_key
         self.caption_key = caption_key
         self.caption_mask_key = caption_mask_key
-        self.use_pooled_embedding = use_pooled_embedding
+        self.pooled_embedding_features = pooled_embedding_features
 
-        # Projection layer for the pooled text embeddings
-        if self.use_pooled_embedding:
-            self.pooled_projection_layer = nn.Linear(self.model.conditioning_features, self.model.num_features)
+        # Embeeding MLP for the pooled text embeddings
+        self.pooled_embedding_mlp = VectorEmbedding(pooled_embedding_features, model.num_features)
 
         # freeze text_encoder during diffusion training and use half precision
         self.autoencoder.requires_grad_(False)
@@ -489,58 +519,43 @@ class ComposerTextToImageMMDiT(ComposerModel):
         return 3 * param_flops + 3 * attention_flops
 
     def diffusion_forward_process(self, inputs: torch.Tensor):
-        """Diffusion forward process."""
-        # Sample a timestep for every element in the batch
-        timesteps = torch.randint(0,
-                                  len(self.noise_scheduler), (inputs.shape[0],),
-                                  device=inputs.device,
-                                  generator=self.rng_generator)
-        # Generate the noise, applied to the whole input sequence
+        """Diffusion forward process using a rectified flow."""
+        # First, sample timesteps according to a logit-normal distribution
+        u = torch.randn(inputs.shape[0], device=inputs.device, generator=self.rng_generator)
+        u = self.timestep_mean + self.timestep_std * u
+        timesteps = torch.sigmoid(u).view(-1, 1, 1)
+        timesteps = self.timestep_shift * timesteps / (1 + (self.timestep_shift - 1) * timesteps)
+        # Then, add the noise to the latents according to the recitified flow
         noise = torch.randn(*inputs.shape, device=inputs.device, generator=self.rng_generator)
-        # Add the noise to the latents according to the schedule
-        noised_inputs = self.noise_scheduler.add_noise(inputs, noise, timesteps)
-        # Generate the targets
-        if self.prediction_type == 'epsilon':
-            targets = noise
-        elif self.prediction_type == 'sample':
-            targets = inputs
-        elif self.prediction_type == 'v_prediction':
-            targets = self.noise_scheduler.get_velocity(inputs, noise, timesteps)
-        else:
-            raise ValueError(
-                f'prediction type must be one of sample, epsilon, or v_prediction. Got {self.prediction_type}')
-        return noised_inputs, targets, timesteps
+        noised_inputs = (1 - timesteps) * inputs + timesteps * noise
+        # Compute the targets, which are the velocities
+        targets = noise - inputs
+        return noised_inputs, targets, timesteps[:, 0, 0]
 
     def forward(self, batch):
         # Get the inputs
         image, caption, caption_mask = batch[self.image_key], batch[self.caption_key], batch[self.caption_mask_key]
-        
+
         # Get the text embeddings and image latents
         with torch.cuda.amp.autocast(enabled=False):
             latents = self.autoencoder.encode(image.half())['latent_dist'].sample().data
             text_encoder_out = self.text_encoder(caption, attention_mask=caption_mask)
             text_embeddings = text_encoder_out[0]
+            pooled_text_embeddings = text_encoder_out[1]
             # Ensure text embeddings are not longer than the model can handle
             if text_embeddings.shape[1] > self.model.conditioning_max_sequence_length:
                 text_embeddings = text_embeddings[:, :self.model.conditioning_max_sequence_length]
                 caption_mask = caption_mask[:, :self.model.conditioning_max_sequence_length]
 
-        # Optionally use pooled embeddings
-        if self.use_pooled_embedding:
-            pooled_text_embeddings = text_encoder_out[1]
-            pooled_text_embeddings = self.pooled_projection_layer(pooled_text_embeddings)
-        else:
-            pooled_text_embeddings = None
-
+        # Encode the pooled embeddings
+        pooled_text_embeddings = self.pooled_embedding_mlp(pooled_text_embeddings)
         # Make the text embedding coords
         text_embeddings_coords = torch.arange(text_embeddings.shape[1], device=text_embeddings.device)
         text_embeddings_coords = text_embeddings_coords.unsqueeze(0).expand(text_embeddings.shape[0], -1).unsqueeze(-1)
-        # Project the text embeddings
         # Zero dropped captions if needed
         if 'drop_caption_mask' in batch.keys():
             text_embeddings *= batch['drop_caption_mask'].view(-1, 1, 1)
-            if self.use_pooled_embedding:
-                pooled_text_embeddings *= batch['drop_caption_mask'].view(-1, 1)
+            pooled_text_embeddings *= batch['drop_caption_mask'].view(-1, 1)
         # Scale and patchify the latents
         latents = (latents - self.latent_mean) / self.latent_std
         latent_patches, latent_coords = patchify(latents, self.patch_size)
@@ -601,13 +616,25 @@ class ComposerTextToImageMMDiT(ComposerModel):
                                            return_tensors='pt')
             tokenized_prompts = tokenized_out['input_ids'].to(self.text_encoder.device)
             prompt_mask = tokenized_out['attention_mask'].to(self.text_encoder.device)
-            text_embeddings = self.text_encoder(tokenized_prompts, attention_mask=prompt_mask)[0]
+            text_encoder_out = self.text_encoder(tokenized_prompts, attention_mask=prompt_mask)
+            text_embeddings, pooled_text_embeddings = text_encoder_out[0], text_encoder_out[1]
             prompt_mask = self.combine_attention_masks(prompt_mask)
-        return text_embeddings, prompt_mask
+        return text_embeddings, prompt_mask, pooled_text_embeddings
+
+    def make_text_embeddings_coords(self, text_embeddings):
+        text_embeddings_coords = torch.arange(text_embeddings.shape[1], device=text_embeddings.device)
+        text_embeddings_coords = text_embeddings_coords.unsqueeze(0).expand(text_embeddings.shape[0], -1)
+        text_embeddings_coords = text_embeddings_coords.unsqueeze(-1)
+        return text_embeddings_coords
+
+    def make_sampling_timesteps(self, N: int):
+        timesteps = torch.linspace(1, 0, N)
+        timesteps = self.timestep_shift * timesteps / (1 + (self.timestep_shift - 1) * timesteps)
+        return timesteps
 
     @torch.no_grad()
     def generate(self,
-                 prompt: Optional[list] = None,
+                 prompt: list,
                  negative_prompt: Optional[list] = None,
                  height: int = 256,
                  width: int = 256,
@@ -623,24 +650,17 @@ class ComposerTextToImageMMDiT(ComposerModel):
         if seed:
             rng_generator = rng_generator.manual_seed(seed)
 
-        # Get the text embeddings
-        if prompt is not None:
-            text_embeddings, prompt_mask = self.embed_prompt(prompt)
-            text_embeddings_coords = torch.arange(text_embeddings.shape[1], device=text_embeddings.device)
-            text_embeddings_coords = text_embeddings_coords.unsqueeze(0).expand(text_embeddings.shape[0], -1)
-            text_embeddings_coords = text_embeddings_coords.unsqueeze(-1)
-        else:
-            raise ValueError('Prompt must be specified')
+        # Get the text embeddings and their coords
+        text_embeddings, prompt_mask, pooled_embedding = self.embed_prompt(prompt)
+        text_embeddings_coords = self.make_text_embeddings_coords(text_embeddings)
+        # Create the negative prompt if it exists, or use all zeros if it doesn't
         if negative_prompt is not None:
-            negative_text_embeddings, negative_prompt_mask = self.embed_prompt(negative_prompt)
+            negative_text_embeddings, negative_prompt_mask, pooled_neg_embedding = self.embed_prompt(negative_prompt)
         else:
             negative_text_embeddings = torch.zeros_like(text_embeddings)
             negative_prompt_mask = torch.zeros_like(prompt_mask)
-        negative_text_embeddings_coords = torch.arange(negative_text_embeddings.shape[1],
-                                                       device=negative_text_embeddings.device)
-        negative_text_embeddings_coords = negative_text_embeddings_coords.unsqueeze(0).expand(
-            negative_text_embeddings.shape[0], -1)
-        negative_text_embeddings_coords = negative_text_embeddings_coords.unsqueeze(-1)
+            pooled_neg_embedding = torch.zeros_like(pooled_embedding)
+        negative_text_embeddings_coords = self.make_text_embeddings_coords(negative_text_embeddings)
 
         # Generate initial noise
         latent_height = height // self.downsample_factor
@@ -656,12 +676,8 @@ class ComposerTextToImageMMDiT(ComposerModel):
         text_embeddings = torch.cat([text_embeddings, negative_text_embeddings], dim=0)
         text_embeddings_coords = torch.cat([text_embeddings_coords, negative_text_embeddings_coords], dim=0)
         text_embeddings_mask = torch.cat([prompt_mask, negative_prompt_mask], dim=0)
+        pooled_embedding = torch.cat([pooled_embedding, pooled_neg_embedding], dim=0)
         latent_coords_input = torch.cat([latent_coords, latent_coords], dim=0)
-
-        # Prep for reverse process
-        self.inference_scheduler.set_timesteps(num_inference_steps)
-        # scale the initial noise by the standard deviation required by the scheduler
-        latent_patches = latent_patches * self.inference_scheduler.init_noise_sigma
 
         # Ensure text embeddings, mask, and coords are not longer than the model can handle
         if text_embeddings.shape[1] > self.model.conditioning_max_sequence_length:
@@ -669,23 +685,32 @@ class ComposerTextToImageMMDiT(ComposerModel):
             text_embeddings_coords = text_embeddings_coords[:, :self.model.conditioning_max_sequence_length]
             text_embeddings_mask = text_embeddings_mask[:, :self.model.conditioning_max_sequence_length]
 
+        # Encode the pooled embeddings
+        pooled_embedding = self.pooled_embedding_mlp(pooled_embedding)
+
         # backward diffusion process
-        for t in tqdm(self.inference_scheduler.timesteps, disable=not progress_bar):
+        timesteps = self.make_sampling_timesteps(num_inference_steps).to(device)
+        for i, t in tqdm(enumerate(timesteps), disable=not progress_bar):
             latent_patches_input = torch.cat([latent_patches, latent_patches], dim=0)
-            latent_patches_input = self.inference_scheduler.scale_model_input(latent_patches_input, t)
             # Get the model prediction
             model_out = self.model(latent_patches_input,
                                    latent_coords_input,
-                                   t.unsqueeze(0).to(device),
+                                   t.unsqueeze(0),
                                    conditioning=text_embeddings,
                                    conditioning_coords=text_embeddings_coords,
                                    input_mask=None,
-                                   conditioning_mask=text_embeddings_mask)
+                                   conditioning_mask=text_embeddings_mask,
+                                   constant_conditioning=pooled_embedding)
             # Do CFG
             pred_cond, pred_uncond = model_out.chunk(2, dim=0)
             pred = pred_uncond + guidance_scale * (pred_cond - pred_uncond)
-            # Update the inputs
-            latent_patches = self.inference_scheduler.step(pred, t, latent_patches, generator=rng_generator).prev_sample
+            # compute the time delta.
+            if i < len(timesteps) - 1:
+                delta_t = timesteps[i] - timesteps[(i + 1)]
+            else:
+                delta_t = timesteps[i]
+            # Update the latents
+            latent_patches = latent_patches - pred * delta_t
         # Unpatchify the latents
         latents = [
             unpatchify(latent_patches[i], latent_coords[i], self.patch_size) for i in range(latent_patches.shape[0])
