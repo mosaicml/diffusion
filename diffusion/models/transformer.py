@@ -452,7 +452,7 @@ class ComposerTextToImageMMDiT(ComposerModel):
         self.caption_mask_key = caption_mask_key
         self.pooled_embedding_features = pooled_embedding_features
 
-        # Embeeding MLP for the pooled text embeddings
+        # Embedding MLP for the pooled text embeddings
         self.pooled_embedding_mlp = VectorEmbedding(pooled_embedding_features, model.num_features)
 
         # freeze text_encoder during diffusion training and use half precision
@@ -535,7 +535,6 @@ class ComposerTextToImageMMDiT(ComposerModel):
     def forward(self, batch):
         # Get the inputs
         image, caption, caption_mask = batch[self.image_key], batch[self.caption_key], batch[self.caption_mask_key]
-
         # Get the text embeddings and image latents
         with torch.cuda.amp.autocast(enabled=False):
             latents = self.autoencoder.encode(image.half())['latent_dist'].sample().data
@@ -641,6 +640,7 @@ class ComposerTextToImageMMDiT(ComposerModel):
                  guidance_scale: float = 7.0,
                  rescaled_guidance: Optional[float] = None,
                  num_inference_steps: int = 50,
+                 num_images_per_prompt: int = 1,
                  progress_bar: bool = True,
                  seed: Optional[int] = None):
         """Generate from the model."""
@@ -650,11 +650,15 @@ class ComposerTextToImageMMDiT(ComposerModel):
         if seed:
             rng_generator = rng_generator.manual_seed(seed)
 
+        # Duplicate the images in the prompt if needed.
+        prompt = [item for item in prompt for _ in range(num_images_per_prompt)]
         # Get the text embeddings and their coords
         text_embeddings, prompt_mask, pooled_embedding = self.embed_prompt(prompt)
         text_embeddings_coords = self.make_text_embeddings_coords(text_embeddings)
         # Create the negative prompt if it exists, or use all zeros if it doesn't
         if negative_prompt is not None:
+            # Duplicate the images in the negative prompt if needed.
+            negative_prompt = [item for item in negative_prompt for _ in range(num_images_per_prompt)]
             negative_text_embeddings, negative_prompt_mask, pooled_neg_embedding = self.embed_prompt(negative_prompt)
         else:
             negative_text_embeddings = torch.zeros_like(text_embeddings)

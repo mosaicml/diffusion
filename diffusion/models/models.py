@@ -498,10 +498,8 @@ def stable_diffusion_xl(
 
 
 def text_to_image_transformer(
-    tokenizer_names: Union[str, Tuple[str, ...]] = ('stabilityai/stable-diffusion-xl-base-1.0/tokenizer',
-                                                    'stabilityai/stable-diffusion-xl-base-1.0/tokenizer_2'),
-    text_encoder_names: Union[str, Tuple[str, ...]] = ('stabilityai/stable-diffusion-xl-base-1.0/text_encoder',
-                                                       'stabilityai/stable-diffusion-xl-base-1.0/text_encoder_2'),
+    tokenizer_names: Union[str, Tuple[str, ...]] = ('stabilityai/stable-diffusion-xl-base-1.0/tokenizer'),
+    text_encoder_names: Union[str, Tuple[str, ...]] = ('stabilityai/stable-diffusion-xl-base-1.0/text_encoder'),
     vae_model_name: str = 'madebyollin/sdxl-vae-fp16-fix',
     autoencoder_path: Optional[str] = None,
     autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
