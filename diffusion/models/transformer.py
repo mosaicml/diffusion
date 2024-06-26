@@ -518,6 +518,67 @@ class ComposerTextToImageMMDiT(ComposerModel):
         attention_flops = 4 * self.model.num_layers * seq_len**2 * self.model.num_features * batch_size
         return 3 * param_flops + 3 * attention_flops
 
+    def encode_image(self, image):
+        with torch.cuda.amp.autocast(enabled=False):
+            latents = self.autoencoder.encode(image.half())['latent_dist'].sample().data
+        # Scale and patchify the latents
+        latents = (latents - self.latent_mean) / self.latent_std
+        latent_patches, latent_coords = patchify(latents, self.patch_size)
+        return latent_patches, latent_coords
+
+    @torch.no_grad()
+    def decode_image(self, latent_patches, latent_coords):
+        # Unpatchify the latents
+        latents = [
+            unpatchify(latent_patches[i], latent_coords[i], self.patch_size) for i in range(latent_patches.shape[0])
+        ]
+        latents = torch.stack(latents)
+        # Scale the latents back to the original scale
+        latents = latents * self.latent_std + self.latent_mean
+        # Decode the latents
+        with torch.cuda.amp.autocast(enabled=False):
+            image = self.autoencoder.decode(latents.half()).sample
+        image = (image / 2 + 0.5).clamp(0, 1)
+        return image
+
+    def tokenize_prompts(self, prompts):
+        tokenized_out = self.tokenizer(prompts,
+                                       padding='max_length',
+                                       max_length=self.tokenizer.model_max_length,
+                                       truncation=True,
+                                       return_tensors='pt')
+        return tokenized_out['input_ids'], tokenized_out['attention_mask']
+
+    def combine_attention_masks(self, attention_masks):
+        if len(attention_masks.shape) == 2:
+            return attention_masks
+        elif len(attention_masks.shape) == 3:
+            encoder_attention_masks = attention_masks[:, 0]
+            for i in range(1, attention_masks.shape[1]):
+                encoder_attention_masks |= attention_masks[:, i]
+            return encoder_attention_masks
+        else:
+            raise ValueError(f'attention_mask should have either 2 or 3 dimensions: {attention_masks.shape}')
+
+    def make_text_embeddings_coords(self, text_embeddings):
+        text_embeddings_coords = torch.arange(text_embeddings.shape[1], device=text_embeddings.device)
+        text_embeddings_coords = text_embeddings_coords.unsqueeze(0).expand(text_embeddings.shape[0], -1)
+        text_embeddings_coords = text_embeddings_coords.unsqueeze(-1)
+        return text_embeddings_coords
+
+    def embed_tokenized_prompts(self, tokenized_prompts, attention_masks):
+        with torch.cuda.amp.autocast(enabled=False):
+            # Ensure text embeddings are not longer than the model can handle
+            if tokenized_prompts.shape[1] > self.model.conditioning_max_sequence_length:
+                tokenized_prompts = tokenized_prompts[:, :self.model.conditioning_max_sequence_length]
+            text_encoder_out = self.text_encoder(tokenized_prompts, attention_mask=attention_masks)
+            text_embeddings, pooled_text_embeddings = text_encoder_out[0], text_encoder_out[1]
+            text_mask = self.combine_attention_masks(attention_masks)
+            text_embeddings_coords = self.make_text_embeddings_coords(text_embeddings)
+        # Encode the pooled embeddings
+        pooled_text_embeddings = self.pooled_embedding_mlp(pooled_text_embeddings)
+        return text_embeddings, text_embeddings_coords, text_mask, pooled_text_embeddings
+
     def diffusion_forward_process(self, inputs: torch.Tensor):
         """Diffusion forward process using a rectified flow."""
         # First, sample timesteps according to a logit-normal distribution
@@ -535,29 +596,11 @@ class ComposerTextToImageMMDiT(ComposerModel):
     def forward(self, batch):
         # Get the inputs
         image, caption, caption_mask = batch[self.image_key], batch[self.caption_key], batch[self.caption_mask_key]
-        # Get the text embeddings and image latents
-        with torch.cuda.amp.autocast(enabled=False):
-            latents = self.autoencoder.encode(image.half())['latent_dist'].sample().data
-            text_encoder_out = self.text_encoder(caption, attention_mask=caption_mask)
-            text_embeddings = text_encoder_out[0]
-            pooled_text_embeddings = text_encoder_out[1]
-            # Ensure text embeddings are not longer than the model can handle
-            if text_embeddings.shape[1] > self.model.conditioning_max_sequence_length:
-                text_embeddings = text_embeddings[:, :self.model.conditioning_max_sequence_length]
-                caption_mask = caption_mask[:, :self.model.conditioning_max_sequence_length]
-
-        # Encode the pooled embeddings
-        pooled_text_embeddings = self.pooled_embedding_mlp(pooled_text_embeddings)
-        # Make the text embedding coords
-        text_embeddings_coords = torch.arange(text_embeddings.shape[1], device=text_embeddings.device)
-        text_embeddings_coords = text_embeddings_coords.unsqueeze(0).expand(text_embeddings.shape[0], -1).unsqueeze(-1)
-        # Zero dropped captions if needed
-        if 'drop_caption_mask' in batch.keys():
-            text_embeddings *= batch['drop_caption_mask'].view(-1, 1, 1)
-            pooled_text_embeddings *= batch['drop_caption_mask'].view(-1, 1)
-        # Scale and patchify the latents
-        latents = (latents - self.latent_mean) / self.latent_std
-        latent_patches, latent_coords = patchify(latents, self.patch_size)
+        # Get the image latents
+        latent_patches, latent_coords = self.encode_image(image)
+        # Get the text embeddings and their coords
+        text_embeddings, text_embeddings_coords, caption_mask, pooled_text_embeddings = self.embed_tokenized_prompts(
+            caption, caption_mask)
         # Diffusion forward process
         noised_inputs, targets, timesteps = self.diffusion_forward_process(latent_patches)
         # Forward through the model
@@ -595,37 +638,6 @@ class ComposerTextToImageMMDiT(ComposerModel):
         else:
             raise ValueError(f'Unrecognized metric {metric.__class__.__name__}')
 
-    def combine_attention_masks(self, attention_mask):
-        if len(attention_mask.shape) == 2:
-            return attention_mask
-        elif len(attention_mask.shape) == 3:
-            encoder_attention_mask = attention_mask[:, 0]
-            for i in range(1, attention_mask.shape[1]):
-                encoder_attention_mask |= attention_mask[:, i]
-            return encoder_attention_mask
-        else:
-            raise ValueError(f'attention_mask should have either 2 or 3 dimensions: {attention_mask.shape}')
-
-    def embed_prompt(self, prompt):
-        with torch.cuda.amp.autocast(enabled=False):
-            tokenized_out = self.tokenizer(prompt,
-                                           padding='max_length',
-                                           max_length=self.tokenizer.model_max_length,
-                                           truncation=True,
-                                           return_tensors='pt')
-            tokenized_prompts = tokenized_out['input_ids'].to(self.text_encoder.device)
-            prompt_mask = tokenized_out['attention_mask'].to(self.text_encoder.device)
-            text_encoder_out = self.text_encoder(tokenized_prompts, attention_mask=prompt_mask)
-            text_embeddings, pooled_text_embeddings = text_encoder_out[0], text_encoder_out[1]
-            prompt_mask = self.combine_attention_masks(prompt_mask)
-        return text_embeddings, prompt_mask, pooled_text_embeddings
-
-    def make_text_embeddings_coords(self, text_embeddings):
-        text_embeddings_coords = torch.arange(text_embeddings.shape[1], device=text_embeddings.device)
-        text_embeddings_coords = text_embeddings_coords.unsqueeze(0).expand(text_embeddings.shape[0], -1)
-        text_embeddings_coords = text_embeddings_coords.unsqueeze(-1)
-        return text_embeddings_coords
-
     def make_sampling_timesteps(self, N: int):
         timesteps = torch.linspace(1, 0, N)
         timesteps = self.timestep_shift * timesteps / (1 + (self.timestep_shift - 1) * timesteps)
@@ -650,21 +662,20 @@ class ComposerTextToImageMMDiT(ComposerModel):
         if seed:
             rng_generator = rng_generator.manual_seed(seed)
 
-        # Duplicate the images in the prompt if needed.
+        # Set default negative prompts to empty string if not provided
+        if negative_prompt is None:
+            negative_prompt = ['' for _ in prompt]
+        # Duplicate the images in the prompt and negative prompt if needed.
         prompt = [item for item in prompt for _ in range(num_images_per_prompt)]
-        # Get the text embeddings and their coords
-        text_embeddings, prompt_mask, pooled_embedding = self.embed_prompt(prompt)
-        text_embeddings_coords = self.make_text_embeddings_coords(text_embeddings)
-        # Create the negative prompt if it exists, or use all zeros if it doesn't
-        if negative_prompt is not None:
-            # Duplicate the images in the negative prompt if needed.
-            negative_prompt = [item for item in negative_prompt for _ in range(num_images_per_prompt)]
-            negative_text_embeddings, negative_prompt_mask, pooled_neg_embedding = self.embed_prompt(negative_prompt)
-        else:
-            negative_text_embeddings = torch.zeros_like(text_embeddings)
-            negative_prompt_mask = torch.zeros_like(prompt_mask)
-            pooled_neg_embedding = torch.zeros_like(pooled_embedding)
-        negative_text_embeddings_coords = self.make_text_embeddings_coords(negative_text_embeddings)
+        negative_prompt = [item for item in negative_prompt for _ in range(num_images_per_prompt)]
+        # Tokenize both prompt and negative prompts
+        prompt_tokens, prompt_mask = self.tokenize_prompts(prompt)
+        negative_prompt_tokens, negative_prompt_mask = self.tokenize_prompts(negative_prompt)
+        # Embed the tokenized prompts and negative prompts
+        text_embeddings, text_embeddings_coords, prompt_mask, pooled_embedding = self.embed_tokenized_prompts(
+            prompt_tokens, prompt_mask)
+        neg_text_embeddings, neg_text_embeddings_coords, neg_prompt_mask, pooled_neg_embedding = self.embed_tokenized_prompts(
+            negative_prompt_tokens, negative_prompt_mask)
 
         # Generate initial noise
         latent_height = height // self.downsample_factor
@@ -677,23 +688,12 @@ class ComposerTextToImageMMDiT(ComposerModel):
         latent_patches, latent_coords = patchify(latents, self.patch_size)
 
         # Set up for CFG
-        text_embeddings = torch.cat([text_embeddings, negative_text_embeddings], dim=0)
-        text_embeddings_coords = torch.cat([text_embeddings_coords, negative_text_embeddings_coords], dim=0)
-        text_embeddings_mask = torch.cat([prompt_mask, negative_prompt_mask], dim=0)
+        text_embeddings = torch.cat([text_embeddings, neg_text_embeddings], dim=0)
+        text_embeddings_coords = torch.cat([text_embeddings_coords, neg_text_embeddings_coords], dim=0)
+        text_embeddings_mask = torch.cat([prompt_mask, neg_prompt_mask], dim=0)
         pooled_embedding = torch.cat([pooled_embedding, pooled_neg_embedding], dim=0)
         latent_coords_input = torch.cat([latent_coords, latent_coords], dim=0)
 
-        # Ensure text embeddings, mask, and coords are not longer than the model can handle
-        if text_embeddings.shape[1] > self.model.conditioning_max_sequence_length:
-            text_embeddings = text_embeddings[:, :self.model.conditioning_max_sequence_length]
-            text_embeddings_coords = text_embeddings_coords[:, :self.model.conditioning_max_sequence_length]
-            text_embeddings_mask = text_embeddings_mask[:, :self.model.conditioning_max_sequence_length]
-
-        # Encode the pooled embeddings
-        pooled_embedding = self.pooled_embedding_mlp(pooled_embedding)
-        # Zero out the embedded pooled embeddings for the negative prompt if there isn't one
-        if negative_prompt is None:
-            pooled_embedding[len(prompt):] *= 0.0
         # backward diffusion process
         timesteps = self.make_sampling_timesteps(num_inference_steps).to(device)
         for i, t in tqdm(enumerate(timesteps), disable=not progress_bar):
@@ -717,14 +717,6 @@ class ComposerTextToImageMMDiT(ComposerModel):
                 delta_t = timesteps[i]
             # Update the latents
             latent_patches = latent_patches - pred * delta_t
-        # Unpatchify the latents
-        latents = [
-            unpatchify(latent_patches[i], latent_coords[i], self.patch_size) for i in range(latent_patches.shape[0])
-        ]
-        latents = torch.stack(latents)
-        # Scale the latents back to the original scale
-        latents = latents * self.latent_std + self.latent_mean
         # Decode the latents
-        image = self.autoencoder.decode(latents).sample
-        image = (image / 2 + 0.5).clamp(0, 1)
+        image = self.decode_image(latent_patches, latent_coords)
         return image.detach()  # (batch*num_images_per_prompt, channel, h, w)
