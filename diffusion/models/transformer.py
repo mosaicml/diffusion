@@ -691,7 +691,9 @@ class ComposerTextToImageMMDiT(ComposerModel):
 
         # Encode the pooled embeddings
         pooled_embedding = self.pooled_embedding_mlp(pooled_embedding)
-
+        # Zero out the embedded pooled embeddings for the negative prompt if there isn't one
+        if negative_prompt is None:
+            pooled_embedding[len(prompt):] *= 0.0
         # backward diffusion process
         timesteps = self.make_sampling_timesteps(num_inference_steps).to(device)
         for i, t in tqdm(enumerate(timesteps), disable=not progress_bar):
