@@ -20,7 +20,7 @@ from omegaconf import DictConfig, OmegaConf
 from torch.optim import Optimizer
 
 from diffusion.models.autoencoder import ComposerAutoEncoder, ComposerDiffusersAutoEncoder
-from diffusion.models.transformer import ComposerTextToImageMMDiT
+from diffusion.models.t2i_transformer import ComposerTextToImageMMDiT
 
 
 def make_autoencoder_optimizer(config: DictConfig, model: ComposerModel) -> Optimizer:

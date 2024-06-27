@@ -17,8 +17,9 @@ from diffusion.models.autoencoder import (AutoEncoder, AutoEncoderLoss, Composer
 from diffusion.models.layers import ClippedAttnProcessor2_0, ClippedXFormersAttnProcessor, zero_module
 from diffusion.models.pixel_diffusion import PixelDiffusion
 from diffusion.models.stable_diffusion import StableDiffusion
+from diffusion.models.t2i_transformer import ComposerTextToImageMMDiT
 from diffusion.models.text_encoder import MultiTextEncoder, MultiTokenizer
-from diffusion.models.transformer import ComposerTextToImageMMDiT, DiffusionTransformer
+from diffusion.models.transformer import DiffusionTransformer
 from diffusion.schedulers.schedulers import ContinuousTimeScheduler
 from diffusion.schedulers.utils import shift_noise_schedule
 
@@ -516,7 +517,34 @@ def text_to_image_transformer(
     timestep_std: float = 1.0,
     timestep_shift: float = 1.0,
 ):
-    """Text to image transformer training setup."""
+    """Text to image transformer training setup.
+
+    Args:
+        tokenizer_names (str, Tuple[str, ...]): HuggingFace name(s) of the tokenizer(s) to load.
+            Default: ``('stabilityai/stable-diffusion-xl-base-1.0/tokenizer')``.
+        text_encoder_names (str, Tuple[str, ...]): HuggingFace name(s) of the text encoder(s) to load.
+            Default: ``('stabilityai/stable-diffusion-xl-base-1.0/text_encoder')``.
+        vae_model_name (str): Name of the VAE model to load. Defaults to 'madebyollin/sdxl-vae-fp16-fix'.
+        autoencoder_path (optional, str): Path to autoencoder weights if using custom autoencoder. If not specified,
+            will use the vae from `model_name`. Default `None`.
+        autoencoder_local_path (optional, str): Path to autoencoder weights. Default: `/tmp/autoencoder_weights.pt`.
+        num_features (int): Number of features in the transformer. Default: `1152`.
+        num_heads (int): Number of heads in the transformer. Default: `16`.
+        num_layers (int): Number of layers in the transformer. Default: `28`.
+        input_max_sequence_length (int): Maximum sequence length for the input. Default: `1024`.
+        conditioning_features (int): Number of features in the conditioning transformer. Default: `768`.
+        conditioning_max_sequence_length (int): Maximum sequence length for the conditioning transformer. Default: `77`.
+        patch_size (int): Patch size for the transformer. Default: `2`.
+        latent_mean (float, Tuple, str): The mean of the autoencoder latents. Either a float for a single value,
+            a tuple of means, or or `'latent_statistics'` to try to use the value from the autoencoder
+            checkpoint. Defaults to `0.0`.
+        latent_std (float, Tuple, str): The std. dev. of the autoencoder latents. Either a float for a single value,
+            a tuple of std_devs, or or `'latent_statistics'` to try to use the value from the autoencoder
+            checkpoint. Defaults to `1/0.13025`.
+        timestep_mean (float): The mean of the timesteps. Default: `0.0`.
+        timestep_std (float): The std. dev. of the timesteps. Default: `1.0`.
+        timestep_shift (float): The shift of the timesteps. Default: `1.0`.
+    """
     latent_mean, latent_std = _parse_latent_statistics(latent_mean), _parse_latent_statistics(latent_std)
 
     if (isinstance(tokenizer_names, tuple) or
