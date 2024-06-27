@@ -56,13 +56,12 @@ def make_transformer_optimizer(config: DictConfig, model: ComposerModel) -> Opti
     print('Configuring optimizer for transformer')
     assert isinstance(model, ComposerTextToImageMMDiT)
 
-    # Turn off weight decay for the positional embeddings
+    # Turn off weight decay for biases, norms, and positional embeddings.
     no_decay = ['bias', 'norm', 'position_embedding']
     params_with_no_decay = []
     params_with_decay = []
     for name, param in model.named_parameters():
         if any(nd in name for nd in no_decay):
-            #print(f'No decay: {name}')
             params_with_no_decay.append(param)
         else:
             params_with_decay.append(param)
