@@ -4,7 +4,7 @@
 """Diffusion Transformer model."""
 
 import math
-from typing import Optional
+from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -14,12 +14,12 @@ from torchmetrics import MeanSquaredError
 from tqdm.auto import tqdm
 
 
-def modulate(x, shift, scale):
+def modulate(x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
     """Modulate the input with the shift and scale."""
     return x * (1.0 + scale) + shift
 
 
-def get_multidimensional_position_embeddings(position_embeddings, coords):
+def get_multidimensional_position_embeddings(position_embeddings: torch.Tensor, coords: torch.Tensor) -> torch.Tensor:
     """Extracts position embeddings for a multidimensional sequence given by coordinates.
 
     Position embeddings are shape (D, T, F). Coords are shape (B, S, D). Position embeddings should be
@@ -44,7 +44,7 @@ def get_multidimensional_position_embeddings(position_embeddings, coords):
     return sequenced_embeddings  # (B, S, F, D)
 
 
-def patchify(latents, patch_size):
+def patchify(latents: torch.Tensor, patch_size: int) -> Tuple[torch.Tensor, torch.Tensor]:
     """Function to extract non-overlapping patches from image-like latents.
 
     Converts a tensor of shape [B, C, H, W] to patches of shape [B, num_patches, C * patch_size * patch_size].
@@ -72,7 +72,7 @@ def patchify(latents, patch_size):
     return patches, coords
 
 
-def unpatchify(patches, coords, patch_size):
+def unpatchify(patches: torch.Tensor, coords: torch.Tensor, patch_size: int) -> torch.Tensor:
     """Recover an image-like tensor from a sequence of patches and their coordinates.
 
     Converts a tensor of shape [num_patches, C * patch_size * patch_size] to an image of shape [C, H, W].
@@ -89,7 +89,7 @@ def unpatchify(patches, coords, patch_size):
     H = coords[:, 0].max() * patch_size + patch_size
     W = coords[:, 1].max() * patch_size + patch_size
     # Initialize an empty tensor for the reconstructed image
-    img = torch.zeros((C, H, W), device=patches.device, dtype=patches.dtype)
+    img = torch.zeros((C, H, W), device=patches.device, dtype=patches.dtype)  # type: ignore
     # Iterate over the patches and their coordinates
     for patch, (y, x) in zip(patches, patch_size * coords):
         # Reshape the patch to [C, patch_size, patch_size]
@@ -100,9 +100,19 @@ def unpatchify(patches, coords, patch_size):
 
 
 class ScalarEmbedding(nn.Module):
-    """Embedding block for scalars."""
+    """Embedding block for scalars.
 
-    def __init__(self, num_features, sinusoidal_embedding_dim=256):
+    Embeds a scalar into a vector of size `num_features` using a sinusoidal embedding followed by an MLP.
+
+    Args:
+        num_features (int): The size of the output vector.
+        sinusoidal_embedding_dim (int): The size of the intermediate sinusoidal embedding. Default: `256`.
+
+    Returns:
+        torch.Tensor: The embedded scalar
+    """
+
+    def __init__(self, num_features: int, sinusoidal_embedding_dim: int = 256):
         super().__init__()
         self.num_features = num_features
         self.sinusoidal_embedding_dim = sinusoidal_embedding_dim
@@ -111,14 +121,13 @@ class ScalarEmbedding(nn.Module):
         self.mlp = nn.Sequential(self.linear_1, nn.SiLU(), self.linear_2)
 
     @staticmethod
-    def timestep_embedding(timesteps, dim, max_period=10000):
+    def timestep_embedding(timesteps: torch.Tensor, dim: int, max_period: int = 10000) -> torch.Tensor:
         """Create sinusoidal timestep embeddings.
 
-        :param timesteps: a 1-D Tensor of N indices, one per batch element.
-                        These may be fractional.
-        :param dim: the dimension of the output.
-        :param max_period: controls the minimum frequency of the embeddings.
-        :return: an [N x dim] Tensor of positional embeddings.
+        Args:
+            timesteps (torch.Tensor): The timesteps to embed.
+            dim (int): The size of the output embedding.
+            max_period (int): The maximum period of the sinusoidal embedding. Default: `10000`.
         """
         half = dim // 2
         freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) /
@@ -129,15 +138,22 @@ class ScalarEmbedding(nn.Module):
             embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
         return embedding
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         sinusoidal_embedding = self.timestep_embedding(x, self.sinusoidal_embedding_dim)
         return self.mlp(sinusoidal_embedding)
 
 
 class VectorEmbedding(nn.Module):
-    """Embedding block for vectors."""
+    """Embedding block for vectors.
 
-    def __init__(self, input_features, num_features):
+    Embeds vectors via an MLP into a vector of size `num_features`.
+
+    Args:
+        input_features (int): The size of the input vector.
+        num_features (int): The size of the output vector.
+    """
+
+    def __init__(self, input_features: int, num_features: int):
         super().__init__()
         self.input_features = input_features
         self.num_features = num_features
@@ -145,14 +161,20 @@ class VectorEmbedding(nn.Module):
         self.linear_2 = nn.Linear(self.num_features, self.num_features)
         self.mlp = nn.Sequential(self.linear_1, nn.SiLU(), self.linear_2)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.mlp(x)
 
 
 class PreAttentionBlock(nn.Module):
-    """Block to compute QKV before attention."""
+    """Block to compute QKV before attention.
 
-    def __init__(self, num_features):
+    Includes QK layernorms and an adaptive layernorms.
+
+    Args:
+        num_features (int): Number of input features.
+    """
+
+    def __init__(self, num_features: int):
         super().__init__()
         self.num_features = num_features
 
@@ -173,7 +195,7 @@ class PreAttentionBlock(nn.Module):
         # Init the standard deviation of the weights to 0.02 as is tradition
         nn.init.normal_(self.qkv.weight, std=0.02)
 
-    def forward(self, x, t):
+    def forward(self, x: torch.Tensor, t: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # Calculate the modulations
         mods = self.adaLN_mlp(t).unsqueeze(1).chunk(2, dim=2)
         # Forward, with modulations
@@ -186,14 +208,23 @@ class PreAttentionBlock(nn.Module):
 
 
 class SelfAttention(nn.Module):
-    """Standard self attention layer that supports masking."""
+    """Standard multihead self attention layer that supports masking.
 
-    def __init__(self, num_features, num_heads):
+    Args:
+        num_features (int): Number of input features.
+        num_heads (int): Number of attention heads.
+    """
+
+    def __init__(self, num_features: int, num_heads: int):
         super().__init__()
         self.num_features = num_features
         self.num_heads = num_heads
 
-    def forward(self, q, k, v, mask=None):
+    def forward(self,
+                q: torch.Tensor,
+                k: torch.Tensor,
+                v: torch.Tensor,
+                mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         # Get the shape of the inputs
         B, T, C = v.size()
         # Reshape the query, key, and values for multi-head attention
@@ -208,9 +239,16 @@ class SelfAttention(nn.Module):
 
 
 class PostAttentionBlock(nn.Module):
-    """Block to postprocess V after attention."""
+    """Block to postprocess v after attention.
 
-    def __init__(self, num_features, expansion_factor=4):
+    Includes adaptive layernorms.
+
+    Args:
+        num_features (int): Number of input features.
+        expansion_factor (int): Expansion factor for the MLP. Default: `4`.
+    """
+
+    def __init__(self, num_features: int, expansion_factor: int = 4):
         super().__init__()
         self.num_features = num_features
         self.expansion_factor = expansion_factor
@@ -233,7 +271,7 @@ class PostAttentionBlock(nn.Module):
         # Output MLP
         self.output_mlp = nn.Sequential(self.linear_1, self.nonlinearity, self.linear_2)
 
-    def forward(self, v, x, t):
+    def forward(self, v: torch.Tensor, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """Forward takes v from self attention and the original sequence x with scalar conditioning t."""
         # Calculate the modulations
         mods = self.adaLN_mlp(t).unsqueeze(1).chunk(4, dim=2)
@@ -251,9 +289,19 @@ class PostAttentionBlock(nn.Module):
 
 
 class MMDiTBlock(nn.Module):
-    """Transformer block that supports masking, multimodal attention, and adaptive norms."""
+    """Transformer block that supports masking, multimodal attention, and adaptive norms.
 
-    def __init__(self, num_features, num_heads, expansion_factor=4, is_last=False):
+    Can optionally be the last block in the network, in which case it does not apply post-attention layers to the
+    conditioning sequence, as those params may not be used.
+
+    Args:
+        num_features (int): Number of input features.
+        num_heads (int): Number of attention heads.
+        expansion_factor (int): Expansion factor for the MLP. Default: `4`.
+        is_last (bool): Whether this is the last block in the network. Default: `False`.
+    """
+
+    def __init__(self, num_features: int, num_heads: int, expansion_factor: int = 4, is_last: bool = False):
         super().__init__()
         self.num_features = num_features
         self.num_heads = num_heads
@@ -269,7 +317,11 @@ class MMDiTBlock(nn.Module):
         if not self.is_last:
             self.post_attention_block_2 = PostAttentionBlock(self.num_features, self.expansion_factor)
 
-    def forward(self, x1, x2, t, mask=None):
+    def forward(self,
+                x1: torch.Tensor,
+                x2: torch.Tensor,
+                t: torch.Tensor,
+                mask: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
         # Pre-attention for the two modalities
         q1, k1, v1 = self.pre_attention_block_1(x1, t)
         q2, k2, v2 = self.pre_attention_block_2(x2, t)
@@ -290,7 +342,22 @@ class MMDiTBlock(nn.Module):
 
 
 class DiffusionTransformer(nn.Module):
-    """Transformer model for diffusion."""
+    """Transformer model for generic diffusion.
+
+    Supports input and conditioning sequences with different lengths and dimensions.
+
+    Args:
+        num_features (int): Number of hidden features.
+        num_heads (int): Number of attention heads.
+        num_layers (int): Number of transformer layers.
+        input_features (int): Number of features in the input sequence. Default: `192`.
+        input_max_sequence_length (int): Maximum sequence length for the input sequence. Default: `1024`.
+        input_dimension (int): Dimension of the input sequence. Default: `2`.
+        conditioning_features (int): Number of features in the conditioning sequence. Default: `1024`.
+        conditioning_max_sequence_length (int): Maximum sequence length for the conditioning sequence. Default: `77`.
+        conditioning_dimension (int): Dimension of the conditioning sequence. Default: `1`.
+        expansion_factor (int): Expansion factor for the MLPs. Default: `4`.
+    """
 
     def __init__(self,
                  num_features: int,
@@ -354,25 +421,40 @@ class DiffusionTransformer(nn.Module):
         nn.init.zeros_(self.adaLN_mlp_linear.bias)
         self.adaLN_mlp = nn.Sequential(nn.SiLU(), self.adaLN_mlp_linear)
 
-    def fsdp_wrap_fn(self, module):
+    def fsdp_wrap_fn(self, module: nn.Module) -> bool:
         if isinstance(module, MMDiTBlock):
             return True
         return False
 
-    def activation_checkpointing_fn(self, module):
+    def activation_checkpointing_fn(self, module: nn.Module) -> bool:
         if isinstance(module, MMDiTBlock):
             return True
         return False
 
     def forward(self,
-                x,
-                input_coords,
-                t,
-                conditioning,
-                conditioning_coords,
-                input_mask=None,
-                conditioning_mask=None,
-                constant_conditioning=None):
+                x: torch.Tensor,
+                input_coords: torch.Tensor,
+                t: torch.Tensor,
+                conditioning: torch.Tensor,
+                conditioning_coords: torch.Tensor,
+                input_mask: Optional[torch.Tensor] = None,
+                conditioning_mask: Optional[torch.Tensor] = None,
+                constant_conditioning: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """Forward pass through the diffusion transformer.
+
+        Args:
+            x (torch.Tensor): The input sequence of shape (B, T1, C1).
+            input_coords (torch.Tensor): The coordinates of the D dimensional input sequence of shape (B, T1, D).
+            t (torch.Tensor): The scalar timesteps of shape (B, 1).
+            conditioning (torch.Tensor): The conditioning sequence of shape (B, T2, C2).
+            conditioning_coords (torch.Tensor): The coordinates of the D dimensional conditioning sequence of shape (B, T2, D).
+            input_mask (Optional[torch.Tensor]): The mask for the input sequence of shape (B, T1).
+            conditioning_mask (Optional[torch.Tensor]): The mask for the conditioning sequence of shape (B, T2).
+            constant_conditioning (Optional[torch.Tensor]): Optional additional constant conditioning (B, num_features).
+
+        Returns:
+            torch.Tensor: The output sequence of shape (B, T1, C1).
+        """
         # Embed the timestep
         t = self.timestep_embedding(t)
         # Optionally add constant conditioning. This assumes it has been embedded already.
