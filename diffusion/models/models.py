@@ -504,8 +504,6 @@ def text_to_image_transformer(
     vae_model_name: str = 'madebyollin/sdxl-vae-fp16-fix',
     autoencoder_path: Optional[str] = None,
     autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
-    num_features: int = 1152,
-    num_heads: int = 16,
     num_layers: int = 28,
     input_max_sequence_length: int = 1024,
     conditioning_features: int = 768,
@@ -528,9 +526,8 @@ def text_to_image_transformer(
         autoencoder_path (optional, str): Path to autoencoder weights if using custom autoencoder. If not specified,
             will use the vae from `model_name`. Default `None`.
         autoencoder_local_path (optional, str): Path to autoencoder weights. Default: `/tmp/autoencoder_weights.pt`.
-        num_features (int): Number of features in the transformer. Default: `1152`.
-        num_heads (int): Number of heads in the transformer. Default: `16`.
-        num_layers (int): Number of layers in the transformer. Default: `28`.
+        num_layers (int): Number of layers in the transformer. Number of heads and layer width are determined by
+            this according to `num_features = 64 * num_layers`, and `num_heads = num_layers`. Default: `28`.
         input_max_sequence_length (int): Maximum sequence length for the input. Default: `1024`.
         conditioning_features (int): Number of features in the conditioning transformer. Default: `768`.
         conditioning_max_sequence_length (int): Maximum sequence length for the conditioning transformer. Default: `77`.
@@ -544,6 +541,7 @@ def text_to_image_transformer(
         timestep_mean (float): The mean of the timesteps. Default: `0.0`.
         timestep_std (float): The std. dev. of the timesteps. Default: `1.0`.
         timestep_shift (float): The shift of the timesteps. Default: `1.0`.
+        pretrained (bool): Whether to load pretrained weights. Not used. Defaults to False.
     """
     latent_mean, latent_std = _parse_latent_statistics(latent_mean), _parse_latent_statistics(latent_std)
 
@@ -589,8 +587,8 @@ def text_to_image_transformer(
     assert isinstance(latent_mean, tuple) and isinstance(latent_std, tuple)
 
     # Make the transformer model
-    transformer = DiffusionTransformer(num_features=num_features,
-                                       num_heads=num_heads,
+    transformer = DiffusionTransformer(num_features=64 * num_layers,
+                                       num_heads=num_layers,
                                        num_layers=num_layers,
                                        input_features=autoencoder_channels * (patch_size**2),
                                        input_max_sequence_length=input_max_sequence_length,
