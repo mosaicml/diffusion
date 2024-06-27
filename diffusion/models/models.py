@@ -4,6 +4,7 @@
 """Constructors for diffusion models."""
 
 import logging
+import math
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -505,7 +506,7 @@ def text_to_image_transformer(
     autoencoder_path: Optional[str] = None,
     autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
     num_layers: int = 28,
-    input_max_sequence_length: int = 1024,
+    max_image_side: int = 1280,
     conditioning_features: int = 768,
     conditioning_max_sequence_length: int = 77,
     patch_size: int = 2,
@@ -532,7 +533,7 @@ def text_to_image_transformer(
         autoencoder_local_path (optional, str): Path to autoencoder weights. Default: `/tmp/autoencoder_weights.pt`.
         num_layers (int): Number of layers in the transformer. Number of heads and layer width are determined by
             this according to `num_features = 64 * num_layers`, and `num_heads = num_layers`. Default: `28`.
-        input_max_sequence_length (int): Maximum sequence length for the input. Default: `1024`.
+        max_image_side (int): Maximum side length of the image. Default: `1280`.
         conditioning_features (int): Number of features in the conditioning transformer. Default: `768`.
         conditioning_max_sequence_length (int): Maximum sequence length for the conditioning transformer. Default: `77`.
         patch_size (int): Patch size for the transformer. Default: `2`.
@@ -592,7 +593,8 @@ def text_to_image_transformer(
     if isinstance(latent_std, float):
         latent_std = (latent_std,) * autoencoder_channels
     assert isinstance(latent_mean, tuple) and isinstance(latent_std, tuple)
-
+    # Figure out the maximum input sequence length
+    input_max_sequence_length = math.ceil(max_image_side / (downsample_factor * patch_size))
     # Make the transformer model
     transformer = DiffusionTransformer(num_features=64 * num_layers,
                                        num_heads=num_layers,
