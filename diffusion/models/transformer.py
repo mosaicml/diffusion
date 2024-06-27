@@ -20,7 +20,21 @@ def modulate(x, shift, scale):
 
 
 def get_multidimensional_position_embeddings(position_embeddings, coords):
-    """Position embeddings are shape (D, T, F). Coords are shape (B, S, D)."""
+    """Extracts position embeddings for a multidimensional sequence given by coordinates.
+
+    Position embeddings are shape (D, T, F). Coords are shape (B, S, D). Position embeddings should be
+    interpreted as D dimensional embeddings with F features each for a maximum of T timesteps.
+    Coordinates or `coords` is a batch of size B of sequences of length S with D dimensional integer
+    coordinates. For example, if D=2, then each of the B, S elements of the sequence would have a 2D
+    X,Y coordinate.
+
+    Args:
+        position_embeddings (torch.Tensor): Position embeddings of shape (D, T, F).
+        coords (torch.Tensor): Coordinates of shape (B, S, D).
+
+    Returns:
+        torch.Tensor: Sequenced embeddings of shape (B, S, F, D)
+    """
     B, S, D = coords.shape
     F = position_embeddings.shape[2]
     coords = coords.reshape(B * S, D)
@@ -31,7 +45,19 @@ def get_multidimensional_position_embeddings(position_embeddings, coords):
 
 
 def patchify(latents, patch_size):
-    """Converts a tensor of shape [B, C, H, W] to patches of shape [B, num_patches, C * patch_size * patch_size]."""
+    """Function to extract non-overlapping patches from image-like latents.
+
+    Converts a tensor of shape [B, C, H, W] to patches of shape [B, num_patches, C * patch_size * patch_size].
+    Coordinates of the patches are also returned to allow for unpatching and sequence embedding.
+
+    Args:
+        latents (torch.Tensor): Latents of shape [B, C, H, W].
+        patch_size (int): Size of the patches.
+
+    Returns:
+        torch.Tensor: Patches of shape [B, num_patches, C * patch_size * patch_size].
+        torch.Tensor: Coordinates of the patches. Shape [B, num_patches, 2].
+    """
     # Assume img is a tensor of shape [B, C, H, W]
     B, C, H, W = latents.shape
     assert H % patch_size == 0 and W % patch_size == 0, 'Image dimensions must be divisible by patch_size'
@@ -47,7 +73,16 @@ def patchify(latents, patch_size):
 
 
 def unpatchify(patches, coords, patch_size):
-    """Converts a tensor of shape [num_patches, C * patch_size * patch_size] to an image of shape [C, H, W]."""
+    """Recover an image-like tensor from a sequence of patches and their coordinates.
+
+    Converts a tensor of shape [num_patches, C * patch_size * patch_size] to an image of shape [C, H, W].
+    Coordinates are used to place the patches in the correct location in the image.
+
+    Args:
+        patches (torch.Tensor): Patches of shape [num_patches, C * patch_size * patch_size].
+        coords (torch.Tensor): Coordinates of the patches. Shape [num_patches, 2].
+        patch_size (int): Size of the patches.
+    """
     # Assume patches is a tensor of shape [num_patches, C * patch_size * patch_size]
     C = patches.shape[1] // (patch_size * patch_size)
     # Calculate the height and width of the original image from the coordinates
@@ -639,9 +674,11 @@ class ComposerTextToImageMMDiT(ComposerModel):
             raise ValueError(f'Unrecognized metric {metric.__class__.__name__}')
 
     def make_sampling_timesteps(self, N: int):
-        timesteps = torch.linspace(1, 0, N)
+        timesteps = torch.linspace(1, 0, N + 1)
         timesteps = self.timestep_shift * timesteps / (1 + (self.timestep_shift - 1) * timesteps)
-        return timesteps
+        # Make timestep differences
+        delta_t = timesteps[:-1] - timesteps[1:]
+        return timesteps[:-1], delta_t
 
     @torch.no_grad()
     def generate(self,
@@ -695,8 +732,10 @@ class ComposerTextToImageMMDiT(ComposerModel):
         latent_coords_input = torch.cat([latent_coords, latent_coords], dim=0)
 
         # backward diffusion process
-        timesteps = self.make_sampling_timesteps(num_inference_steps).to(device)
+        timesteps, delta_t = self.make_sampling_timesteps(num_inference_steps)
+        timesteps, delta_t = timesteps.to(device), delta_t.to(device)
         for i, t in tqdm(enumerate(timesteps), disable=not progress_bar):
+            print(t, delta_t[i])
             latent_patches_input = torch.cat([latent_patches, latent_patches], dim=0)
             # Get the model prediction
             model_out = self.model(latent_patches_input,
@@ -710,13 +749,8 @@ class ComposerTextToImageMMDiT(ComposerModel):
             # Do CFG
             pred_cond, pred_uncond = model_out.chunk(2, dim=0)
             pred = pred_uncond + guidance_scale * (pred_cond - pred_uncond)
-            # compute the time delta.
-            if i < len(timesteps) - 1:
-                delta_t = timesteps[i] - timesteps[(i + 1)]
-            else:
-                delta_t = timesteps[i]
             # Update the latents
-            latent_patches = latent_patches - pred * delta_t
+            latent_patches = latent_patches - pred * delta_t[i]
         # Decode the latents
         image = self.decode_image(latent_patches, latent_coords)
         return image.detach()  # (batch*num_images_per_prompt, channel, h, w)
