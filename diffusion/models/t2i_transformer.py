@@ -3,7 +3,7 @@
 
 """Composer model for text to image generation with a multimodal transformer."""
 
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.nn.functional as F
@@ -80,11 +80,6 @@ class ComposerTextToImageMMDiT(ComposerModel):
         tokenizer (transformers.PreTrainedTokenizer): Tokenizer used for
             text_encoder. For a `CLIPTextModel` this will be the
             `CLIPTokenizer` from HuggingFace transformers.
-        noise_scheduler (diffusers.SchedulerMixin): HuggingFace diffusers
-            noise scheduler. Used during the forward diffusion process (training).
-        inference_noise_scheduler (diffusers.SchedulerMixin): HuggingFace diffusers
-            noise scheduler. Used during the backward diffusion process (inference).
-        prediction_type (str): The type of prediction to use. Currently `epsilon`, `v_prediction` are supported.
         latent_mean (Optional[tuple[float]]): The means of the latent space. If not specified, defaults to
             4 * (0.0,). Default: `None`.
         latent_std (Optional[tuple[float]]): The standard deviations of the latent space. If not specified,
@@ -92,9 +87,15 @@ class ComposerTextToImageMMDiT(ComposerModel):
         patch_size (int): The size of the patches in the image latents. Default: `2`.
         downsample_factor (int): The factor by which the image is downsampled by the autoencoder. Default `8`.
         latent_channels (int): The number of channels in the autoencoder latent space. Default: `4`.
+        timestep_mean (float): The mean of the logit-normal distribution for sampling timesteps. Default: `0.0`.
+        timestep_std (float): The standard deviation of the logit-normal distribution for sampling timesteps.
+            Default: `1.0`.
+        timestep_shift (float): The shift parameter for the logit-normal distribution for sampling timesteps.
+            A value of `1.0` is no shift. Default: `1.0`.
         image_key (str): The name of the images in the dataloader batch. Default: `image`.
         caption_key (str): The name of the caption in the dataloader batch. Default: `caption`.
         caption_mask_key (str): The name of the caption mask in the dataloader batch. Default: `caption_mask`.
+        pooled_embedding_features (int): The number of features in the pooled text embeddings. Default: `768`.
     """
 
     def __init__(
@@ -184,7 +185,7 @@ class ComposerTextToImageMMDiT(ComposerModel):
         """Sets the rng generator for the model."""
         self.rng_generator = rng_generator
 
-    def flops_per_batch(self, batch):
+    def flops_per_batch(self, batch) -> int:
         batch_size = batch[self.image_key].shape[0]
         height, width = batch[self.image_key].shape[2:]
         input_seq_len = height * width / (self.patch_size**2 * self.downsample_factor**2)
@@ -204,7 +205,8 @@ class ComposerTextToImageMMDiT(ComposerModel):
         attention_flops = 4 * self.model.num_layers * seq_len**2 * self.model.num_features * batch_size
         return 3 * param_flops + 3 * attention_flops
 
-    def encode_image(self, image):
+    def encode_image(self, image: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Encode an image tensor with the autoencoder and patchify the latents."""
         with torch.cuda.amp.autocast(enabled=False):
             latents = self.autoencoder.encode(image.half())['latent_dist'].sample().data
         # Scale and patchify the latents
@@ -213,7 +215,8 @@ class ComposerTextToImageMMDiT(ComposerModel):
         return latent_patches, latent_coords
 
     @torch.no_grad()
-    def decode_image(self, latent_patches, latent_coords):
+    def decode_image(self, latent_patches: torch.Tensor, latent_coords: torch.Tensor) -> torch.Tensor:
+        """Decode image latent patches and unpatchify the image."""
         # Unpatchify the latents
         latents = [
             unpatchify(latent_patches[i], latent_coords[i], self.patch_size) for i in range(latent_patches.shape[0])
@@ -227,7 +230,8 @@ class ComposerTextToImageMMDiT(ComposerModel):
         image = (image / 2 + 0.5).clamp(0, 1)
         return image
 
-    def tokenize_prompts(self, prompts):
+    def tokenize_prompts(self, prompts: Union[str, List[str]]) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Tokenize the prompts using the model's tokenizer."""
         tokenized_out = self.tokenizer(prompts,
                                        padding='max_length',
                                        max_length=self.tokenizer.model_max_length,
@@ -235,7 +239,8 @@ class ComposerTextToImageMMDiT(ComposerModel):
                                        return_tensors='pt')
         return tokenized_out['input_ids'], tokenized_out['attention_mask']
 
-    def combine_attention_masks(self, attention_masks):
+    def combine_attention_masks(self, attention_masks: torch.Tensor) -> torch.Tensor:
+        """Combine attention masks for the encoder if there are multiple text encoders."""
         if len(attention_masks.shape) == 2:
             return attention_masks
         elif len(attention_masks.shape) == 3:
@@ -246,13 +251,17 @@ class ComposerTextToImageMMDiT(ComposerModel):
         else:
             raise ValueError(f'attention_mask should have either 2 or 3 dimensions: {attention_masks.shape}')
 
-    def make_text_embeddings_coords(self, text_embeddings):
+    def make_text_embeddings_coords(self, text_embeddings: torch.Tensor) -> torch.Tensor:
+        """Make text embeddings coordinates for the transformer."""
         text_embeddings_coords = torch.arange(text_embeddings.shape[1], device=text_embeddings.device)
         text_embeddings_coords = text_embeddings_coords.unsqueeze(0).expand(text_embeddings.shape[0], -1)
         text_embeddings_coords = text_embeddings_coords.unsqueeze(-1)
         return text_embeddings_coords
 
-    def embed_tokenized_prompts(self, tokenized_prompts, attention_masks):
+    def embed_tokenized_prompts(
+            self, tokenized_prompts: torch.Tensor,
+            attention_masks: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Use the model's text encoder to embed tokenized prompts and create pooled text embeddings."""
         with torch.cuda.amp.autocast(enabled=False):
             # Ensure text embeddings are not longer than the model can handle
             if tokenized_prompts.shape[1] > self.model.conditioning_max_sequence_length:
@@ -265,7 +274,7 @@ class ComposerTextToImageMMDiT(ComposerModel):
         pooled_text_embeddings = self.pooled_embedding_mlp(pooled_text_embeddings)
         return text_embeddings, text_embeddings_coords, text_mask, pooled_text_embeddings
 
-    def diffusion_forward_process(self, inputs: torch.Tensor):
+    def diffusion_forward_process(self, inputs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Diffusion forward process using a rectified flow."""
         # First, sample timesteps according to a logit-normal distribution
         u = torch.randn(inputs.shape[0], device=inputs.device, generator=self.rng_generator)
@@ -343,7 +352,23 @@ class ComposerTextToImageMMDiT(ComposerModel):
                  num_images_per_prompt: int = 1,
                  progress_bar: bool = True,
                  seed: Optional[int] = None):
-        """Generate from the model."""
+        """Run generation for the model.
+
+        Args:
+            prompt (list): List of prompts for the generation.
+            negative_prompt (Optional[list]): List of negative prompts for the generation. Default: `None`.
+            height (int): Height of the generated images. Default: `256`.
+            width (int): Width of the generated images. Default: `256`.
+            guidance_scale (float): Scale for the guidance. Default: `7.0`.
+            rescaled_guidance (Optional[float]): Rescale the guidance. Default: `None`.
+            num_inference_steps (int): Number of inference steps. Default: `50`.
+            num_images_per_prompt (int): Number of images per prompt. Default: `1`.
+            progress_bar (bool): Whether to show a progress bar. Default: `True`.
+            seed (Optional[int]): Seed for the generation. Default: `None`.
+
+        Returns:
+            torch.Tensor: Generated images. Shape [batch*num_images_per_prompt, channel, h, w].
+        """
         device = next(self.model.parameters()).device
         # Create rng for the generation
         rng_generator = torch.Generator(device=device)
@@ -399,6 +424,12 @@ class ComposerTextToImageMMDiT(ComposerModel):
             # Do CFG
             pred_cond, pred_uncond = model_out.chunk(2, dim=0)
             pred = pred_uncond + guidance_scale * (pred_cond - pred_uncond)
+            # Optionally rescale the classifer free guidance
+            if rescaled_guidance is not None:
+                std_pos = torch.std(pred_cond, dim=(1, 2), keepdim=True)
+                std_cfg = torch.std(pred, dim=(1, 2), keepdim=True)
+                pred_rescaled = pred * (std_pos / std_cfg)
+                pred = pred_rescaled * rescaled_guidance + pred * (1 - rescaled_guidance)
             # Update the latents
             latent_patches = latent_patches - pred * delta_t[i]
         # Decode the latents
