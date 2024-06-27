@@ -82,6 +82,8 @@ class ScalarEmbedding(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         sinusoidal_embedding = self.timestep_embedding(x, self.sinusoidal_embedding_dim)
+        # Ensure embedding is the correct dtype
+        sinusoidal_embedding = sinusoidal_embedding.to(next(self.parameters()).dtype)
         return self.mlp(sinusoidal_embedding)
 
 

@@ -270,6 +270,9 @@ class ComposerTextToImageMMDiT(ComposerModel):
             text_embeddings, pooled_text_embeddings = text_encoder_out[0], text_encoder_out[1]
             text_mask = self.combine_attention_masks(attention_masks)
             text_embeddings_coords = self.make_text_embeddings_coords(text_embeddings)
+        # Ensure the embeddings are the same dtype as the model
+        text_embeddings = text_embeddings.to(next(self.model.parameters()).dtype)
+        pooled_text_embeddings = pooled_text_embeddings.to(next(self.pooled_embedding_mlp.parameters()).dtype)
         # Encode the pooled embeddings
         pooled_text_embeddings = self.pooled_embedding_mlp(pooled_text_embeddings)
         return text_embeddings, text_embeddings_coords, text_mask, pooled_text_embeddings
@@ -277,7 +280,7 @@ class ComposerTextToImageMMDiT(ComposerModel):
     def diffusion_forward_process(self, inputs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Diffusion forward process using a rectified flow."""
         # First, sample timesteps according to a logit-normal distribution
-        u = torch.randn(inputs.shape[0], device=inputs.device, generator=self.rng_generator)
+        u = torch.randn(inputs.shape[0], device=inputs.device, generator=self.rng_generator, dtype=inputs.dtype)
         u = self.timestep_mean + self.timestep_std * u
         timesteps = torch.sigmoid(u).view(-1, 1, 1)
         timesteps = self.timestep_shift * timesteps / (1 + (self.timestep_shift - 1) * timesteps)
@@ -342,8 +345,8 @@ class ComposerTextToImageMMDiT(ComposerModel):
 
     @torch.no_grad()
     def generate(self,
-                 prompt: list,
-                 negative_prompt: Optional[list] = None,
+                 prompt: Union[str, list],
+                 negative_prompt: Optional[Union[str, list]] = None,
                  height: int = 256,
                  width: int = 256,
                  guidance_scale: float = 7.0,
@@ -355,8 +358,8 @@ class ComposerTextToImageMMDiT(ComposerModel):
         """Run generation for the model.
 
         Args:
-            prompt (list): List of prompts for the generation.
-            negative_prompt (Optional[list]): List of negative prompts for the generation. Default: `None`.
+            prompt (str, list): Prompt or prompts for the generation.
+            negative_prompt (Optional[str, list]): Negative prompt or prompts for the generation. Default: `None`.
             height (int): Height of the generated images. Default: `256`.
             width (int): Width of the generated images. Default: `256`.
             guidance_scale (float): Scale for the guidance. Default: `7.0`.
@@ -376,14 +379,23 @@ class ComposerTextToImageMMDiT(ComposerModel):
             rng_generator = rng_generator.manual_seed(seed)
 
         # Set default negative prompts to empty string if not provided
-        if negative_prompt is None:
+        if isinstance(prompt, str):
+            prompt = [prompt]
+        if isinstance(negative_prompt, str):
+            negative_prompt = [negative_prompt] * len(prompt)
+        elif isinstance(negative_prompt, list):
+            assert len(negative_prompt) == len(prompt), 'Prompt and negative prompt must have the same length.'
+        elif negative_prompt is None:
             negative_prompt = ['' for _ in prompt]
         # Duplicate the images in the prompt and negative prompt if needed.
         prompt = [item for item in prompt for _ in range(num_images_per_prompt)]
         negative_prompt = [item for item in negative_prompt for _ in range(num_images_per_prompt)]
         # Tokenize both prompt and negative prompts
         prompt_tokens, prompt_mask = self.tokenize_prompts(prompt)
+        prompt_tokens, prompt_mask = prompt_tokens.to(device), prompt_mask.to(device)
         negative_prompt_tokens, negative_prompt_mask = self.tokenize_prompts(negative_prompt)
+        negative_prompt_tokens, negative_prompt_mask = negative_prompt_tokens.to(device), negative_prompt_mask.to(
+            device)
         # Embed the tokenized prompts and negative prompts
         text_embeddings, text_embeddings_coords, prompt_mask, pooled_embedding = self.embed_tokenized_prompts(
             prompt_tokens, prompt_mask)

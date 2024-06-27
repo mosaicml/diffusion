@@ -514,6 +514,10 @@ def text_to_image_transformer(
     timestep_mean: float = 0.0,
     timestep_std: float = 1.0,
     timestep_shift: float = 1.0,
+    image_key: str = 'image',
+    caption_key: str = 'captions',
+    caption_mask_key: str = 'attention_mask',
+    pretrained: bool = False,
 ):
     """Text to image transformer training setup.
 
@@ -541,6 +545,9 @@ def text_to_image_transformer(
         timestep_mean (float): The mean of the timesteps. Default: `0.0`.
         timestep_std (float): The std. dev. of the timesteps. Default: `1.0`.
         timestep_shift (float): The shift of the timesteps. Default: `1.0`.
+        image_key (str): The key for the image in the batch. Default: `image`.
+        caption_key (str): The key for the captions in the batch. Default: `captions`.
+        caption_mask_key (str): The key for the caption mask in the batch. Default: `attention_mask`.
         pretrained (bool): Whether to load pretrained weights. Not used. Defaults to False.
     """
     latent_mean, latent_std = _parse_latent_statistics(latent_mean), _parse_latent_statistics(latent_std)
@@ -610,9 +617,9 @@ def text_to_image_transformer(
                                      timestep_mean=timestep_mean,
                                      timestep_std=timestep_std,
                                      timestep_shift=timestep_shift,
-                                     image_key='image',
-                                     caption_key='captions',
-                                     caption_mask_key='attention_mask')
+                                     image_key=image_key,
+                                     caption_key=caption_key,
+                                     caption_mask_key=caption_mask_key)
 
     if torch.cuda.is_available():
         model = DeviceGPU().module_to_device(model)

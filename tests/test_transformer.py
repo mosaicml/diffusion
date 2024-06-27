@@ -4,7 +4,9 @@
 import pytest
 import torch
 
-from diffusion.models.transformer import get_multidimensional_position_embeddings, patchify, unpatchify
+from diffusion.models.models import text_to_image_transformer
+from diffusion.models.t2i_transformer import patchify, unpatchify
+from diffusion.models.transformer import get_multidimensional_position_embeddings
 
 
 def test_multidimensional_position_embeddings():
@@ -49,3 +51,42 @@ def test_patch_and_unpatch(patch_size, batch_size, C, H, W):
     # Verify reconstructed image is close to the original
     for i in range(batch_size):
         assert torch.allclose(image_recon[i], image[i], atol=1e-6)
+
+
+def test_t2i_transformer_forward():
+    # fp16 vae does not run on cpu
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    model = text_to_image_transformer(num_layers=2)
+    batch_size = 1
+    H = 32
+    W = 32
+    image = torch.randn(batch_size, 3, H, W, device=device).half()
+    caption = torch.randint(low=0, high=128, size=(
+        batch_size,
+        77,
+    ), dtype=torch.long, device=device)
+    caption_mask = torch.ones_like(caption, dtype=torch.bool, device=device)
+    batch = {'image': image, 'captions': caption, 'attention_mask': caption_mask}
+    outputs = model(batch)  # model.forward generates the unet output noise or v_pred target.
+    # Desired output shape
+    seq_len = H / (8 * 2) * W / (8 * 2)
+    output_shape = (1, seq_len, 4 * 2 * 2)
+    assert outputs['predictions'].shape == output_shape
+    assert outputs['targets'].shape == output_shape
+
+
+@pytest.mark.parametrize('guidance_scale', [0.0, 3.0])
+@pytest.mark.parametrize('negative_prompt', [None, 'so cool'])
+def test_t2i_transformer_generate(guidance_scale, negative_prompt):
+    model = model = text_to_image_transformer(num_layers=2)
+    output = model.generate(
+        prompt='a cool doge',
+        negative_prompt=negative_prompt,
+        num_inference_steps=1,
+        num_images_per_prompt=1,
+        height=32,
+        width=32,
+        guidance_scale=guidance_scale,
+        progress_bar=False,
+    )
+    assert output.shape == (1, 3, 32, 32)
