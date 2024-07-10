@@ -6,7 +6,6 @@
 import logging
 import random
 from io import BytesIO
-from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
@@ -17,6 +16,7 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 
 from diffusion.datasets.laion.transforms import LargestCenterSquare, RandomCropAspectRatioTransorm, RandomCropSquare
+from diffusion.datasets.utils import make_streams
 from diffusion.models.text_encoder import MultiTokenizer
 
 log = logging.getLogger(__name__)
@@ -182,6 +182,9 @@ def build_streaming_image_caption_dataloader(
     crop_type: Optional[str] = 'square',
     zero_dropped_captions: bool = True,
     sdxl_conditioning: bool = False,
+    proportion: Optional[list] = None,
+    repeat: Optional[list] = None,
+    choose: Optional[list] = None,
     streaming_kwargs: Optional[Dict] = None,
     dataloader_kwargs: Optional[Dict] = None,
 ):
@@ -213,6 +216,9 @@ def build_streaming_image_caption_dataloader(
             Default: ``'square'``.
         zero_dropped_captions (bool): If True, zero out text embeddings for dropped captions. Default: ``True``.
         sdxl_conditioning (bool): Whether or not to include SDXL microconditioning in a sample. Default: `False`.
+        proportion (list, optional): Specifies how to sample this Stream relative to other Streams. Default: ``None``.
+        repeat (list, optional): Specifies the degree to which a Stream is upsampled or downsampled. Default: ``None``.
+        choose (list, optional): Specifies the number of samples to choose from a Stream. Default: ``None``.
         streaming_kwargs (dict, optional): Additional arguments to pass to the ``StreamingDataset``. Default: ``None``.
         dataloader_kwargs (dict, optional): Additional arguments to pass to the ``DataLoader``. Default: ``None``.
     """
@@ -231,25 +237,8 @@ def build_streaming_image_caption_dataloader(
     if dataloader_kwargs is None:
         dataloader_kwargs = {}
 
-    # Check types for remote and local
-
-    if isinstance(remote, str):
-        remote = [remote]
-    if isinstance(local, str):
-        local = [local]
-    if not local:
-        local = [_make_default_local_path(r) for r in remote]
-    if isinstance(remote, Sequence) and isinstance(local, Sequence):
-        if len(remote) != len(local):
-            ValueError(
-                f'remote and local Sequences must be the same length, got lengths {len(remote)} and {len(local)}')
-    else:
-        ValueError(f'remote and local must be both Strings or Sequences, got types {type(remote)} and {type(local)}.')
-
-    # Create a Stream for each (remote, local) pair
-    streams = []
-    for r, l in zip(remote, local):
-        streams.append(Stream(remote=r, local=l))
+    # Set up streams
+    streams = make_streams(remote, local=local, proportion=proportion, repeat=repeat, choose=choose)
 
     # Set the crop to apply
     if crop_type == 'square':
@@ -290,7 +279,3 @@ def build_streaming_image_caption_dataloader(
     )
 
     return dataloader
-
-
-def _make_default_local_path(remote_path):
-    return str(Path(*['/tmp'] + list(Path(remote_path).parts[1:])))
