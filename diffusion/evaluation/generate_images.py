@@ -56,8 +56,6 @@ class ImageGenerator:
                  additional_generate_kwargs: Optional[Dict] = None,
                  hf_model: Optional[bool] = False):
 
-        if isinstance(model, str) and hf_model == False:
-            raise ValueError('Can only use strings for model with hf models!')
         self.hf_model = hf_model
         self.model = model
         self.dataset = dataset
