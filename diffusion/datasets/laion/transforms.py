@@ -134,7 +134,7 @@ class RandomCropBucketedAspectRatioTransorm:
         self.log_aspect_ratio_buckets = torch.log(self.aspect_ratio_buckets)
 
     def __call__(self, img, aspect_ratio):
-        orig_h, orig_w = img.shape[1:]
+        orig_h, orig_w = img.size
         orig_aspect_ratio = orig_h / orig_w
         # Figure out target H/W given the input aspect ratio
         bucket_ind = torch.abs(self.log_aspect_ratio_buckets - math.log(aspect_ratio)).argmin()
