@@ -76,6 +76,7 @@ def generate(config: DictConfig) -> None:
         config.generator,
         model=model,
         dataset=dataset,
+        hf_model = config.hf_model,
     )
 
     def generate_from_model():
