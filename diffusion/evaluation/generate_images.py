@@ -59,10 +59,7 @@ class ImageGenerator:
         if isinstance(model, str) and hf_model == False:
             raise ValueError('Can only use strings for model with hf models!')
         self.hf_model = hf_model
-        if not hf_model:
-            self.model = model
-        else:
-            self.model = AutoPipelineForText2Image.from_pretrained(model, torch_dtype=torch.float16, use_auth_token=True).to('cuda')
+        self.model = model
         self.dataset = dataset
         self.load_path = load_path
         self.local_checkpoint_path = local_checkpoint_path
