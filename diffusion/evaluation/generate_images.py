@@ -17,6 +17,7 @@ from diffusers import AutoPipelineForText2Image
 from torch.utils.data import Dataset
 from torchvision.transforms.functional import to_pil_image
 from tqdm.auto import tqdm
+from diffusers import AutoPipelineForText2Image
 
 
 class ImageGenerator:
@@ -56,8 +57,13 @@ class ImageGenerator:
                  additional_generate_kwargs: Optional[Dict] = None,
                  hf_model: Optional[bool] = False):
 
+        if isinstance(model, str) and hf_model == False:
+            raise ValueError('Can only use strings for model with hf models!')
         self.hf_model = hf_model
-        self.model = model
+        if hf_model:
+            self.model AutoPipelineForText2Image.from_pretrained(model, device = dist.get_local_rank(), torch_dtype=torch.float16).to('cuda')
+        else:
+            self.model = model
         self.dataset = dataset
         self.load_path = load_path
         self.local_checkpoint_path = local_checkpoint_path

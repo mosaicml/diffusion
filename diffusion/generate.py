@@ -15,8 +15,7 @@ from composer.utils import reproducibility
 from datasets import load_dataset
 from omegaconf import DictConfig
 from torch.utils.data import Dataset
-from diffusers import AutoPipelineForText2Image
-import torch
+
 
 from diffusion.evaluation.generate_images import ImageGenerator
 
@@ -28,13 +27,12 @@ def generate(config: DictConfig) -> None:
     """
     reproducibility.seed_all(config.seed)
 
-    if isinstance(config.model.name, str) and config.hf_model == False:
-        raise ValueError('Can only use strings for model with hf models!')
+
     # The model to evaluate
     if not config.hf_model:
         model: ComposerModel = hydra.utils.instantiate(config.model)
     else:
-        model = AutoPipelineForText2Image.from_pretrained(config.model.name, torch_dtype=torch.float16).to('cuda')
+        model = config.model.name
 
     tokenizer = model.tokenizer if hasattr(model, 'tokenizer') else None
 
