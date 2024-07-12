@@ -3,6 +3,7 @@
 
 """Transforms for the training and eval dataset."""
 
+import math
 from typing import Optional, Tuple
 
 import torch
@@ -101,6 +102,52 @@ class RandomCropAspectRatioTransorm:
             w_scale = target_width / orig_w
             resize_size = (round(w_scale * orig_h), target_width)
         elif orig_aspect_ratio < target_aspect_ratio:
+            h_scale = target_height / orig_h
+            resize_size = (target_height, round(h_scale * orig_w))
+        else:
+            resize_size = (target_height, target_width)
+        img = transforms.functional.resize(img, resize_size, antialias=True)
+
+        # Crop based on aspect ratio
+        c_top, c_left, height, width = transforms.RandomCrop.get_params(img, output_size=(target_height, target_width))
+        img = crop(img, c_top, c_left, height, width)
+        return img, c_top, c_left
+
+
+class RandomCropBucketedAspectRatioTransorm:
+    """Assigns an image to a arbitrary set of aspect ratio buckets, then resizes and crops to fit into the bucket.
+
+    This transform requires the desired aspect ratio bucket to be specified manually in the call to the transform.
+
+    Args:
+        resize_size (Tuple[Tuple[int, int], ...): A tuple of 2-tuple integers representing the aspect ratio buckets.
+            The format is ((height_bucket1, width_bucket1), (height_bucket2, width_bucket2), ...).
+    """
+
+    def __init__(
+        self,
+        resize_size: Tuple[Tuple[int, int], ...],
+    ):
+        self.height_buckets = torch.tensor([size[0] for size in resize_size])
+        self.width_buckets = torch.tensor([size[1] for size in resize_size])
+        self.aspect_ratio_buckets = self.height_buckets / self.width_buckets
+        self.log_aspect_ratio_buckets = torch.log(self.aspect_ratio_buckets)
+
+    def __call__(self, img, aspect_ratio):
+        orig_h, orig_w = img.shape[1:]
+        orig_aspect_ratio = orig_h / orig_w
+        # Figure out target H/W given the input aspect ratio
+        bucket_ind = torch.abs(self.log_aspect_ratio_buckets - math.log(aspect_ratio)).argmin()
+        target_width, target_height = self.width_buckets[bucket_ind].item(), self.height_buckets[bucket_ind].item()
+        target_aspect_ratio = target_height / target_width
+
+        # Determine resize size
+        if orig_aspect_ratio > target_aspect_ratio:
+            # Resize width and crop height
+            w_scale = target_width / orig_w
+            resize_size = (round(w_scale * orig_h), target_width)
+        elif orig_aspect_ratio < target_aspect_ratio:
+            # Resize height and crop width
             h_scale = target_height / orig_h
             resize_size = (target_height, round(h_scale * orig_w))
         else:
