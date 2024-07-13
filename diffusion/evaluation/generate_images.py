@@ -62,7 +62,8 @@ class ImageGenerator:
         self.hf_model = hf_model
         if hf_model:
             print(f"LOCALRANK{dist.get_local_rank()}")
-            self.model = AutoPipelineForText2Image.from_pretrained(model, device_map = 'cuda', torch_dtype=torch.float16)
+            print(torch.cuda.current_device())
+            self.model = AutoPipelineForText2Image.from_pretrained(model, torch_dtype=torch.float16).to('cuda')
         else:
             self.model = model
         self.dataset = dataset
