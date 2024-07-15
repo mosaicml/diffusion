@@ -16,17 +16,16 @@ from datasets import load_dataset
 from omegaconf import DictConfig
 from torch.utils.data import Dataset
 
-
 from diffusion.evaluation.generate_images import ImageGenerator
 
 
 def generate(config: DictConfig) -> None:
     """Evaluate a model.
+
     Args:
         config (DictConfig): Configuration composed by Hydra
     """
     reproducibility.seed_all(config.seed)
-
 
     # The model to evaluate
     if not config.hf_model:
@@ -78,7 +77,7 @@ def generate(config: DictConfig) -> None:
         config.generator,
         model=model,
         dataset=dataset,
-        hf_model = config.hf_model,
+        hf_model=config.hf_model,
     )
 
     def generate_from_model():

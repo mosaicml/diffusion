@@ -13,15 +13,16 @@ from composer.core import get_precision_context
 from composer.utils import dist
 from composer.utils.file_helpers import get_file
 from composer.utils.object_store import OCIObjectStore
+from datasets import DatasetDict
 from diffusers import AutoPipelineForText2Image
 from torch.utils.data import Dataset
 from torchvision.transforms.functional import to_pil_image
 from tqdm.auto import tqdm
-from diffusers import AutoPipelineForText2Image
 
 
 class ImageGenerator:
     """Image generator that generates images from a dataset and saves them.
+
     Args:
         model (torch.nn.Module): The model to evaluate.
         dataset (Dataset): The dataset to use the prompts from.
@@ -42,7 +43,7 @@ class ImageGenerator:
 
     def __init__(self,
                  model: Union[torch.nn.Module, str],
-                 dataset: Dataset,
+                 dataset: Union[Dataset, DatasetDict],
                  load_path: Optional[str] = None,
                  local_checkpoint_path: str = '/tmp/model.pt',
                  load_strict_model_weights: bool = True,
@@ -60,9 +61,10 @@ class ImageGenerator:
         if isinstance(model, str) and hf_model == False:
             raise ValueError('Can only use strings for model with hf models!')
         self.hf_model = hf_model
-        if hf_model:
-            print(f"LOCALRANK{dist.get_local_rank()}")
-            self.model = AutoPipelineForText2Image.from_pretrained(model, torch_dtype=torch.float16).to(f'cuda:{dist.get_local_rank()}')
+        if hf_model or isinstance(model, str):
+            print(f'LOCALRANK{dist.get_local_rank()}')
+            self.model = AutoPipelineForText2Image.from_pretrained(
+                model, torch_dtype=torch.float16).to(f'cuda:{dist.get_local_rank()}')
         else:
             self.model = model
         self.dataset = dataset
@@ -89,7 +91,7 @@ class ImageGenerator:
             self.object_store = OCIObjectStore(self.output_bucket.replace('oci://', ''), self.output_prefix)
 
         # Download the model checkpoint if needed
-        if self.load_path is not None:
+        if self.load_path is not None and not isinstance(self.model, str):
             if dist.get_local_rank() == 0:
                 get_file(path=self.load_path, destination=self.local_checkpoint_path, overwrite=True)
             with dist.local_rank_zero_download_and_wait(self.local_checkpoint_path):
@@ -99,17 +101,18 @@ class ImageGenerator:
                 if 'val_metrics.' in key:
                     del state_dict['state']['model'][key]
             self.model.load_state_dict(state_dict['state']['model'], strict=self.load_strict_model_weights)
-            self.model = model.cuda().eval()
+            self.model = self.model.cuda().eval()
 
     def generate(self):
         """Core image generation function. Generates images at a given guidance scale.
+
         Args:
             guidance_scale (float): The guidance scale to use for image generation.
         """
         os.makedirs(os.path.join('/tmp', self.output_prefix), exist_ok=True)
         # Partition the dataset across the ranks
         if self.hf_model:
-            dataset_len = self.dataset.num_rows
+            dataset_len = self.dataset.num_rows  # type: ignore
         else:
             dataset_len = self.dataset.num_samples  # type: ignore
         samples_per_rank, remainder = divmod(dataset_len, dist.get_world_size())
