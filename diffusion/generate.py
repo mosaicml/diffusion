@@ -11,7 +11,7 @@ from composer import Algorithm, ComposerModel
 from composer.algorithms.low_precision_groupnorm import apply_low_precision_groupnorm
 from composer.algorithms.low_precision_layernorm import apply_low_precision_layernorm
 from composer.core import Precision
-from composer.utils import reproducibility
+from composer.utils import reproducibility, dist, get_device
 from datasets import load_dataset
 from omegaconf import DictConfig
 from torch.utils.data import Dataset
@@ -26,6 +26,8 @@ def generate(config: DictConfig) -> None:
         config (DictConfig): Configuration composed by Hydra
     """
     reproducibility.seed_all(config.seed)
+    device = get_device()
+    dist.initialize_dist(device, config.dist_timeout)
 
     # The model to evaluate
     if not config.hf_model:
@@ -37,8 +39,12 @@ def generate(config: DictConfig) -> None:
 
     # The dataset to use for evaluation
 
-    if config.hf_model:
-        dataset = load_dataset(config.dataset.name, split=config.dataset.split)
+    if config.hf_dataset:
+        if dist.get_local_rank() == 0:
+            dataset = load_dataset(config.dataset.name, split=config.dataset.split)
+        dist.barrier()
+        dataset = load_dataset(config.dataset.name, split = config.dataset.split)
+        dist.barrier()
     elif tokenizer:
         dataset = hydra.utils.instantiate(config.dataset)
 
@@ -78,6 +84,7 @@ def generate(config: DictConfig) -> None:
         model=model,
         dataset=dataset,
         hf_model=config.hf_model,
+        hf_dataset=config.hf_dataset
     )
 
     def generate_from_model():

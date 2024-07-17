@@ -39,6 +39,8 @@ class ImageGenerator:
         output_prefix (str, Optional): The prefix to save images to. Default: ``None``.
         extra_keys (list, Optional): Extra keys from the dataset to include in the metadata. Default: ``None``.
         additional_generate_kwargs (Dict, optional): Additional keyword arguments to pass to the model.generate method.
+        hf_model: (bool, Optional): whether the model is HF or not. Default: ``False``.
+        hf_dataset: (bool, Optional): whether the dataset is HF formatted or not. Default: ``False``.
     """
 
     def __init__(self,
@@ -56,13 +58,14 @@ class ImageGenerator:
                  output_prefix: Optional[str] = None,
                  extra_keys: Optional[list] = None,
                  additional_generate_kwargs: Optional[Dict] = None,
-                 hf_model: Optional[bool] = False):
+                 hf_model: Optional[bool] = False,
+                 hf_dataset: Optional[bool] = False):
 
         if isinstance(model, str) and hf_model == False:
             raise ValueError('Can only use strings for model with hf models!')
         self.hf_model = hf_model
+        self.hf_dataset = hf_dataset
         if hf_model or isinstance(model, str):
-            print(f'LOCALRANK{dist.get_local_rank()}')
             if dist.get_local_rank() == 0:
                 self.model = AutoPipelineForText2Image.from_pretrained(
                     model, torch_dtype=torch.float16).to(f'cuda:{dist.get_local_rank()}')
@@ -116,7 +119,7 @@ class ImageGenerator:
         """
         os.makedirs(os.path.join('/tmp', self.output_prefix), exist_ok=True)
         # Partition the dataset across the ranks
-        if self.hf_model:
+        if self.hf_dataset:
             dataset_len = self.dataset.num_rows  # type: ignore
         else:
             dataset_len = self.dataset.num_samples  # type: ignore
