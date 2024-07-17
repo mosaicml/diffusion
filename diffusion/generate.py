@@ -11,7 +11,7 @@ from composer import Algorithm, ComposerModel
 from composer.algorithms.low_precision_groupnorm import apply_low_precision_groupnorm
 from composer.algorithms.low_precision_layernorm import apply_low_precision_layernorm
 from composer.core import Precision
-from composer.utils import reproducibility, dist, get_device
+from composer.utils import dist, get_device, reproducibility
 from datasets import load_dataset
 from omegaconf import DictConfig
 from torch.utils.data import Dataset
@@ -26,7 +26,7 @@ def generate(config: DictConfig) -> None:
         config (DictConfig): Configuration composed by Hydra
     """
     reproducibility.seed_all(config.seed)
-    device = get_device()
+    device = get_device()  # type: ignore
     dist.initialize_dist(device, config.dist_timeout)
 
     # The model to evaluate
@@ -43,7 +43,7 @@ def generate(config: DictConfig) -> None:
         if dist.get_local_rank() == 0:
             dataset = load_dataset(config.dataset.name, split=config.dataset.split)
         dist.barrier()
-        dataset = load_dataset(config.dataset.name, split = config.dataset.split)
+        dataset = load_dataset(config.dataset.name, split=config.dataset.split)
         dist.barrier()
     elif tokenizer:
         dataset = hydra.utils.instantiate(config.dataset)
@@ -79,13 +79,11 @@ def generate(config: DictConfig) -> None:
                     optimizers=None,
                 )
 
-    image_generator: ImageGenerator = hydra.utils.instantiate(
-        config.generator,
-        model=model,
-        dataset=dataset,
-        hf_model=config.hf_model,
-        hf_dataset=config.hf_dataset
-    )
+    image_generator: ImageGenerator = hydra.utils.instantiate(config.generator,
+                                                              model=model,
+                                                              dataset=dataset,
+                                                              hf_model=config.hf_model,
+                                                              hf_dataset=config.hf_dataset)
 
     def generate_from_model():
         image_generator.generate()

@@ -71,7 +71,7 @@ class ImageGenerator:
                     model, torch_dtype=torch.float16).to(f'cuda:{dist.get_local_rank()}')
             dist.barrier()
             self.model = AutoPipelineForText2Image.from_pretrained(
-                    model, torch_dtype=torch.float16).to(f'cuda:{dist.get_local_rank()}')
+                model, torch_dtype=torch.float16).to(f'cuda:{dist.get_local_rank()}')
             dist.barrier()
         else:
             self.model = model
