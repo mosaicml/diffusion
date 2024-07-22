@@ -244,6 +244,8 @@ def stable_diffusion_xl(
     latent_mean: Union[float, Tuple, str] = 0.0,
     latent_std: Union[float, Tuple, str] = 7.67754318618,
     beta_schedule: str = 'scaled_linear',
+    beta_start: float = 0.00085,
+    beta_end: float = 0.012,
     zero_terminal_snr: bool = False,
     use_karras_sigmas: bool = False,
     offset_noise: Optional[float] = None,
@@ -291,6 +293,8 @@ def stable_diffusion_xl(
             checkpoint. Defaults to `1/0.13025`.
         beta_schedule (str): The beta schedule to use. Must be one of 'scaled_linear', 'linear', or 'squaredcos_cap_v2'.
             Default: `scaled_linear`.
+        beta_start (float): The starting beta value. Default: `0.00085`.
+        beta_end (float): The ending beta value. Default: `0.012`.
         zero_terminal_snr (bool): Whether to enforce zero terminal SNR. Default: `False`.
         use_karras_sigmas (bool): Whether to use the Karras sigmas for the diffusion process noise. Default: `False`.
         offset_noise (float, optional): The scale of the offset noise. If not specified, offset noise will not
@@ -412,8 +416,8 @@ def stable_diffusion_xl(
 
     # Make the noise schedulers
     noise_scheduler = DDPMScheduler(num_train_timesteps=1000,
-                                    beta_start=0.00085,
-                                    beta_end=0.012,
+                                    beta_start=beta_start,
+                                    beta_end=beta_end,
                                     beta_schedule=beta_schedule,
                                     trained_betas=None,
                                     variance_type='fixed_small',
@@ -425,8 +429,8 @@ def stable_diffusion_xl(
                                     rescale_betas_zero_snr=zero_terminal_snr)
     if beta_schedule == 'squaredcos_cap_v2':
         inference_noise_scheduler = DDIMScheduler(num_train_timesteps=1000,
-                                                  beta_start=0.00085,
-                                                  beta_end=0.012,
+                                                  beta_start=beta_start,
+                                                  beta_end=beta_end,
                                                   beta_schedule=beta_schedule,
                                                   trained_betas=None,
                                                   clip_sample=False,
@@ -435,8 +439,8 @@ def stable_diffusion_xl(
                                                   rescale_betas_zero_snr=zero_terminal_snr)
     else:
         inference_noise_scheduler = EulerDiscreteScheduler(num_train_timesteps=1000,
-                                                           beta_start=0.00085,
-                                                           beta_end=0.012,
+                                                           beta_start=beta_start,
+                                                           beta_end=beta_end,
                                                            beta_schedule=beta_schedule,
                                                            trained_betas=None,
                                                            prediction_type=prediction_type,
