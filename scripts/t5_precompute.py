@@ -61,7 +61,6 @@ for subdir_path in tqdm(args.subdir_paths):
         print(f'Failed to download index.json for {subdir_path}, skipping')
         continue
     # Dataset
-    print('Building dataset')
     dataset = StreamingDataset(remote=remote_src,
                                local=os.path.join('/tmp', subdir_path),
                                download_timeout=300,
@@ -83,7 +82,6 @@ for subdir_path in tqdm(args.subdir_paths):
     # Make writer
     writer = MDSWriter(out=remote_dst, columns=columns, compression='zstd', hashes=[], size_limit='1GB')
 
-    print('Loading batch')
     with torch.no_grad():
         for i in range(len(dataset)):
             sample = dataset[i]
