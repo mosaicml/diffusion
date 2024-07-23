@@ -56,7 +56,7 @@ for subdir_path in tqdm(args.subdir_paths):
     remote_dst = os.path.join(args.remote_dst_base, subdir_path)
     # Attempt to download an index.json for the remote source, skip this subdir if it doesn't exist
     try:
-        download_file(os.path.join(remote_src, 'index.json'), f'/tmp/index_tries/{subdir_path}/index.json', timeout=60)
+        download_file(os.path.join(remote_src, 'index.json'), f'/tmp/index_tries/{subdir_path}/index.json', timeout=300)
     except Exception:
         print(f'Failed to download index.json for {subdir_path}, skipping')
         continue
@@ -80,7 +80,7 @@ for subdir_path in tqdm(args.subdir_paths):
         print(columns)
 
     # Make writer
-    writer = MDSWriter(out=remote_dst, columns=columns, compression='zstd', hashes=[], size_limit='1GB')
+    writer = MDSWriter(out=remote_dst, columns=columns, compression='zstd', hashes=[], size_limit='1GB', exists_ok=True)
 
     with torch.no_grad():
         for i in range(len(dataset)):
