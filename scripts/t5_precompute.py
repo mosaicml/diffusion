@@ -80,7 +80,7 @@ for subdir_path in tqdm(args.subdir_paths):
         print(columns)
 
     # Make writer
-    writer = MDSWriter(out=remote_dst, columns=columns, compression='zstd', hashes=[], size_limit='1GB', exists_ok=True)
+    writer = MDSWriter(out=remote_dst, columns=columns, compression='zstd', hashes=[], size_limit='1GB', exist_ok=True)
 
     with torch.no_grad():
         for i in range(len(dataset)):
