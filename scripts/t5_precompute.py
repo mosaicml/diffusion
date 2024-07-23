@@ -10,7 +10,7 @@ from argparse import ArgumentParser
 import torch
 from streaming import MDSWriter, StreamingDataset
 from streaming.base.storage import download_file
-from tqdm import trange
+from tqdm import tqdm
 from transformers import AutoModel, AutoTokenizer, CLIPTextModel
 
 # TODO: Implement batching? 10% faster (when using t5-only), but a lot more complicated code
@@ -51,7 +51,7 @@ clip_model = CLIPTextModel.from_pretrained('stabilityai/stable-diffusion-xl-base
                                            local_files_only=True).cuda().eval()
 
 columns = None
-for subdir_path in args.subdir_paths:
+for subdir_path in tqdm(args.subdir_paths):
     remote_src = os.path.join(args.remote_src_base, subdir_path)
     remote_dst = os.path.join(args.remote_dst_base, subdir_path)
     # Attempt to download an index.json for the remote source, skip this subdir if it doesn't exist
@@ -85,7 +85,7 @@ for subdir_path in args.subdir_paths:
 
     print('Loading batch')
     with torch.no_grad():
-        for i in trange(len(dataset)):
+        for i in range(len(dataset)):
             sample = dataset[i]
 
             for caption_key in args.caption_keys:
