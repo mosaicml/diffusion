@@ -114,7 +114,7 @@ class RandomCropAspectRatioTransorm:
         return img, c_top, c_left
 
 
-class RandomCropBucketedAspectRatioTransorm:
+class RandomCropBucketedAspectRatioTransform:
     """Assigns an image to a arbitrary set of aspect ratio buckets, then resizes and crops to fit into the bucket.
 
     This transform requires the desired aspect ratio bucket to be specified manually in the call to the transform.

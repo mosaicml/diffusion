@@ -16,7 +16,7 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 
 from diffusion.datasets.laion.transforms import (LargestCenterSquare, RandomCropAspectRatioTransorm,
-                                                 RandomCropBucketedAspectRatioTransorm, RandomCropSquare)
+                                                 RandomCropBucketedAspectRatioTransform, RandomCropSquare)
 from diffusion.datasets.utils import make_streams
 from diffusion.models.text_encoder import MultiTokenizer
 
@@ -94,8 +94,8 @@ class StreamingImageCaptionDataset(StreamingDataset):
         self.image_key = image_key
         self.caption_key = caption_key
         self.aspect_ratio_bucket_key = aspect_ratio_bucket_key
-        if isinstance(self.crop, RandomCropBucketedAspectRatioTransorm):
-            assert self.aspect_ratio_bucket_key is not None, 'aspect_ratio_bucket_key must be provided when using RandomCropBucketedAspectRatioTransorm'
+        if isinstance(self.crop, RandomCropBucketedAspectRatioTransform):
+            assert self.aspect_ratio_bucket_key is not None, 'aspect_ratio_bucket_key must be provided when using RandomCropBucketedAspectRatioTransform'
         self.zero_dropped_captions = zero_dropped_captions
 
         self.tokenizer = tokenizer
@@ -113,7 +113,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
         orig_w, orig_h = img.size
 
         # Image transforms
-        if isinstance(self.crop, RandomCropBucketedAspectRatioTransorm):
+        if isinstance(self.crop, RandomCropBucketedAspectRatioTransform):
             img, crop_top, crop_left = self.crop(img, sample[self.aspect_ratio_bucket_key])
         elif self.crop is not None:
             img, crop_top, crop_left = self.crop(img)
@@ -261,7 +261,7 @@ def build_streaming_image_caption_dataloader(
         crop = RandomCropAspectRatioTransorm(resize_size, ar_bucket_boundaries)  # type: ignore
     elif crop_type == 'bucketed_aspect_ratio':
         assert aspect_ratio_bucket_key is not None, 'aspect_ratio_bucket_key must be provided when using bucketed_aspect_ratio crop type'
-        crop = RandomCropBucketedAspectRatioTransorm(resize_size)  # type: ignore
+        crop = RandomCropBucketedAspectRatioTransform(resize_size)  # type: ignore
     else:
         crop = None
 
