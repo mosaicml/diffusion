@@ -64,6 +64,7 @@ for subdir_path in tqdm(args.subdir_paths):
     dataset = StreamingDataset(remote=remote_src,
                                local=os.path.join('/tmp', subdir_path),
                                download_timeout=300,
+                               predownload=64,
                                shuffle=False)
 
     # Get columns
