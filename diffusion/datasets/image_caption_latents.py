@@ -1,7 +1,7 @@
 # Copyright 2022 MosaicML Diffusion authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Streaming Image-Caption Dataset for SDXL with Pre-computed Text Latents."""
+"""Streaming Image-Caption Dataset for use with Pre-computed Text Latents."""
 
 import logging
 from io import BytesIO
@@ -10,7 +10,6 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 from PIL import Image
 from streaming import Stream, StreamingDataset
 from torch.utils.data import DataLoader
@@ -31,6 +30,8 @@ class StreamingTextLatentsDataset(StreamingDataset):
         crop (Callable, optional): The crop transform to apply to the image before ``transform``. Default: ``None``
         transform (Callable, optional): The transforms to apply to the image. Default: ``None``.
         image_key (str): Key associated with the image in the streaming dataset. Default: ``'image'``.
+        caption_keys (Tuple[str, ...]): Key(s) associated with captions in the streaming dataset. Default: ``('caption',)``.
+        caption_selection_probs (Tuple[float, ...]): The probability of selecting each caption key. Default: ``(1.0,)``.
         text_latent_keys (Tuple[str, ...]): Key(s) associated with text latents in the streaming dataset.
             Default: ``('T5_LATENTS', 'CLIP_LATENTS')``.
         text_latent_shapes (Tuple[Tuple[int, int], ...]): The shape(s) of the text latents in the streaming dataset.
@@ -49,6 +50,8 @@ class StreamingTextLatentsDataset(StreamingDataset):
             crop: Optional[Callable] = None,
             transform: Optional[Callable] = None,
             image_key: str = 'image',
+            caption_keys: Tuple[str, ...] = ('caption',),
+            caption_selection_probs: Tuple[float, ...] = (1.0,),
             text_latent_keys: Tuple[str, ...] = ('T5_LATENTS', 'CLIP_LATENTS'),
             text_latent_shapes: Tuple[Tuple[int, int], ...] = ((512, 4096), (77, 768)),
             attention_mask_keys: Tuple[str, ...] = ('T5_ATTENTION_MASK', 'CLIP_ATTENTION_MASK'),
@@ -65,6 +68,8 @@ class StreamingTextLatentsDataset(StreamingDataset):
         self.caption_drop_prob = caption_drop_prob
         self.microcond_drop_prob = microcond_drop_prob
         self.image_key = image_key
+        self.caption_keys = caption_keys
+        self.caption_selection_probs = caption_selection_probs
         self.text_latent_keys = text_latent_keys
         self.text_latent_shapes = text_latent_shapes
         self.attention_mask_keys = attention_mask_keys
@@ -110,23 +115,25 @@ class StreamingTextLatentsDataset(StreamingDataset):
         if torch.rand(1) < self.microcond_drop_prob:
             out['cond_target_size'] = out['cond_target_size'] * 0
 
+        # Randomly select a caption according to the selection probabilities
+        caption_key = np.random.choice(self.caption_keys, p=self.caption_selection_probs)
         # Load text latents, attention masks, and clip pooled embeddings
         for i in range(len(self.text_latent_keys)):
-            latent_key = self.text_latent_keys[i]
+            latent_key = f'{caption_key}_{self.text_latent_keys[i]}'
             latent_shape = self.text_latent_shapes[i]
-            attention_key = self.attention_mask_keys[i]
+            attention_key = f'{caption_key}_{self.attention_mask_keys[i]}'
 
             if torch.rand(1) < self.caption_drop_prob:
                 out[latent_key] = torch.zeros(latent_shape, dtype=torch.float16)
                 out[attention_key] = torch.zeros(latent_shape[0])
-                if latent_key == 'CLIP_LATENTS':
+                if 'CLIP_LATENTS' in latent_key:
                     out['CLIP_POOLED'] = torch.zeros(latent_shape[1])
             else:
                 text_latent = np.frombuffer(sample[latent_key], dtype=np.float16).copy()
                 out[latent_key] = torch.from_numpy(text_latent).reshape(latent_shape)
                 attention_mask = np.frombuffer(sample[attention_key], dtype=np.bool_).copy()
-                out[attention_key] = torch.from_numpy(attention_mask).to(dtype=torch.float).reshape(-1) #.reshape(latent_shape[0])
-                if latent_key == 'CLIP_LATENTS':
+                out[attention_key] = torch.from_numpy(attention_mask).to(dtype=torch.float).reshape(-1)  #.reshape(latent_shape[0])
+                if 'CLIP_LATENTS' in latent_key:
                     clip_pooled = np.frombuffer(sample['CLIP_POOLED_TEXT'], dtype=np.float16).copy()
                     out['CLIP_POOLED'] = torch.from_numpy(clip_pooled).reshape(latent_shape[1])
         return out
@@ -143,6 +150,8 @@ def build_streaming_text_latents_dataloader(
     transform: Optional[List[Callable]] = None,
     crop_type: Optional[str] = 'square',
     image_key: str = 'image',
+    caption_keys: Tuple[str, ...] = ('caption',),
+    caption_selection_probs: Tuple[float, ...] = (1.0,),
     text_latent_keys: Tuple[str, ...] = ('T5_LATENTS', 'CLIP_LATENTS'),
     text_latent_shapes: Tuple[Tuple, ...] = ((512, 4096), (77, 768)),
     attention_mask_keys: Tuple[str, ...] = ('T5_ATTENTION_MASK', 'CLIP_ATTENTION_MASK'),
@@ -167,6 +176,8 @@ def build_streaming_text_latents_dataloader(
         crop_type (str, optional): Type of crop to perform, either ['square', 'random', 'aspect_ratio'].
             Default: ``'square'``.
         image_key (str): Key associated with the image in the streaming dataset. Default: ``'image'``.
+        caption_keys (Tuple[str, ...]): Key(s) associated with captions in the streaming dataset. Default: ``('caption',)``.
+        caption_selection_probs (Tuple[float, ...]): The probability of selecting each caption key. Default: ``(1.0,)``.
         text_latent_keys (Tuple[str, ...]): Key(s) associated with text latents in the streaming dataset.
             Default: ``('T5_LATENTS', 'CLIP_LATENTS')``.
         text_latent_shapes (Tuple[Tuple[int, int], ...]): The shape(s) of the text latents in the streaming dataset.
@@ -234,6 +245,8 @@ def build_streaming_text_latents_dataloader(
         crop=crop,
         transform=transform,
         image_key=image_key,
+        caption_keys=caption_keys,
+        caption_selection_probs=caption_selection_probs,
         text_latent_keys=text_latent_keys,
         text_latent_shapes=text_latent_shapes,
         attention_mask_keys=attention_mask_keys,
