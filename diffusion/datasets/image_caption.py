@@ -15,7 +15,7 @@ from streaming import Stream, StreamingDataset
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
-from diffusion.datasets.laion.transforms import (LargestCenterSquare, RandomCropAspectRatioTransorm,
+from diffusion.datasets.laion.transforms import (LargestCenterSquare, RandomCropAspectRatioTransform,
                                                  RandomCropBucketedAspectRatioTransform, RandomCropSquare)
 from diffusion.datasets.utils import make_streams
 from diffusion.models.text_encoder import MultiTokenizer
@@ -258,7 +258,7 @@ def build_streaming_image_caption_dataloader(
     elif crop_type == 'random':
         crop = RandomCropSquare(resize_size)
     elif crop_type == 'aspect_ratio':
-        crop = RandomCropAspectRatioTransorm(resize_size, ar_bucket_boundaries)  # type: ignore
+        crop = RandomCropAspectRatioTransform(resize_size, ar_bucket_boundaries)  # type: ignore
     elif crop_type == 'bucketed_aspect_ratio':
         assert aspect_ratio_bucket_key is not None, 'aspect_ratio_bucket_key must be provided when using bucketed_aspect_ratio crop type'
         crop = RandomCropBucketedAspectRatioTransform(resize_size)  # type: ignore

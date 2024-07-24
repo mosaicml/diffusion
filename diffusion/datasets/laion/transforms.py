@@ -46,7 +46,7 @@ class RandomCropSquare:
         return img, c_top, c_left
 
 
-class RandomCropAspectRatioTransorm:
+class RandomCropAspectRatioTransform:
     """Assigns an image to a arbitrary set of aspect ratio buckets, then resizes and crops to fit into the bucket.
 
     Args:
