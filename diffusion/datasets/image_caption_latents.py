@@ -20,7 +20,7 @@ from diffusion.datasets.utils import make_streams
 log = logging.getLogger(__name__)
 
 
-class StreamingTextLatentsDataset(StreamingDataset):
+class StreamingImageCaptionLatentsDataset(StreamingDataset):
     """Streaming dataset for image-caption datasets with pre-computed text latents.
 
     Args:
@@ -139,7 +139,7 @@ class StreamingTextLatentsDataset(StreamingDataset):
         return out
 
 
-def build_streaming_text_latents_dataloader(
+def build_streaming_image_caption_latents_dataloader(
     remote: Union[str, List],
     batch_size: int,
     local: Optional[Union[str, List]] = None,
@@ -221,7 +221,7 @@ def build_streaming_text_latents_dataloader(
     transform = transforms.Compose(transform)
     assert isinstance(transform, Callable)
 
-    dataset = StreamingTextLatentsDataset(
+    dataset = StreamingImageCaptionLatentsDataset(
         streams=streams,
         caption_drop_prob=caption_drop_prob,
         microcond_drop_prob=microcond_drop_prob,
