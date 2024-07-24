@@ -124,17 +124,17 @@ class StreamingTextLatentsDataset(StreamingDataset):
             attention_key = f'{caption_key}_{self.attention_mask_keys[i]}'
 
             if torch.rand(1) < self.caption_drop_prob:
-                out[latent_key] = torch.zeros(latent_shape, dtype=torch.float16)
-                out[attention_key] = torch.zeros(latent_shape[0])
+                out[self.text_latent_keys[i]] = torch.zeros(latent_shape, dtype=torch.float16)
+                out[self.attention_mask_keys[i]] = torch.zeros(latent_shape[0])
                 if 'CLIP_LATENTS' in latent_key:
                     out['CLIP_POOLED'] = torch.zeros(latent_shape[1])
             else:
                 text_latent = np.frombuffer(sample[latent_key], dtype=np.float16).copy()
-                out[latent_key] = torch.from_numpy(text_latent).reshape(latent_shape)
+                out[self.text_latent_keys[i]] = torch.from_numpy(text_latent).reshape(latent_shape)
                 attention_mask = np.frombuffer(sample[attention_key], dtype=np.bool_).copy()
-                out[attention_key] = torch.from_numpy(attention_mask).to(dtype=torch.float).reshape(-1)  #.reshape(latent_shape[0])
+                out[self.attention_mask_keys[i]] = torch.from_numpy(attention_mask).to(dtype=torch.float).reshape(-1)  #.reshape(latent_shape[0])
                 if 'CLIP_LATENTS' in latent_key:
-                    clip_pooled = np.frombuffer(sample['CLIP_POOLED_TEXT'], dtype=np.float16).copy()
+                    clip_pooled = np.frombuffer(sample[f'{caption_key}_CLIP_POOLED_TEXT'], dtype=np.float16).copy()
                     out['CLIP_POOLED'] = torch.from_numpy(clip_pooled).reshape(latent_shape[1])
         return out
 
