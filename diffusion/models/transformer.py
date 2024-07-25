@@ -77,7 +77,7 @@ class ModulationLayer(nn.Module):
     Args:
         num_features (int): Number of input features.
     """
-    
+
     def __init__(self, num_features: int):
         super().__init__()
         self.num_features = num_features
