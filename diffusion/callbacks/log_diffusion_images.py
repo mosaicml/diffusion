@@ -37,6 +37,9 @@ class LogDiffusionImages(Callback):
         seed (int, optional): Random seed to use for generation. Set a seed for reproducible generation.
             Default: ``1138``.
         use_table (bool): Whether to make a table of the images or not. Default: ``False``.
+        t5_encoder (str, optional): path to the T5 encoder to as a second text encoder.
+        clip_encoder (str, optional): path to the CLIP encoder as the first text encoder.
+        cache_dir: (str, optional): path for HF to cache files while downloading model
     """
 
     def __init__(self,
@@ -48,7 +51,7 @@ class LogDiffusionImages(Callback):
                  rescaled_guidance: Optional[float] = None,
                  seed: Optional[int] = 1138,
                  use_table: bool = False,
-                 text_encoder: Optional[str] = None,
+                 t5_encoder: Optional[str] = None,
                  clip_encoder: Optional[str] = None,
                  cache_dir: Optional[str] = '/tmp/hf_files'):
         self.prompts = prompts
@@ -68,20 +71,20 @@ class LogDiffusionImages(Callback):
             start, end = i * batch_size, (i + 1) * batch_size
             self.batched_prompts.append(prompts[start:end])
 
-        if text_encoder is not None and clip_encoder is None or text_encoder is None and clip_encoder is not None:
+        if t5_encoder is not None and clip_encoder is None or t5_encoder is None and clip_encoder is not None:
             raise ValueError('Cannot specify only one of text encoder and CLIP encoder.')
 
         self.precomputed_latents = False
         self.batched_latents = []
-        if text_encoder:
+        if t5_encoder:
             self.precomputed_latents = True
-            t5_tokenizer = AutoTokenizer.from_pretrained(text_encoder, cache_dir=self.cache_dir, local_files_only=True)
+            t5_tokenizer = AutoTokenizer.from_pretrained(t5_encoder, cache_dir=self.cache_dir, local_files_only=True)
             clip_tokenizer = AutoTokenizer.from_pretrained(clip_encoder,
                                                            subfolder='tokenizer',
                                                            cache_dir=self.cache_dir,
                                                            local_files_only=True)
 
-            t5_model = AutoModel.from_pretrained(text_encoder,
+            t5_model = AutoModel.from_pretrained(t5_encoder,
                                                  torch_dtype=torch.float16,
                                                  cache_dir=self.cache_dir,
                                                  local_files_only=True).encoder.cuda().eval()
@@ -114,7 +117,7 @@ class LogDiffusionImages(Callback):
                                           attention_mask=clip_attention_mask,
                                           output_hidden_states=True)
                 clip_latents = clip_outputs.hidden_states[-2].cpu()
-                clip_pooled = clip_outputs[-1].cpu()
+                clip_pooled = clip_outputs[1].cpu()
                 clip_attention_mask = clip_attention_mask.cpu().to(torch.long)
 
                 latent_batch['T5_LATENTS'] = t5_latents
