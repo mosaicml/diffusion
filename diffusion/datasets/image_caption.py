@@ -6,7 +6,6 @@
 import logging
 import random
 from io import BytesIO
-from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
@@ -16,7 +15,9 @@ from streaming import Stream, StreamingDataset
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
-from diffusion.datasets.laion.transforms import LargestCenterSquare, RandomCropAspectRatioTransorm, RandomCropSquare
+from diffusion.datasets.laion.transforms import (LargestCenterSquare, RandomCropAspectRatioTransform,
+                                                 RandomCropBucketedAspectRatioTransform, RandomCropSquare)
+from diffusion.datasets.utils import make_streams
 from diffusion.models.text_encoder import MultiTokenizer
 
 log = logging.getLogger(__name__)
@@ -45,6 +46,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
         transform (Callable, optional): The transforms to apply to the image. Default: ``None``.
         image_key (str): Key associated with the image in the streaming dataset. Default: ``'image'``.
         caption_key (str): Key associated with the caption in the streaming dataset. Default: ``'caption'``.
+        aspect_ratio_bucket_key (str, optional): Key associated with the aspect ratio bucket in the streaming dataset. Default: ``None``.
         sdxl_conditioning (bool): Whether or not to include SDXL microconditioning in a sample. Default: `False`.
         zero_dropped_captions (bool): If True, zero out text embeddings for dropped captions. Default: ``False``.
         **streaming_kwargs: Additional arguments to pass in the construction of the StreamingDataloader
@@ -63,6 +65,7 @@ class StreamingImageCaptionDataset(StreamingDataset):
         transform: Optional[Callable] = None,
         image_key: str = 'image',
         caption_key: str = 'caption',
+        aspect_ratio_bucket_key: Optional[str] = None,
         sdxl_conditioning: bool = False,
         zero_dropped_captions: bool = False,
         **streaming_kwargs,
@@ -90,6 +93,9 @@ class StreamingImageCaptionDataset(StreamingDataset):
         self.caption_selection = caption_selection
         self.image_key = image_key
         self.caption_key = caption_key
+        self.aspect_ratio_bucket_key = aspect_ratio_bucket_key
+        if isinstance(self.crop, RandomCropBucketedAspectRatioTransform):
+            assert self.aspect_ratio_bucket_key is not None, 'aspect_ratio_bucket_key must be provided when using RandomCropBucketedAspectRatioTransform'
         self.zero_dropped_captions = zero_dropped_captions
 
         self.tokenizer = tokenizer
@@ -107,7 +113,9 @@ class StreamingImageCaptionDataset(StreamingDataset):
         orig_w, orig_h = img.size
 
         # Image transforms
-        if self.crop is not None:
+        if isinstance(self.crop, RandomCropBucketedAspectRatioTransform):
+            img, crop_top, crop_left = self.crop(img, sample[self.aspect_ratio_bucket_key])
+        elif self.crop is not None:
             img, crop_top, crop_left = self.crop(img)
         else:
             crop_top, crop_left = 0, 0
@@ -179,9 +187,13 @@ def build_streaming_image_caption_dataloader(
     transform: Optional[List[Callable]] = None,
     image_key: str = 'image',
     caption_key: str = 'caption',
+    aspect_ratio_bucket_key: Optional[str] = None,
     crop_type: Optional[str] = 'square',
     zero_dropped_captions: bool = True,
     sdxl_conditioning: bool = False,
+    proportion: Optional[list] = None,
+    repeat: Optional[list] = None,
+    choose: Optional[list] = None,
     streaming_kwargs: Optional[Dict] = None,
     dataloader_kwargs: Optional[Dict] = None,
 ):
@@ -209,47 +221,36 @@ def build_streaming_image_caption_dataloader(
         transform (Optional[Callable]): The transforms to apply to the image. Default: ``None``.
         image_key (str): Key associated with the image in the streaming dataset. Default: ``'image'``.
         caption_key (str): Key associated with the caption in the streaming dataset. Default: ``'caption'``.
-        crop_type (str, optional): Type of crop to perform, either ['square', 'random', 'aspect_ratio'].
+        aspect_ratio_bucket_key (str, optional): Key associated with the aspect ratio bucket in the streaming dataset. Default: ``None``.
+        crop_type (str, optional): Type of crop to perform, either ['square', 'random', 'aspect_ratio', 'bucketed_aspect_ratio'].
             Default: ``'square'``.
         zero_dropped_captions (bool): If True, zero out text embeddings for dropped captions. Default: ``True``.
         sdxl_conditioning (bool): Whether or not to include SDXL microconditioning in a sample. Default: `False`.
+        proportion (list, optional): Specifies how to sample this Stream relative to other Streams. Default: ``None``.
+        repeat (list, optional): Specifies the degree to which a Stream is upsampled or downsampled. Default: ``None``.
+        choose (list, optional): Specifies the number of samples to choose from a Stream. Default: ``None``.
         streaming_kwargs (dict, optional): Additional arguments to pass to the ``StreamingDataset``. Default: ``None``.
         dataloader_kwargs (dict, optional): Additional arguments to pass to the ``DataLoader``. Default: ``None``.
     """
     # Check crop type
     if crop_type is not None:
         crop_type = crop_type.lower()
-        if crop_type not in ['square', 'random', 'aspect_ratio']:
-            raise ValueError(f'Invalid crop_type: {crop_type}. Must be ["square", "random", "aspect_ratio", None]')
-        if crop_type == 'aspect_ratio' and (isinstance(resize_size, int) or isinstance(resize_size[0], int)):
+        if crop_type not in ['square', 'random', 'aspect_ratio', 'bucketed_aspect_ratio']:
             raise ValueError(
-                'If using crop_type="aspect_ratio", specify aspect ratio buckets in resize_size as a tuple of tuples.')
-
+                f'Invalid crop_type: {crop_type}. Must be ["square", "random", "aspect_ratio", "bucketed_aspect_ratio", None]'
+            )
+        if crop_type in ['aspect_ratio', 'bucketed_aspect_ratio'] and (isinstance(resize_size, int) or
+                                                                       isinstance(resize_size[0], int)):
+            raise ValueError(
+                'If using aspect ratio bucketing, specify aspect ratio buckets in resize_size as a tuple of tuples.')
     # Handle ``None`` kwargs
     if streaming_kwargs is None:
         streaming_kwargs = {}
     if dataloader_kwargs is None:
         dataloader_kwargs = {}
 
-    # Check types for remote and local
-
-    if isinstance(remote, str):
-        remote = [remote]
-    if isinstance(local, str):
-        local = [local]
-    if not local:
-        local = [_make_default_local_path(r) for r in remote]
-    if isinstance(remote, Sequence) and isinstance(local, Sequence):
-        if len(remote) != len(local):
-            ValueError(
-                f'remote and local Sequences must be the same length, got lengths {len(remote)} and {len(local)}')
-    else:
-        ValueError(f'remote and local must be both Strings or Sequences, got types {type(remote)} and {type(local)}.')
-
-    # Create a Stream for each (remote, local) pair
-    streams = []
-    for r, l in zip(remote, local):
-        streams.append(Stream(remote=r, local=l))
+    # Set up streams
+    streams = make_streams(remote, local=local, proportion=proportion, repeat=repeat, choose=choose)
 
     # Set the crop to apply
     if crop_type == 'square':
@@ -257,7 +258,10 @@ def build_streaming_image_caption_dataloader(
     elif crop_type == 'random':
         crop = RandomCropSquare(resize_size)
     elif crop_type == 'aspect_ratio':
-        crop = RandomCropAspectRatioTransorm(resize_size, ar_bucket_boundaries)  # type: ignore
+        crop = RandomCropAspectRatioTransform(resize_size, ar_bucket_boundaries)  # type: ignore
+    elif crop_type == 'bucketed_aspect_ratio':
+        assert aspect_ratio_bucket_key is not None, 'aspect_ratio_bucket_key must be provided when using bucketed_aspect_ratio crop type'
+        crop = RandomCropBucketedAspectRatioTransform(resize_size)  # type: ignore
     else:
         crop = None
 
@@ -276,6 +280,7 @@ def build_streaming_image_caption_dataloader(
         transform=transform,
         image_key=image_key,
         caption_key=caption_key,
+        aspect_ratio_bucket_key=aspect_ratio_bucket_key,
         batch_size=batch_size,
         sdxl_conditioning=sdxl_conditioning,
         zero_dropped_captions=zero_dropped_captions,
@@ -290,7 +295,3 @@ def build_streaming_image_caption_dataloader(
     )
 
     return dataloader
-
-
-def _make_default_local_path(remote_path):
-    return str(Path(*['/tmp'] + list(Path(remote_path).parts[1:])))

@@ -4,6 +4,7 @@
 """Constructors for diffusion models."""
 
 import logging
+import math
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -17,9 +18,13 @@ from diffusion.models.autoencoder import (AutoEncoder, AutoEncoderLoss, Composer
 from diffusion.models.layers import ClippedAttnProcessor2_0, ClippedXFormersAttnProcessor, zero_module
 from diffusion.models.pixel_diffusion import PixelDiffusion
 from diffusion.models.stable_diffusion import StableDiffusion
+from diffusion.models.t2i_transformer import ComposerTextToImageMMDiT
 from diffusion.models.text_encoder import MultiTextEncoder, MultiTokenizer
 from diffusion.models.controlnet import ControlNet
+
+from diffusion.models.transformer import DiffusionTransformer
 from diffusion.schedulers.schedulers import ContinuousTimeScheduler
+from diffusion.schedulers.utils import shift_noise_schedule
 
 try:
     import xformers  # type: ignore
@@ -52,6 +57,7 @@ def stable_diffusion_2(
     beta_schedule: str = 'scaled_linear',
     zero_terminal_snr: bool = False,
     offset_noise: Optional[float] = None,
+    scheduler_shift_resolution: int = 256,
     train_metrics: Optional[List] = None,
     val_metrics: Optional[List] = None,
     quasirandomness: bool = False,
@@ -98,6 +104,7 @@ def stable_diffusion_2(
         precomputed_latents (bool): Whether to use precomputed latents. Defaults to False.
         offset_noise (float, optional): The scale of the offset noise. If not specified, offset noise will not
             be used. Default `None`.
+        scheduler_shift_resolution (int): The resolution to shift the noise scheduler to. Default: `256`.
         encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
         mask_pad_tokens (bool): Whether to mask pad tokens in cross attention. Defaults to False.
         fsdp (bool): Whether to use FSDP. Defaults to True.
@@ -178,6 +185,14 @@ def stable_diffusion_2(
                                               clip_sample=False,
                                               set_alpha_to_one=False,
                                               prediction_type=prediction_type)
+
+    # Shift noise scheduler to correct for resolution changes
+    noise_scheduler = shift_noise_schedule(noise_scheduler,
+                                           base_dim=32,
+                                           shift_dim=scheduler_shift_resolution // downsample_factor)
+    inference_noise_scheduler = shift_noise_schedule(inference_noise_scheduler,
+                                                     base_dim=32,
+                                                     shift_dim=scheduler_shift_resolution // downsample_factor)
 
     # Make the composer model
     model = StableDiffusion(
@@ -443,6 +458,7 @@ def stable_diffusion_xl(
     zero_terminal_snr: bool = False,
     use_karras_sigmas: bool = False,
     offset_noise: Optional[float] = None,
+    scheduler_shift_resolution: int = 256,
     train_metrics: Optional[List] = None,
     val_metrics: Optional[List] = None,
     quasirandomness: bool = False,
@@ -490,6 +506,7 @@ def stable_diffusion_xl(
         use_karras_sigmas (bool): Whether to use the Karras sigmas for the diffusion process noise. Default: `False`.
         offset_noise (float, optional): The scale of the offset noise. If not specified, offset noise will not
             be used. Default `None`.
+        scheduler_shift_resolution (int): The resolution to shift the noise scheduler to. Default: `256`.
         train_metrics (list, optional): List of metrics to compute during training. If None, defaults to
             [MeanSquaredError()].
         val_metrics (list, optional): List of metrics to compute during validation. If None, defaults to
@@ -639,6 +656,14 @@ def stable_diffusion_xl(
                                                            timestep_spacing='leading',
                                                            steps_offset=1,
                                                            rescale_betas_zero_snr=zero_terminal_snr)
+
+    # Shift noise scheduler to correct for resolution changes
+    noise_scheduler = shift_noise_schedule(noise_scheduler,
+                                           base_dim=32,
+                                           shift_dim=scheduler_shift_resolution // downsample_factor)
+    inference_noise_scheduler = shift_noise_schedule(inference_noise_scheduler,
+                                                     base_dim=32,
+                                                     shift_dim=scheduler_shift_resolution // downsample_factor)
 
     # Make the composer model
     model = StableDiffusion(
@@ -948,6 +973,135 @@ def stable_diffusion_xl_controlnet(
         model.controlnet.set_attn_processor(attn_processor)
 
     return model
+
+def text_to_image_transformer(
+    tokenizer_names: Union[str, Tuple[str, ...]] = ('stabilityai/stable-diffusion-xl-base-1.0/tokenizer'),
+    text_encoder_names: Union[str, Tuple[str, ...]] = ('stabilityai/stable-diffusion-xl-base-1.0/text_encoder'),
+    vae_model_name: str = 'madebyollin/sdxl-vae-fp16-fix',
+    autoencoder_path: Optional[str] = None,
+    autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
+    num_layers: int = 28,
+    max_image_side: int = 1280,
+    conditioning_features: int = 768,
+    conditioning_max_sequence_length: int = 77,
+    patch_size: int = 2,
+    latent_mean: Union[float, Tuple, str] = 0.0,
+    latent_std: Union[float, Tuple, str] = 7.67754318618,
+    timestep_mean: float = 0.0,
+    timestep_std: float = 1.0,
+    timestep_shift: float = 1.0,
+    image_key: str = 'image',
+    caption_key: str = 'captions',
+    caption_mask_key: str = 'attention_mask',
+    pretrained: bool = False,
+):
+    """Text to image transformer training setup.
+
+    Args:
+        tokenizer_names (str, Tuple[str, ...]): HuggingFace name(s) of the tokenizer(s) to load.
+            Default: ``('stabilityai/stable-diffusion-xl-base-1.0/tokenizer')``.
+        text_encoder_names (str, Tuple[str, ...]): HuggingFace name(s) of the text encoder(s) to load.
+            Default: ``('stabilityai/stable-diffusion-xl-base-1.0/text_encoder')``.
+        vae_model_name (str): Name of the VAE model to load. Defaults to 'madebyollin/sdxl-vae-fp16-fix'.
+        autoencoder_path (optional, str): Path to autoencoder weights if using custom autoencoder. If not specified,
+            will use the vae from `model_name`. Default `None`.
+        autoencoder_local_path (optional, str): Path to autoencoder weights. Default: `/tmp/autoencoder_weights.pt`.
+        num_layers (int): Number of layers in the transformer. Number of heads and layer width are determined by
+            this according to `num_features = 64 * num_layers`, and `num_heads = num_layers`. Default: `28`.
+        max_image_side (int): Maximum side length of the image. Default: `1280`.
+        conditioning_features (int): Number of features in the conditioning transformer. Default: `768`.
+        conditioning_max_sequence_length (int): Maximum sequence length for the conditioning transformer. Default: `77`.
+        patch_size (int): Patch size for the transformer. Default: `2`.
+        latent_mean (float, Tuple, str): The mean of the autoencoder latents. Either a float for a single value,
+            a tuple of means, or or `'latent_statistics'` to try to use the value from the autoencoder
+            checkpoint. Defaults to `0.0`.
+        latent_std (float, Tuple, str): The std. dev. of the autoencoder latents. Either a float for a single value,
+            a tuple of std_devs, or or `'latent_statistics'` to try to use the value from the autoencoder
+            checkpoint. Defaults to `1/0.13025`.
+        timestep_mean (float): The mean of the timesteps. Default: `0.0`.
+        timestep_std (float): The std. dev. of the timesteps. Default: `1.0`.
+        timestep_shift (float): The shift of the timesteps. Default: `1.0`.
+        image_key (str): The key for the image in the batch. Default: `image`.
+        caption_key (str): The key for the captions in the batch. Default: `captions`.
+        caption_mask_key (str): The key for the caption mask in the batch. Default: `attention_mask`.
+        pretrained (bool): Whether to load pretrained weights. Not used. Defaults to False.
+    """
+    latent_mean, latent_std = _parse_latent_statistics(latent_mean), _parse_latent_statistics(latent_std)
+
+    if (isinstance(tokenizer_names, tuple) or
+            isinstance(text_encoder_names, tuple)) and len(tokenizer_names) != len(text_encoder_names):
+        raise ValueError('Number of tokenizer_names and text_encoder_names must be equal')
+
+    # Make the tokenizer and text encoder
+    tokenizer = MultiTokenizer(tokenizer_names_or_paths=tokenizer_names)
+    text_encoder = MultiTextEncoder(model_names=text_encoder_names, encode_latents_in_fp16=True, pretrained_sdxl=False)
+
+    precision = torch.float16
+    # Make the autoencoder
+    if autoencoder_path is None:
+        if latent_mean == 'latent_statistics' or latent_std == 'latent_statistics':
+            raise ValueError('Cannot use tracked latent_statistics when using the pretrained vae.')
+        downsample_factor = 8
+        autoencoder_channels = 4
+        # Use the pretrained vae
+        try:
+            vae = AutoencoderKL.from_pretrained(vae_model_name, subfolder='vae', torch_dtype=precision)
+        except:  # for handling SDXL vae fp16 fixed checkpoint
+            vae = AutoencoderKL.from_pretrained(vae_model_name, torch_dtype=precision)
+    else:
+        # Use a custom autoencoder
+        vae, latent_statistics = load_autoencoder(autoencoder_path, autoencoder_local_path, torch_dtype=precision)
+        if latent_statistics is None and (latent_mean == 'latent_statistics' or latent_std == 'latent_statistics'):
+            raise ValueError(
+                'Must specify latent scale when using a custom autoencoder without tracking latent statistics.')
+        if isinstance(latent_mean, str) and latent_mean == 'latent_statistics':
+            assert isinstance(latent_statistics, dict)
+            latent_mean = tuple(latent_statistics['latent_channel_means'])
+        if isinstance(latent_std, str) and latent_std == 'latent_statistics':
+            assert isinstance(latent_statistics, dict)
+            latent_std = tuple(latent_statistics['latent_channel_stds'])
+        downsample_factor = 2**(len(vae.config['channel_multipliers']) - 1)
+        autoencoder_channels = vae.config['latent_channels']
+    assert isinstance(vae, torch.nn.Module)
+    if isinstance(latent_mean, float):
+        latent_mean = (latent_mean,) * autoencoder_channels
+    if isinstance(latent_std, float):
+        latent_std = (latent_std,) * autoencoder_channels
+    assert isinstance(latent_mean, tuple) and isinstance(latent_std, tuple)
+    # Figure out the maximum input sequence length
+    input_max_sequence_length = math.ceil(max_image_side / (downsample_factor * patch_size))
+    # Make the transformer model
+    transformer = DiffusionTransformer(num_features=64 * num_layers,
+                                       num_heads=num_layers,
+                                       num_layers=num_layers,
+                                       input_features=autoencoder_channels * (patch_size**2),
+                                       input_max_sequence_length=input_max_sequence_length,
+                                       input_dimension=2,
+                                       conditioning_features=conditioning_features,
+                                       conditioning_max_sequence_length=conditioning_max_sequence_length,
+                                       conditioning_dimension=1,
+                                       expansion_factor=4)
+    # Make the composer model
+    model = ComposerTextToImageMMDiT(model=transformer,
+                                     autoencoder=vae,
+                                     text_encoder=text_encoder,
+                                     tokenizer=tokenizer,
+                                     latent_mean=latent_mean,
+                                     latent_std=latent_std,
+                                     patch_size=patch_size,
+                                     downsample_factor=downsample_factor,
+                                     latent_channels=autoencoder_channels,
+                                     timestep_mean=timestep_mean,
+                                     timestep_std=timestep_std,
+                                     timestep_shift=timestep_shift,
+                                     image_key=image_key,
+                                     caption_key=caption_key,
+                                     caption_mask_key=caption_mask_key)
+
+    if torch.cuda.is_available():
+        model = DeviceGPU().module_to_device(model)
+    return model
+
 
 def build_autoencoder(input_channels: int = 3,
                       output_channels: int = 3,
