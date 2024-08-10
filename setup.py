@@ -21,6 +21,7 @@ install_requires = [
     'clean-fid==0.1.35',
     'clip@git+https://github.com/openai/CLIP.git@a1d071733d7111c9c014f024669f959182114e33',
     'gradio==4.19.2',
+    'peft==0.12.0'
 ]
 
 extras_require = {}

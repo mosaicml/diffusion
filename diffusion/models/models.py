@@ -11,6 +11,7 @@ from composer.devices import DeviceGPU
 from diffusers import AutoencoderKL, DDIMScheduler, DDPMScheduler, EulerDiscreteScheduler, UNet2DConditionModel
 from torchmetrics import MeanSquaredError
 from transformers import CLIPTextModel, CLIPTokenizer, PretrainedConfig
+from peft import LoraConfig
 
 from diffusion.models.autoencoder import (AutoEncoder, AutoEncoderLoss, ComposerAutoEncoder,
                                           ComposerDiffusersAutoEncoder, load_autoencoder)
@@ -62,6 +63,8 @@ def stable_diffusion_2(
     fsdp: bool = True,
     clip_qkv: Optional[float] = None,
     use_xformers: bool = True,
+    use_lora: bool = False,
+    lora_rank: Optional[int] = None
 ):
     """Stable diffusion v2 training setup.
 
@@ -201,6 +204,20 @@ def stable_diffusion_2(
         mask_pad_tokens=mask_pad_tokens,
         fsdp=fsdp,
     )
+    if use_lora:
+        assert lora_rank is not None
+        model.unet.requires_grad_(False)
+        for param in model.unet.parameters():
+            param.requires_grad_(False)
+
+        unet_lora_config = LoraConfig(
+            r=lora_rank,
+            lora_alpha=lora_rank,
+            init_lora_weights="gaussian",
+            target_modules=["to_k", "to_q", "to_v", "to_out.0"],
+        )
+        model.unet.add_adapter(unet_lora_config)
+        
     if torch.cuda.is_available():
         model = DeviceGPU().module_to_device(model)
         if is_xformers_installed and use_xformers:
@@ -247,6 +264,8 @@ def stable_diffusion_xl(
     fsdp: bool = True,
     clip_qkv: Optional[float] = None,
     use_xformers: bool = True,
+    use_lora: bool = False,
+    lora_rank: Optional[int] = None
 ):
     """Stable diffusion 2 training setup + SDXL UNet and VAE.
 
@@ -457,6 +476,20 @@ def stable_diffusion_xl(
         fsdp=fsdp,
         sdxl=True,
     )
+
+    if use_lora:
+        assert lora_rank is not None
+        model.unet.requires_grad_(False)
+        for param in model.unet.parameters():
+            param.requires_grad_(False)
+
+        unet_lora_config = LoraConfig(
+            r=lora_rank,
+            lora_alpha=lora_rank,
+            init_lora_weights="gaussian",
+            target_modules=["to_k", "to_q", "to_v", "to_out.0"],
+        )
+        model.unet.add_adapter(unet_lora_config)
     if torch.cuda.is_available():
         model = DeviceGPU().module_to_device(model)
         if is_xformers_installed and use_xformers:
