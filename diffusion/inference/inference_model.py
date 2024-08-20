@@ -11,6 +11,7 @@ import torch
 from composer.utils.file_helpers import get_file
 from PIL import Image
 
+import diffusion.models
 from diffusion.models import stable_diffusion_2, stable_diffusion_xl
 
 # Local checkpoint params
@@ -173,6 +174,83 @@ class StableDiffusionXLInference():
                 if 'val_metrics.' in key:
                     del state_dict['state']['model'][key]
             model.load_state_dict(state_dict['state']['model'], strict=False)
+        model.to(self.device)
+        self.model = model.eval()
+
+    def predict(self, model_requests: List[Dict[str, Any]]):
+        prompts = []
+        negative_prompts = []
+        generate_kwargs = {}
+
+        # assumes the same generate_kwargs across all samples
+        for req in model_requests:
+            if 'input' not in req:
+                raise RuntimeError('"input" must be provided to generate call')
+            inputs = req['input']
+
+            # Prompts and negative prompts if available
+            if isinstance(inputs, str):
+                prompts.append(inputs)
+            elif isinstance(inputs, Dict):
+                if 'prompt' not in inputs:
+                    raise RuntimeError('"prompt" must be provided to generate call if using a dict as input')
+                prompts.append(inputs['prompt'])
+                if 'negative_prompt' in inputs:
+                    negative_prompts.append(inputs['negative_prompt'])
+            else:
+                raise RuntimeError(f'Input must be of type string or dict, but it is type: {type(inputs)}')
+
+            generate_kwargs = req['parameters']
+
+        # Check for prompts
+        if len(prompts) == 0:
+            raise RuntimeError('No prompts provided, must be either a string or dictionary with "prompt"')
+
+        # Check negative prompt length
+        if len(negative_prompts) == 0:
+            negative_prompts = None
+        elif len(prompts) != len(negative_prompts):
+            raise RuntimeError('There must be the same number of negative prompts as prompts.')
+
+        # Generate images
+        with torch.cuda.amp.autocast(True):
+            imgs = self.model.generate(prompt=prompts, negative_prompt=negative_prompts, **generate_kwargs).cpu()
+
+        # Send as bytes
+        png_images = []
+        for i in range(imgs.shape[0]):
+            img = (imgs[i].permute(1, 2, 0).numpy() * 255).round().astype('uint8')
+            pil_image = Image.fromarray(img, 'RGB')
+            img_byte_arr = io.BytesIO()
+            pil_image.save(img_byte_arr, format='PNG')
+            base64_encoded_image = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
+            png_images.append(base64_encoded_image)
+        return png_images
+
+
+class ModelInference():
+    """Generic inference endpoint class for diffusion models with a model.generate() method.
+
+    Args:
+        model_name (str): Name of the model from `diffusion.models` to load. Ex: for stable diffusion xl, use 'stable_diffusion_xl'.
+        local_checkpoint_path (str): Path to the local checkpoint. Default: '/tmp/model.pt'.
+        strict (bool): Whether to load the model weights strictly. Default: False.
+        **model_kwargs: Keyword arguments to pass to the model initialization.
+    """
+
+    def __init__(self, model_name, local_checkpoint_path: str = LOCAL_CHECKPOINT_PATH, strict=False, **model_kwargs):
+        self.device = torch.cuda.current_device()
+        model_factory = getattr(diffusion.models, model_name)
+        model = model_factory(**model_kwargs)
+
+        if 'pretrained' in model_kwargs and model_kwargs['pretrained']:
+            pass
+        else:
+            state_dict = torch.load(local_checkpoint_path)
+            for key in list(state_dict['state']['model'].keys()):
+                if 'val_metrics.' in key:
+                    del state_dict['state']['model'][key]
+            model.load_state_dict(state_dict['state']['model'], strict=strict)
         model.to(self.device)
         self.model = model.eval()
 
