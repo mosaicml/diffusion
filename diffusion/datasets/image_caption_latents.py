@@ -14,7 +14,7 @@ from streaming import Stream, StreamingDataset
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
-from diffusion.datasets.laion.transforms import LargestCenterSquare, RandomCropAspectRatioTransorm, RandomCropSquare
+from diffusion.datasets.laion.transforms import LargestCenterSquare, RandomCropAspectRatioTransform, RandomCropSquare
 from diffusion.datasets.utils import make_streams
 
 log = logging.getLogger(__name__)
@@ -212,7 +212,7 @@ def build_streaming_image_caption_latents_dataloader(
     elif crop_type == 'random':
         crop = RandomCropSquare(resize_size)
     elif crop_type == 'aspect_ratio':
-        crop = RandomCropAspectRatioTransorm(resize_size, ar_bucket_boundaries)  # type: ignore
+        crop = RandomCropAspectRatioTransform(resize_size, ar_bucket_boundaries)  # type: ignore
     else:
         crop = None
 
