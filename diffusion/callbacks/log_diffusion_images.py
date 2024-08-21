@@ -10,8 +10,6 @@ from typing import List, Optional, Tuple, Union
 import torch
 from composer import Callback, Logger, State
 from composer.core import TimeUnit, get_precision_context
-from numpy import asarray
-from PIL import Image
 from torch.nn.parallel import DistributedDataParallel
 from transformers import AutoModel, AutoTokenizer, CLIPTextModel
 
@@ -178,9 +176,7 @@ class LogDiffusionImages(Callback):
 
         # Log images to wandb
         for prompt, image in zip(self.prompts, gen_images):
-            img = (image.detach().cpu().permute(1, 2, 0).numpy() * 255).round().astype('uint8')
-            pil_image = asarray(Image.fromarray(img, 'RGB'))
-            logger.log_images(images=pil_image, name=prompt, step=state.timestamp.batch.value, use_table=self.use_table)
+            logger.log_images(images=image, name=prompt, step=state.timestamp.batch.value, use_table=self.use_table)
 
 
 class LogAutoencoderImages(Callback):
