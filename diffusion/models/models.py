@@ -233,6 +233,26 @@ def stable_diffusion_2(
             target_modules=['to_k', 'to_q', 'to_v', 'to_out.0'],
         )
         model.unet.add_adapter(unet_lora_config)
+        model.unet._fsdp_wrap = True
+        if hasattr(model.unet, 'mid_block') and model.unet.mid_block is not None:
+            for attention in model.unet.mid_block.attentions:
+                attention._fsdp_wrap = True
+            for resnet in model.unet.mid_block.resnets:
+                resnet._fsdp_wrap = True
+        for block in model.unet.up_blocks:
+            if hasattr(block, 'attentions'):
+                for attention in block.attentions:
+                    attention._fsdp_wrap = True
+            if hasattr(block, 'resnets'):
+                for resnet in block.resnets:
+                    resnet._fsdp_wrap = True
+        for block in model.unet.down_blocks:
+            if hasattr(block, 'attentions'):
+                for attention in block.attentions:
+                    attention._fsdp_wrap = True
+            if hasattr(block, 'resnets'):
+                for resnet in block.resnets:
+                    resnet._fsdp_wrap = True
 
     if torch.cuda.is_available():
         model = DeviceGPU().module_to_device(model)
@@ -518,6 +538,26 @@ def stable_diffusion_xl(
             target_modules=['to_k', 'to_q', 'to_v', 'to_out.0'],
         )
         model.unet.add_adapter(unet_lora_config)
+        model.unet._fsdp_wrap = True
+        if hasattr(model.unet, 'mid_block') and model.unet.mid_block is not None:
+            for attention in model.unet.mid_block.attentions:
+                attention._fsdp_wrap = True
+            for resnet in model.unet.mid_block.resnets:
+                resnet._fsdp_wrap = True
+        for block in model.unet.up_blocks:
+            if hasattr(block, 'attentions'):
+                for attention in block.attentions:
+                    attention._fsdp_wrap = True
+            if hasattr(block, 'resnets'):
+                for resnet in block.resnets:
+                    resnet._fsdp_wrap = True
+        for block in model.unet.down_blocks:
+            if hasattr(block, 'attentions'):
+                for attention in block.attentions:
+                    attention._fsdp_wrap = True
+            if hasattr(block, 'resnets'):
+                for resnet in block.resnets:
+                    resnet._fsdp_wrap = True
     if torch.cuda.is_available():
         model = DeviceGPU().module_to_device(model)
         if is_xformers_installed and use_xformers:
