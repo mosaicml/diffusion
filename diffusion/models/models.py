@@ -9,7 +9,7 @@ from typing import List, Optional, Tuple, Union
 
 import torch
 from composer.devices import DeviceGPU
-from diffusers import AutoencoderKL, DDIMScheduler, DDPMScheduler, EulerDiscreteScheduler, UNet2DConditionModel
+from diffusers import AutoencoderKL, DDIMScheduler, DDPMScheduler, EulerDiscreteScheduler, UNet2DConditionModel, ControlNetModel
 from torchmetrics import MeanSquaredError
 from transformers import CLIPTextModel, CLIPTokenizer, PretrainedConfig
 
@@ -20,6 +20,8 @@ from diffusion.models.pixel_diffusion import PixelDiffusion
 from diffusion.models.stable_diffusion import StableDiffusion
 from diffusion.models.t2i_transformer import ComposerTextToImageMMDiT
 from diffusion.models.text_encoder import MultiTextEncoder, MultiTokenizer
+from diffusion.models.controlnet import ControlNet
+
 from diffusion.models.transformer import DiffusionTransformer
 from diffusion.schedulers.schedulers import ContinuousTimeScheduler
 from diffusion.schedulers.utils import shift_noise_schedule
@@ -229,6 +231,212 @@ def stable_diffusion_2(
             attn_processor = ClippedAttnProcessor2_0(clip_val=clip_qkv)
         log.info('Using %s with clip_val %.1f' % (attn_processor.__class__, clip_qkv))
         model.unet.set_attn_processor(attn_processor)
+
+    return model
+
+def stable_diffusion_2_controlnet(
+    model_name: str = 'stabilityai/stable-diffusion-2-base',
+    pretrained: bool = True,
+    autoencoder_path: Optional[str] = None,
+    autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
+    prediction_type: str = 'epsilon',
+    controlnet_from_composer_unet: bool = False,
+    controlnet: Optional[str] = None,
+    latent_mean: Union[float, Tuple, str] = 0.0,
+    latent_std: Union[float, Tuple, str] = 5.489980785067252,
+    beta_schedule: str = 'scaled_linear',
+    zero_terminal_snr: bool = False,
+    offset_noise: Optional[float] = None,
+    train_metrics: Optional[List] = None,
+    val_metrics: Optional[List] = None,
+    quasirandomness: bool = False,
+    train_seed: int = 42,
+    val_seed: int = 1138,
+    precomputed_latents: bool = False,
+    encode_latents_in_fp16: bool = True,
+    mask_pad_tokens: bool = False,
+    fsdp: bool = True,
+    clip_qkv: Optional[float] = None,
+    use_xformers: bool = True,
+):
+    """Stable diffusion v2 training setup.
+
+    Requires batches of matched images and text prompts to train. Generates images from text
+    prompts.
+
+    Args:
+        model_name (str): Name of the model to load. Defaults to 'stabilityai/stable-diffusion-2-base'.
+        pretrained (bool): Whether to load pretrained weights. Defaults to True.
+        autoencoder_path (optional, str): Path to autoencoder weights if using custom autoencoder. If not specified,
+            will use the vae from `model_name`. Default `None`.
+        autoencoder_local_path (optional, str): Path to autoencoder weights. Default: `/tmp/autoencoder_weights.pt`.
+        prediction_type (str): The type of prediction to use. Must be one of 'sample',
+            'epsilon', or 'v_prediction'. Default: `epsilon`.
+        latent_mean (float, list, str): The mean of the autoencoder latents. Either a float for a single value,
+            a tuple of means, or or `'latent_statistics'` to try to use the value from the autoencoder
+            checkpoint. Defaults to `0.0`.
+        latent_std (float, list, str): The std. dev. of the autoencoder latents. Either a float for a single value,
+            a tuple of std_devs, or or `'latent_statistics'` to try to use the value from the autoencoder
+            checkpoint. Defaults to `1/0.18215`.
+        beta_schedule (str): The beta schedule to use. Must be one of 'scaled_linear', 'linear', or 'squaredcos_cap_v2'.
+            Default: `scaled_linear`.
+        zero_terminal_snr (bool): Whether to enforce zero terminal SNR. Default: `False`.
+        train_metrics (list, optional): List of metrics to compute during training. If None, defaults to
+            [MeanSquaredError()].
+        val_metrics (list, optional): List of metrics to compute during validation. If None, defaults to
+            [MeanSquaredError()].
+        quasirandomness (bool): Whether to use quasirandomness for generating diffusion process noise.
+            Default: `False`.
+        train_seed (int): Seed to use for generating diffusion process noise during training if using
+            quasirandomness. Default: `42`.
+        val_seed (int): Seed to use for generating evaluation images. Defaults to 1138.
+        precomputed_latents (bool): Whether to use precomputed latents. Defaults to False.
+        offset_noise (float, optional): The scale of the offset noise. If not specified, offset noise will not
+            be used. Default `None`.
+        encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
+        mask_pad_tokens (bool): Whether to mask pad tokens in cross attention. Defaults to False.
+        fsdp (bool): Whether to use FSDP. Defaults to True.
+        clip_qkv (float, optional): If not None, clip the qkv values to this value. Defaults to None.
+        use_xformers (bool): Whether to use xformers for attention. Defaults to True.
+    """
+    latent_mean, latent_std = _parse_latent_statistics(latent_mean), _parse_latent_statistics(latent_std)
+
+    if train_metrics is None:
+        train_metrics = [MeanSquaredError()]
+    if val_metrics is None:
+        val_metrics = [MeanSquaredError()]
+
+    precision = torch.float16 if encode_latents_in_fp16 else None
+    # Make the text encoder
+    text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder', torch_dtype=precision)
+    tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer')
+
+    # Make the autoencoder
+    if autoencoder_path is None:
+        if latent_mean == 'latent_statistics' or latent_std == 'latent_statistics':
+            raise ValueError('Cannot use tracked latent_statistics when using the pretrained vae.')
+        # Use the pretrained vae
+        downsample_factor = 8
+        vae = AutoencoderKL.from_pretrained(model_name, subfolder='vae', torch_dtype=precision)
+    else:
+        # Use a custom autoencoder
+        vae, latent_statistics = load_autoencoder(autoencoder_path, autoencoder_local_path, torch_dtype=precision)
+        if latent_statistics is None and (latent_mean == 'latent_statistics' or latent_std == 'latent_statistics'):
+            raise ValueError(
+                'Must specify latent scale when using a custom autoencoder without tracking latent statistics.')
+        if isinstance(latent_mean, str) and latent_mean == 'latent_statistics':
+            assert isinstance(latent_statistics, dict)
+            latent_mean = tuple(latent_statistics['latent_channel_means'])
+        if isinstance(latent_std, str) and latent_std == 'latent_statistics':
+            assert isinstance(latent_statistics, dict)
+            latent_std = tuple(latent_statistics['latent_channel_stds'])
+        downsample_factor = 2**(len(vae.config['channel_multipliers']) - 1)
+
+    # Make the unet
+    unet_config = PretrainedConfig.get_config_dict(model_name, subfolder='unet')[0]
+    unet = UNet2DConditionModel.from_pretrained(model_name, subfolder='unet')
+    if pretrained:
+        controlnet = ControlNetModel.from_pretrained(controlnet)
+    else:
+        controlnet = ControlNetModel.from_unet(unet)
+    if isinstance(vae, AutoEncoder) and vae.config['latent_channels'] != 4:
+        raise ValueError(f'Pretrained unet has 4 latent channels but the vae has {vae.latent_channels}.')
+    if isinstance(latent_mean, float):
+        latent_mean = (latent_mean,) * unet_config['in_channels']
+    if isinstance(latent_std, float):
+        latent_std = (latent_std,) * unet_config['in_channels']
+    assert isinstance(latent_mean, tuple) and isinstance(latent_std, tuple)
+
+    # Make the noise schedulers
+    noise_scheduler = DDPMScheduler(num_train_timesteps=1000,
+                                    beta_start=0.00085,
+                                    beta_end=0.012,
+                                    beta_schedule=beta_schedule,
+                                    trained_betas=None,
+                                    variance_type='fixed_small',
+                                    clip_sample=False,
+                                    prediction_type=prediction_type,
+                                    sample_max_value=1.0,
+                                    timestep_spacing='leading',
+                                    steps_offset=1,
+                                    rescale_betas_zero_snr=zero_terminal_snr)
+
+    inference_noise_scheduler = DDIMScheduler(num_train_timesteps=1000,
+                                              beta_start=0.00085,
+                                              beta_end=0.012,
+                                              beta_schedule=beta_schedule,
+                                              trained_betas=None,
+                                              clip_sample=False,
+                                              set_alpha_to_one=False,
+                                              prediction_type=prediction_type)
+
+
+    if hasattr(controlnet, 'mid_block') and unet.controlnet is not None:
+        for attention in controlnet.mid_block.attentions:
+            attention._fsdp_wrap = True
+        for resnet in controlnet.mid_block.resnets:
+            resnet._fsdp_wrap = True
+    for block in controlnet.up_blocks:
+        if hasattr(block, 'attentions'):
+            for attention in block.attentions:
+                attention._fsdp_wrap = True
+        if hasattr(block, 'resnets'):
+            for resnet in block.resnets:
+                resnet._fsdp_wrap = True
+    for block in controlnet.down_blocks:
+        if hasattr(block, 'attentions'):
+            for attention in block.attentions:
+                attention._fsdp_wrap = True
+        if hasattr(block, 'resnets'):
+            for resnet in block.resnets:
+                resnet._fsdp_wrap = True
+    
+    for block in controlnet.controlnet_down_blocks:
+        block._fsdp_wrap = True
+
+    controlnet.controlnet_mid_block._fsdp_wrap = True
+
+    # Make the composer model
+    model = ControlNet(
+        unet=unet,
+        vae=vae,
+        controlnet = controlnet,
+        text_encoder=text_encoder,
+        tokenizer=tokenizer,
+        noise_scheduler=noise_scheduler,
+        inference_noise_scheduler=inference_noise_scheduler,
+        prediction_type=prediction_type,
+        latent_mean=latent_mean,
+        latent_std=latent_std,
+        downsample_factor=downsample_factor,
+        offset_noise=offset_noise,
+        train_metrics=train_metrics,
+        val_metrics=val_metrics,
+        quasirandomness=quasirandomness,
+        train_seed=train_seed,
+        val_seed=val_seed,
+        precomputed_latents=precomputed_latents,
+        encode_latents_in_fp16=encode_latents_in_fp16,
+        mask_pad_tokens=mask_pad_tokens,
+        fsdp=fsdp,
+        load_controlnet_from_composer=controlnet_from_composer_unet
+    )
+    if torch.cuda.is_available():
+        model = DeviceGPU().module_to_device(model)
+        if is_xformers_installed and use_xformers:
+            model.unet.enable_xformers_memory_efficient_attention()
+            if hasattr(model.vae, 'enable_xformers_memory_efficient_attention'):
+                model.vae.enable_xformers_memory_efficient_attention()
+            model.controlnet.enable_xformers_memory_efficient_attention()
+
+    if clip_qkv is not None:
+        if is_xformers_installed and use_xformers:
+            attn_processor = ClippedXFormersAttnProcessor(clip_val=clip_qkv)
+        else:
+            attn_processor = ClippedAttnProcessor2_0(clip_val=clip_qkv)
+        log.info('Using %s with clip_val %.1f' % (attn_processor.__class__, clip_qkv))
+        model.unet.set_attn_processor(attn_processor)
+        model.controlnet.set_attn_processor(attn_processor)
 
     return model
 
@@ -498,6 +706,273 @@ def stable_diffusion_xl(
 
     return model
 
+def stable_diffusion_xl_controlnet(
+    tokenizer_names: Union[str, Tuple[str, ...]] = ('stabilityai/stable-diffusion-xl-base-1.0/tokenizer',
+                                                    'stabilityai/stable-diffusion-xl-base-1.0/tokenizer_2'),
+    text_encoder_names: Union[str, Tuple[str, ...]] = ('stabilityai/stable-diffusion-xl-base-1.0/text_encoder',
+                                                       'stabilityai/stable-diffusion-xl-base-1.0/text_encoder_2'),
+    unet_model_name: str = 'stabilityai/stable-diffusion-xl-base-1.0',
+    vae_model_name: str = 'madebyollin/sdxl-vae-fp16-fix',
+    controlnet: str = None,
+    pretrained: bool = True,
+    autoencoder_path: Optional[str] = None,
+    autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
+    prediction_type: str = 'epsilon',
+    latent_mean: Union[float, Tuple, str] = 0.0,
+    latent_std: Union[float, Tuple, str] = 7.67754318618,
+    beta_schedule: str = 'scaled_linear',
+    zero_terminal_snr: bool = False,
+    use_karras_sigmas: bool = False,
+    offset_noise: Optional[float] = None,
+    train_metrics: Optional[List] = None,
+    val_metrics: Optional[List] = None,
+    quasirandomness: bool = False,
+    train_seed: int = 42,
+    val_seed: int = 1138,
+    precomputed_latents: bool = False,
+    encode_latents_in_fp16: bool = True,
+    mask_pad_tokens: bool = False,
+    fsdp: bool = True,
+    clip_qkv: Optional[float] = None,
+    use_xformers: bool = True,
+    controlnet_from_composer_unet: bool = False,
+):
+    """Stable diffusion 2 training setup + SDXL UNet and VAE.
+
+    Requires batches of matched images and text prompts to train. Generates images from text
+    prompts. Currently uses UNet and VAE config from SDXL, but text encoder/tokenizer from SD2.
+
+    Args:
+        tokenizer_names (str, Tuple[str, ...]): HuggingFace name(s) of the tokenizer(s) to load.
+            Default: ``('stabilityai/stable-diffusion-xl-base-1.0/tokenizer',
+            'stabilityai/stable-diffusion-xl-base-1.0/tokenizer_2')``.
+        text_encoder_names (str, Tuple[str, ...]): HuggingFace name(s) of the text encoder(s) to load.
+            Default: ``('stabilityai/stable-diffusion-xl-base-1.0/text_encoder',
+            'stabilityai/stable-diffusion-xl-base-1.0/text_encoder_2')``.
+        unet_model_name (str): Name of the UNet model to load. Defaults to
+            'stabilityai/stable-diffusion-xl-base-1.0'.
+        vae_model_name (str): Name of the VAE model to load. Defaults to
+            'madebyollin/sdxl-vae-fp16-fix' as the official VAE checkpoint (from
+            'stabilityai/stable-diffusion-xl-base-1.0') is not compatible with fp16.
+        pretrained (bool): Whether to load pretrained weights. Defaults to True.
+        autoencoder_path (optional, str): Path to autoencoder weights if using custom autoencoder. If not specified,
+            will use the vae from `model_name`. Default `None`.
+        autoencoder_local_path (optional, str): Path to autoencoder weights. Default: `/tmp/autoencoder_weights.pt`.
+        prediction_type (str): The type of prediction to use. Must be one of 'sample',
+            'epsilon', or 'v_prediction'. Default: `epsilon`.
+        latent_mean (float, Tuple, str): The mean of the autoencoder latents. Either a float for a single value,
+            a tuple of means, or or `'latent_statistics'` to try to use the value from the autoencoder
+            checkpoint. Defaults to `0.0`.
+        latent_std (float, Tuple, str): The std. dev. of the autoencoder latents. Either a float for a single value,
+            a tuple of std_devs, or or `'latent_statistics'` to try to use the value from the autoencoder
+            checkpoint. Defaults to `1/0.13025`.
+        beta_schedule (str): The beta schedule to use. Must be one of 'scaled_linear', 'linear', or 'squaredcos_cap_v2'.
+            Default: `scaled_linear`.
+        zero_terminal_snr (bool): Whether to enforce zero terminal SNR. Default: `False`.
+        use_karras_sigmas (bool): Whether to use the Karras sigmas for the diffusion process noise. Default: `False`.
+        offset_noise (float, optional): The scale of the offset noise. If not specified, offset noise will not
+            be used. Default `None`.
+        train_metrics (list, optional): List of metrics to compute during training. If None, defaults to
+            [MeanSquaredError()].
+        val_metrics (list, optional): List of metrics to compute during validation. If None, defaults to
+            [MeanSquaredError()].
+        quasirandomness (bool): Whether to use quasirandomness for generating diffusion process noise.
+            Default: `False`.
+        train_seed (int): Seed to use for generating diffusion process noise during training if using
+            quasirandomness. Default: `42`.
+        val_seed (int): Seed to use for generating evaluation images. Defaults to 1138.
+        precomputed_latents (bool): Whether to use precomputed latents. Defaults to False.
+        encode_latents_in_fp16 (bool): Whether to encode latents in fp16. Defaults to True.
+        mask_pad_tokens (bool): Whether to mask pad tokens in cross attention. Defaults to False.
+        fsdp (bool): Whether to use FSDP. Defaults to True.
+        clip_qkv (float, optional): If not None, clip the qkv values to this value. Improves stability of training.
+            Default: ``None``.
+        use_xformers (bool): Whether to use xformers for attention. Defaults to True.
+    """
+    latent_mean, latent_std = _parse_latent_statistics(latent_mean), _parse_latent_statistics(latent_std)
+
+    if (isinstance(tokenizer_names, tuple) or
+            isinstance(text_encoder_names, tuple)) and len(tokenizer_names) != len(text_encoder_names):
+        raise ValueError('Number of tokenizer_names and text_encoder_names must be equal')
+
+    if train_metrics is None:
+        train_metrics = [MeanSquaredError()]
+    if val_metrics is None:
+        val_metrics = [MeanSquaredError()]
+
+    # Make the tokenizer and text encoder
+    tokenizer = MultiTokenizer(tokenizer_names_or_paths=tokenizer_names)
+    text_encoder = MultiTextEncoder(model_names=text_encoder_names,
+                                    encode_latents_in_fp16=encode_latents_in_fp16,
+                                    pretrained_sdxl=pretrained)
+
+    precision = torch.float16 if encode_latents_in_fp16 else None
+    # Make the autoencoder
+    if autoencoder_path is None:
+        if latent_mean == 'latent_statistics' or latent_std == 'latent_statistics':
+            raise ValueError('Cannot use tracked latent_statistics when using the pretrained vae.')
+        downsample_factor = 8
+        # Use the pretrained vae
+        try:
+            vae = AutoencoderKL.from_pretrained(vae_model_name, subfolder='vae', torch_dtype=precision)
+        except:  # for handling SDXL vae fp16 fixed checkpoint
+            vae = AutoencoderKL.from_pretrained(vae_model_name, torch_dtype=precision)
+    else:
+        # Use a custom autoencoder
+        vae, latent_statistics = load_autoencoder(autoencoder_path, autoencoder_local_path, torch_dtype=precision)
+        if latent_statistics is None and (latent_mean == 'latent_statistics' or latent_std == 'latent_statistics'):
+            raise ValueError(
+                'Must specify latent scale when using a custom autoencoder without tracking latent statistics.')
+        if isinstance(latent_mean, str) and latent_mean == 'latent_statistics':
+            assert isinstance(latent_statistics, dict)
+            latent_mean = tuple(latent_statistics['latent_channel_means'])
+        if isinstance(latent_std, str) and latent_std == 'latent_statistics':
+            assert isinstance(latent_statistics, dict)
+            latent_std = tuple(latent_statistics['latent_channel_stds'])
+        downsample_factor = 2**(len(vae.config['channel_multipliers']) - 1)
+
+    # Make the unet
+    unet_config = PretrainedConfig.get_config_dict(unet_model_name, subfolder='unet')[0]
+    unet = UNet2DConditionModel.from_pretrained(unet_model_name, subfolder='unet')
+    if isinstance(vae, AutoEncoder) and vae.config['latent_channels'] != 4:
+        raise ValueError(f'Pretrained unet has 4 latent channels but the vae has {vae.latent_channels}.')
+    
+    if pretrained:
+        controlnet = ControlNetModel.from_pretrained(controlnet)
+    else:
+        controlnet = ControlNetModel.from_unet(unet)
+    if isinstance(latent_mean, float):
+        latent_mean = (latent_mean,) * unet_config['in_channels']
+    if isinstance(latent_std, float):
+        latent_std = (latent_std,) * unet_config['in_channels']
+    assert isinstance(latent_mean, tuple) and isinstance(latent_std, tuple)
+
+    assert isinstance(unet, UNet2DConditionModel)
+    if hasattr(unet, 'mid_block') and unet.mid_block is not None:
+        for attention in unet.mid_block.attentions:
+            attention._fsdp_wrap = True
+        for resnet in unet.mid_block.resnets:
+            resnet._fsdp_wrap = True
+    for block in unet.up_blocks:
+        if hasattr(block, 'attentions'):
+            for attention in block.attentions:
+                attention._fsdp_wrap = True
+        if hasattr(block, 'resnets'):
+            for resnet in block.resnets:
+                resnet._fsdp_wrap = True
+    for block in unet.down_blocks:
+        if hasattr(block, 'attentions'):
+            for attention in block.attentions:
+                attention._fsdp_wrap = True
+        if hasattr(block, 'resnets'):
+            for resnet in block.resnets:
+                resnet._fsdp_wrap = True
+    
+    if hasattr(controlnet, 'mid_block') and unet.controlnet is not None:
+        for attention in controlnet.mid_block.attentions:
+            attention._fsdp_wrap = True
+        for resnet in controlnet.mid_block.resnets:
+            resnet._fsdp_wrap = True
+    for block in controlnet.up_blocks:
+        if hasattr(block, 'attentions'):
+            for attention in block.attentions:
+                attention._fsdp_wrap = True
+        if hasattr(block, 'resnets'):
+            for resnet in block.resnets:
+                resnet._fsdp_wrap = True
+    for block in controlnet.down_blocks:
+        if hasattr(block, 'attentions'):
+            for attention in block.attentions:
+                attention._fsdp_wrap = True
+        if hasattr(block, 'resnets'):
+            for resnet in block.resnets:
+                resnet._fsdp_wrap = True
+    
+    for block in controlnet.controlnet_down_blocks:
+        block._fsdp_wrap = True
+
+    controlnet.controlnet_mid_block._fsdp_wrap = True
+
+    # Make the noise schedulers
+    noise_scheduler = DDPMScheduler(num_train_timesteps=1000,
+                                    beta_start=0.00085,
+                                    beta_end=0.012,
+                                    beta_schedule=beta_schedule,
+                                    trained_betas=None,
+                                    variance_type='fixed_small',
+                                    clip_sample=False,
+                                    prediction_type=prediction_type,
+                                    sample_max_value=1.0,
+                                    timestep_spacing='leading',
+                                    steps_offset=1,
+                                    rescale_betas_zero_snr=zero_terminal_snr)
+    if beta_schedule == 'squaredcos_cap_v2':
+        inference_noise_scheduler = DDIMScheduler(num_train_timesteps=1000,
+                                                  beta_start=0.00085,
+                                                  beta_end=0.012,
+                                                  beta_schedule=beta_schedule,
+                                                  trained_betas=None,
+                                                  clip_sample=False,
+                                                  set_alpha_to_one=False,
+                                                  prediction_type=prediction_type,
+                                                  rescale_betas_zero_snr=zero_terminal_snr)
+    else:
+        inference_noise_scheduler = EulerDiscreteScheduler(num_train_timesteps=1000,
+                                                           beta_start=0.00085,
+                                                           beta_end=0.012,
+                                                           beta_schedule=beta_schedule,
+                                                           trained_betas=None,
+                                                           prediction_type=prediction_type,
+                                                           interpolation_type='linear',
+                                                           use_karras_sigmas=use_karras_sigmas,
+                                                           timestep_spacing='leading',
+                                                           steps_offset=1,
+                                                           rescale_betas_zero_snr=zero_terminal_snr)
+
+    # Make the composer model
+    model = ControlNet(
+        unet=unet,
+        vae=vae,
+        controlnet = controlnet,
+        text_encoder=text_encoder,
+        tokenizer=tokenizer,
+        noise_scheduler=noise_scheduler,
+        inference_noise_scheduler=inference_noise_scheduler,
+        prediction_type=prediction_type,
+        latent_mean=latent_mean,
+        latent_std=latent_std,
+        downsample_factor=downsample_factor,
+        offset_noise=offset_noise,
+        train_metrics=train_metrics,
+        val_metrics=val_metrics,
+        quasirandomness=quasirandomness,
+        train_seed=train_seed,
+        val_seed=val_seed,
+        precomputed_latents=precomputed_latents,
+        encode_latents_in_fp16=encode_latents_in_fp16,
+        mask_pad_tokens=mask_pad_tokens,
+        fsdp=fsdp,
+        sdxl=True,
+        load_controlnet_from_composer=controlnet_from_composer_unet
+    )
+    if torch.cuda.is_available():
+        model = DeviceGPU().module_to_device(model)
+        if is_xformers_installed and use_xformers:
+            model.unet.enable_xformers_memory_efficient_attention()
+            if hasattr(model.vae, 'enable_xformers_memory_efficient_attention'):
+                model.vae.enable_xformers_memory_efficient_attention()
+            model.controlnet.enable_xformers_memory_efficient_attention()
+
+    if clip_qkv is not None:
+        if is_xformers_installed and use_xformers:
+            attn_processor = ClippedXFormersAttnProcessor(clip_val=clip_qkv)
+        else:
+            attn_processor = ClippedAttnProcessor2_0(clip_val=clip_qkv)
+        log.info('Using %s with clip_val %.1f' % (attn_processor.__class__, clip_qkv))
+        model.unet.set_attn_processor(attn_processor)
+        model.controlnet.set_attn_processor(attn_processor)
+
+    return model
 
 def text_to_image_transformer(
     tokenizer_names: Union[str, Tuple[str, ...]] = ('stabilityai/stable-diffusion-xl-base-1.0/tokenizer'),
