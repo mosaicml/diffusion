@@ -10,7 +10,7 @@ install_requires = [
     'diffusers[torch]==0.26.3', 'transformers[torch]==4.38.2', 'huggingface_hub==0.21.2', 'wandb==0.16.3',
     'xformers==0.0.23.post1', 'triton==2.1.0', 'torchmetrics[image]==1.3.1', 'lpips==0.1.4', 'clean-fid==0.1.35',
     'clip@git+https://github.com/openai/CLIP.git@a1d071733d7111c9c014f024669f959182114e33', 'gradio==4.19.2',
-    'datasets==2.19.2'
+    'datasets==2.19.2', 'peft==0.12.0'
 ]
 
 extras_require = {}
