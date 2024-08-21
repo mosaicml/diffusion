@@ -177,7 +177,7 @@ class LogDiffusionImages(Callback):
 
         # Log images to wandb
         for prompt, image in zip(self.prompts, gen_images):
-            img = (image.permute(1, 2, 0).numpy() * 255).round().astype('uint8')
+            img = (image.detach().cpu().permute(1, 2, 0).numpy() * 255).round().astype('uint8')
             pil_image = Image.fromarray(img, 'RGB')
             logger.log_images(images=pil_image, name=prompt, step=state.timestamp.batch.value, use_table=self.use_table)
 
