@@ -58,12 +58,12 @@ def load_models_and_tokenizers(cache_dir, device=None):
 
     print('Building models')
     t5_model = AutoModel.from_pretrained('google/t5-v1_1-xxl',
-                                         torch_dtype=torch.float16,
+                                         torch_dtype=torch.bfloat16,
                                          cache_dir=cache_dir,
                                          local_files_only=True).encoder.eval().to(device)
     clip_model = CLIPTextModel.from_pretrained('stabilityai/stable-diffusion-xl-base-1.0',
                                                subfolder='text_encoder',
-                                               torch_dtype=torch.float16,
+                                               torch_dtype=torch.bfloat16,
                                                cache_dir=cache_dir,
                                                local_files_only=True).eval().to(device)
 
@@ -167,15 +167,15 @@ def main():
                                           output_hidden_states=True)
 
                     # Add caption_key latents to sample
-                    for i in range(len(samples)):
-                        samples[i][f'{caption_key}_T5_ATTENTION_MASK'] = t5_tokenizer_out['attention_mask'][i].to(
+                    for i, sample in enumerate(samples):
+                        sample[f'{caption_key}_T5_ATTENTION_MASK'] = t5_tokenizer_out['attention_mask'][i].to(
                             torch.bool).numpy().tobytes()
-                        samples[i][f'{caption_key}_T5_LATENTS'] = t5_out[0][i].cpu().numpy().tobytes()
-                        samples[i][f'{caption_key}_CLIP_ATTENTION_MASK'] = clip_tokenizer_out['attention_mask'][i].to(
+                        sample[f'{caption_key}_T5_LATENTS'] = t5_out[0][i].cpu().float().numpy().tobytes()
+                        sample[f'{caption_key}_CLIP_ATTENTION_MASK'] = clip_tokenizer_out['attention_mask'][i].to(
                             torch.bool).numpy().tobytes()
-                        samples[i][f'{caption_key}_CLIP_LATENTS'] = clip_out.hidden_states[-2][i].cpu().numpy().tobytes(
-                        )
-                        samples[i][f'{caption_key}_CLIP_POOLED_TEXT'] = clip_out[1][i].cpu().numpy().tobytes()
+                        sample[f'{caption_key}_CLIP_LATENTS'] = clip_out.hidden_states[-2][i].cpu().float().numpy(
+                        ).tobytes()
+                        sample[f'{caption_key}_CLIP_POOLED_TEXT'] = clip_out[1][i].cpu().float().numpy().tobytes()
 
                 for sample in samples:
                     writer.write(sample)
