@@ -3,6 +3,7 @@
 
 """Script to stream text from a dataset, compute CLIP and T5 latents, and write the latents to streaming dataset."""
 
+import re
 import json
 import os
 import threading
@@ -68,6 +69,46 @@ def load_models_and_tokenizers(cache_dir, device=None):
                                                local_files_only=True).eval().to(device)
 
     return t5_tokenizer, clip_tokenizer, t5_model, clip_model
+
+
+def filter_before_keywords(text):
+    # Split the text into sentences, accounting for cases with and without spaces after periods
+    sentences = re.split(r'(?<=[.!?])(?:\s+|\s*(?=[A-Z]))', text)
+    
+    # Find the index of the first sentence containing "keyword" or "keywords" (case-insensitive)
+    keyword_index = next((i for i, sentence in enumerate(sentences) 
+                          if re.search(r'\bkeywords?\b', sentence, re.IGNORECASE)), None)
+    
+    if keyword_index is not None:
+        # Join sentences before the keyword sentence
+        return ' '.join(sentences[:keyword_index]).strip()
+    else:
+        # If no keyword found, return the original text
+        return text.strip()
+
+def split_before_note_string_method(text):
+    # Find the index of "Note:" or "(Note:"
+    note_index = min(
+        text.find("Note:") if text.find("Note:") != -1 else float('inf'),
+        text.find("(Note:") if text.find("(Note:") != -1 else float('inf')
+    )
+    
+    # If either "Note:" or "(Note:" is found, return everything before it
+    if note_index != float('inf'):
+        return text[:note_index].strip()
+    else:
+        return text.strip()
+    
+def preprocess_model_description(description):
+    # Cut off anything after a \n\n
+    description = description.split('\n\n')[0]
+
+    # Cut off anything after and including "(Note:" or "Note:""
+    description = split_before_note_string_method(description)
+
+    description = filter_before_keywords(description)
+
+    return description
 
 
 def prefetch_samples(dataset, start_idx, end_idx):
@@ -142,7 +183,10 @@ def main():
                 samples = [dataset[i] for i in range(sample_id, batch_end_idx)]
 
                 for caption_key in args.caption_keys:
-                    caption_batch = [sample[caption_key] for sample in samples]
+                    if caption_key == 'MODEL_DESCRIPTION':
+                        caption_batch = [preprocess_model_description(sample[caption_key]) for sample in samples]
+                    else:
+                        caption_batch = [sample[caption_key] for sample in samples]
 
                     # Pre-compute T5
                     t5_tokenizer_out = t5_tokenizer(caption_batch,
