@@ -104,7 +104,7 @@ class ImageGenerator:
                 get_file(path=self.load_path, destination=self.local_checkpoint_path, overwrite=True)
             with dist.local_rank_zero_download_and_wait(self.local_checkpoint_path):
                 # Load the model
-                state_dict = torch.load(self.local_checkpoint_path)
+                state_dict = torch.load(self.local_checkpoint_path, map_location='cpu')
             for key in list(state_dict['state']['model'].keys()):
                 if 'val_metrics.' in key:
                     del state_dict['state']['model'][key]
