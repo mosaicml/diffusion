@@ -26,7 +26,7 @@ def generate(config: DictConfig) -> None:
         config (DictConfig): Configuration composed by Hydra
     """
     reproducibility.seed_all(config.seed)
-    device = get_device()  # type: ignore
+    device = get_device(None)  # type: ignore
     dist.initialize_dist(device, config.dist_timeout)
 
     # The model to evaluate
