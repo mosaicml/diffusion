@@ -10,6 +10,7 @@ from typing import List, Optional, Tuple, Union
 import torch
 from composer.devices import DeviceGPU
 from diffusers import AutoencoderKL, DDIMScheduler, DDPMScheduler, EulerDiscreteScheduler, UNet2DConditionModel
+from peft import LoraConfig
 from torchmetrics import MeanSquaredError
 from transformers import CLIPTextModel, CLIPTokenizer, PretrainedConfig
 
@@ -67,6 +68,8 @@ def stable_diffusion_2(
     fsdp: bool = True,
     clip_qkv: Optional[float] = None,
     use_xformers: bool = True,
+    lora_rank: Optional[int] = None,
+    lora_alpha: Optional[int] = None,
 ):
     """Stable diffusion v2 training setup.
 
@@ -108,6 +111,8 @@ def stable_diffusion_2(
         fsdp (bool): Whether to use FSDP. Defaults to True.
         clip_qkv (float, optional): If not None, clip the qkv values to this value. Defaults to None.
         use_xformers (bool): Whether to use xformers for attention. Defaults to True.
+        lora_rank (int, optional): If not None, the rank to use for LoRA finetuning. Defaults to None.
+        lora_alpha (int, optional): If not None, the alpha to use for LoRA finetuning. Defaults to None.
     """
     latent_mean, latent_std = _parse_latent_statistics(latent_mean), _parse_latent_statistics(latent_std)
 
@@ -215,6 +220,40 @@ def stable_diffusion_2(
         mask_pad_tokens=mask_pad_tokens,
         fsdp=fsdp,
     )
+    if lora_rank is not None:
+        assert lora_alpha is not None
+        model.unet.requires_grad_(False)
+        for param in model.unet.parameters():
+            param.requires_grad_(False)
+
+        unet_lora_config = LoraConfig(
+            r=lora_rank,
+            lora_alpha=lora_alpha,
+            init_lora_weights='gaussian',
+            target_modules=['to_k', 'to_q', 'to_v', 'to_out.0'],
+        )
+        model.unet.add_adapter(unet_lora_config)
+        model.unet._fsdp_wrap = True
+        if hasattr(model.unet, 'mid_block') and model.unet.mid_block is not None:
+            for attention in model.unet.mid_block.attentions:
+                attention._fsdp_wrap = True
+            for resnet in model.unet.mid_block.resnets:
+                resnet._fsdp_wrap = True
+        for block in model.unet.up_blocks:
+            if hasattr(block, 'attentions'):
+                for attention in block.attentions:
+                    attention._fsdp_wrap = True
+            if hasattr(block, 'resnets'):
+                for resnet in block.resnets:
+                    resnet._fsdp_wrap = True
+        for block in model.unet.down_blocks:
+            if hasattr(block, 'attentions'):
+                for attention in block.attentions:
+                    attention._fsdp_wrap = True
+            if hasattr(block, 'resnets'):
+                for resnet in block.resnets:
+                    resnet._fsdp_wrap = True
+
     if torch.cuda.is_available():
         model = DeviceGPU().module_to_device(model)
         if is_xformers_installed and use_xformers:
@@ -264,6 +303,8 @@ def stable_diffusion_xl(
     fsdp: bool = True,
     clip_qkv: Optional[float] = None,
     use_xformers: bool = True,
+    lora_rank: Optional[int] = None,
+    lora_alpha: Optional[int] = None,
 ):
     """Stable diffusion 2 training setup + SDXL UNet and VAE.
 
@@ -319,6 +360,8 @@ def stable_diffusion_xl(
         clip_qkv (float, optional): If not None, clip the qkv values to this value. Improves stability of training.
             Default: ``None``.
         use_xformers (bool): Whether to use xformers for attention. Defaults to True.
+        lora_rank (int, optional): If not None, the rank to use for LoRA finetuning. Defaults to None.
+        lora_alpha (int, optional): If not None, the alpha to use for LoRA finetuning. Defaults to None.
     """
     latent_mean, latent_std = _parse_latent_statistics(latent_mean), _parse_latent_statistics(latent_std)
 
@@ -485,6 +528,40 @@ def stable_diffusion_xl(
         fsdp=fsdp,
         sdxl=True,
     )
+
+    if lora_rank is not None:
+        assert lora_alpha is not None
+        model.unet.requires_grad_(False)
+        for param in model.unet.parameters():
+            param.requires_grad_(False)
+
+        unet_lora_config = LoraConfig(
+            r=lora_rank,
+            lora_alpha=lora_alpha,
+            init_lora_weights='gaussian',
+            target_modules=['to_k', 'to_q', 'to_v', 'to_out.0'],
+        )
+        model.unet.add_adapter(unet_lora_config)
+        model.unet._fsdp_wrap = True
+        if hasattr(model.unet, 'mid_block') and model.unet.mid_block is not None:
+            for attention in model.unet.mid_block.attentions:
+                attention._fsdp_wrap = True
+            for resnet in model.unet.mid_block.resnets:
+                resnet._fsdp_wrap = True
+        for block in model.unet.up_blocks:
+            if hasattr(block, 'attentions'):
+                for attention in block.attentions:
+                    attention._fsdp_wrap = True
+            if hasattr(block, 'resnets'):
+                for resnet in block.resnets:
+                    resnet._fsdp_wrap = True
+        for block in model.unet.down_blocks:
+            if hasattr(block, 'attentions'):
+                for attention in block.attentions:
+                    attention._fsdp_wrap = True
+            if hasattr(block, 'resnets'):
+                for resnet in block.resnets:
+                    resnet._fsdp_wrap = True
     if torch.cuda.is_available():
         model = DeviceGPU().module_to_device(model)
         if is_xformers_installed and use_xformers:
