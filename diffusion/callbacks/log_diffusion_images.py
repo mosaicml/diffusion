@@ -108,7 +108,7 @@ class LogDiffusionImages(Callback):
 
                 tokenized_clip = clip_tokenizer(batch,
                                                 padding='max_length',
-                                                max_length=t5_tokenizer.model_max_length,
+                                                max_length=clip_tokenizer.model_max_length,
                                                 truncation=True,
                                                 return_tensors='pt')
                 clip_attention_mask = tokenized_clip['attention_mask'].cuda()
