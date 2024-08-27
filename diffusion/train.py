@@ -88,17 +88,20 @@ def train(config: DictConfig) -> None:
 
     model: ComposerModel = hydra.utils.instantiate(config.model)
 
+    # If the model has a tokenizer, we'll need it for the dataset
+    if hasattr(model, 'tokenizer'):
+        tokenizer = model.tokenizer
+    else:
+        tokenizer = None
+
     if hasattr(model, 'autoencoder_loss'):
         # Check if this is training an autoencoder. If so, the optimizer needs different param groups
         optimizer = make_autoencoder_optimizer(config, model)
-        tokenizer = None
     elif isinstance(model, ComposerTextToImageMMDiT):
         # Check if this is training a transformer. If so, the optimizer needs different param groups
         optimizer = make_transformer_optimizer(config, model)
-        tokenizer = model.tokenizer
     else:
         optimizer = hydra.utils.instantiate(config.optimizer, params=model.parameters())
-        tokenizer = model.tokenizer
 
     # Load train dataset. Currently this expects to load according to the datasetHparam method.
     # This means adding external datasets is currently not super easy. Will refactor or check for
