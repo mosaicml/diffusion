@@ -98,7 +98,7 @@ class LogDiffusionImages(Callback):
                 latent_batch = {}
                 tokenized_t5 = t5_tokenizer(batch,
                                             padding='max_length',
-                                            max_length=t5_tokenizer.model.max_length,
+                                            max_length=t5_tokenizer.model_max_length,
                                             truncation=True,
                                             return_tensors='pt')
                 t5_attention_mask = tokenized_t5['attention_mask'].to(torch.bool).cuda()
@@ -108,7 +108,7 @@ class LogDiffusionImages(Callback):
 
                 tokenized_clip = clip_tokenizer(batch,
                                                 padding='max_length',
-                                                max_length=t5_tokenizer.model.max_length,
+                                                max_length=t5_tokenizer.model_max_length,
                                                 truncation=True,
                                                 return_tensors='pt')
                 clip_attention_mask = tokenized_clip['attention_mask'].cuda()
