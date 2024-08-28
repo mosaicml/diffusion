@@ -207,11 +207,9 @@ def train(config: DictConfig) -> None:
                 print(f'Instantiating callbacks <{call_conf._target_}>')
                 callbacks.append(hydra.utils.instantiate(call_conf))
 
-    if 'planners' in config:
-        for pl_name, pl_conf in config.planners.items():
-            if pl_name == 'lora_planner' and pl_conf:
-                assert 'fsdp_config' in config.trainer
-                config.trainer.fsdp_config.load_planner = LoraPlanner
+    if 'lora_rank' in config.model:
+        assert 'fsdp_config' in config.trainer
+        config.trainer.fsdp_config.load_planner = LoraPlanner
 
     scheduler = hydra.utils.instantiate(config.scheduler)
 
