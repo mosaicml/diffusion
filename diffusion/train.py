@@ -21,6 +21,7 @@ from torch.optim import Optimizer
 
 from diffusion.models.autoencoder import ComposerAutoEncoder, ComposerDiffusersAutoEncoder
 from diffusion.models.t2i_transformer import ComposerTextToImageMMDiT
+from diffusion.planners import LoraPlanner
 
 
 def make_autoencoder_optimizer(config: DictConfig, model: ComposerModel) -> Optimizer:
@@ -205,6 +206,12 @@ def train(config: DictConfig) -> None:
             if '_target_' in call_conf:
                 print(f'Instantiating callbacks <{call_conf._target_}>')
                 callbacks.append(hydra.utils.instantiate(call_conf))
+
+    if 'planners' in config:
+        for pl_name, pl_conf in config.planners.items():
+            if pl_name == 'lora_planner' and pl_conf:
+                assert 'fsdp_config' in config.trainer
+                config.trainer.fsdp_config.load_planner = LoraPlanner
 
     scheduler = hydra.utils.instantiate(config.scheduler)
 
