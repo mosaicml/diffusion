@@ -3,6 +3,7 @@
 
 """Diffusion models."""
 
+import math
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -120,8 +121,16 @@ class DiffusionV1(ComposerModel):
         if self.quasirandomness:
             self.sobol = qmc.Sobol(d=1, scramble=True, seed=self.train_seed)
 
+        # Projection layers for the text embeddings
         self.clip_proj = nn.Linear(768, text_embed_dim)
         self.t5_proj = nn.Linear(4096, text_embed_dim)
+        # Learnable position embeddings for the conitioning sequences
+        t5_position_embeddings = torch.randn(self.max_seq_len, text_embed_dim)
+        t5_position_embeddings /= math.sqrt(text_embed_dim)
+        self.t5_position_embedding = torch.nn.Parameter(t5_position_embeddings, requires_grad=True)
+        clip_position_embeddings = torch.randn(self.max_seq_len, text_embed_dim)
+        clip_position_embeddings /= math.sqrt(text_embed_dim)
+        self.clip_position_embedding = torch.nn.Parameter(clip_position_embeddings, requires_grad=True)
 
     def _apply(self, fn):
         super(DiffusionV1, self)._apply(fn)
@@ -150,39 +159,30 @@ class DiffusionV1(ComposerModel):
         """Sets the rng generator for the model."""
         self.rng_generator = rng_generator
 
+    def encode_images(self, inputs):
+        with torch.cuda.amp.autocast(enabled=False):
+            latents = self.vae.encode(inputs.half())['latent_dist'].sample().data
+        latents = (latents - self.latent_mean) / self.latent_std  # scale latents
+        return latents
+
     def prepare_text_embeddings(self, t5_embed, clip_embed, t5_mask, clip_mask):
-        t5_embed = self.t5_proj(t5_embed)
-        clip_embed = self.clip_proj(clip_embed)
         if t5_embed.shape[1] > self.max_seq_len:
             t5_embed = t5_embed[:, :self.max_seq_len]
             t5_mask = t5_mask[:, :self.max_seq_len]
         if clip_embed.shape[1] > self.max_seq_len:
             clip_embed = clip_embed[:, :self.max_seq_len]
             clip_mask = clip_mask[:, :self.max_seq_len]
+        t5_embed = self.t5_proj(t5_embed)
+        clip_embed = self.clip_proj(clip_embed)
+        # Add position embeddings
+        t5_embed = 0.707 * t5_embed + 0.707 * self.t5_position_embedding[:t5_embed.shape[1]].unsqueeze(0)
+        clip_embed = 0.707 * clip_embed + 0.707 * self.clip_position_embedding[:clip_embed.shape[1]].unsqueeze(0)
         # Concatenate the text embeddings
         text_embeds = torch.cat([t5_embed, clip_embed], dim=1)
         encoder_attention_mask = torch.cat([t5_mask, clip_mask], dim=1)
         return text_embeds, encoder_attention_mask
 
-    def forward(self, batch):
-        latents, text_embeds, text_pooled_embeds, encoder_attention_mask = None, None, None, None
-
-        # Encode the images with the autoencoder encoder
-        inputs = batch['image']
-        with torch.cuda.amp.autocast(enabled=False):
-            latents = self.vae.encode(inputs.half())['latent_dist'].sample().data
-        latents = (latents - self.latent_mean) / self.latent_std  # scale latents
-
-        # Text embeddings are shape (B, seq_len, emb_dim), optionally truncate to a max length
-        t5_embed = batch['T5_LATENTS']
-        t5_mask = batch['T5_ATTENTION_MASK']
-        clip_embed = batch['CLIP_LATENTS']
-        clip_mask = batch['CLIP_ATTENTION_MASK']
-        text_pooled_embeds = batch['CLIP_POOLED']
-        text_embeds, encoder_attention_mask = self.prepare_text_embeddings(t5_embed, clip_embed, t5_mask, clip_mask)
-        
-        # Sample the diffusion timesteps
-        timesteps = self._generate_timesteps(latents)
+    def diffusion_forward(self, latents, timesteps):
         # Add noise to the inputs (forward diffusion)
         noise = torch.randn(*latents.shape, device=latents.device, generator=self.rng_generator)
         noised_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
@@ -196,6 +196,26 @@ class DiffusionV1(ComposerModel):
         else:
             raise ValueError(
                 f'prediction type must be one of sample, epsilon, or v_prediction. Got {self.prediction_type}')
+        return noised_latents, targets
+
+    def forward(self, batch):
+        latents, text_embeds, text_pooled_embeds, encoder_attention_mask = None, None, None, None
+
+        # Encode the images with the autoencoder encoder
+        inputs = batch['image']
+        latents = self.encode_images(inputs)
+
+        # Text embeddings are shape (B, seq_len, emb_dim), optionally truncate to a max length
+        t5_embed = batch['T5_LATENTS']
+        t5_mask = batch['T5_ATTENTION_MASK']
+        clip_embed = batch['CLIP_LATENTS']
+        clip_mask = batch['CLIP_ATTENTION_MASK']
+        text_pooled_embeds = batch['CLIP_POOLED']
+        text_embeds, encoder_attention_mask = self.prepare_text_embeddings(t5_embed, clip_embed, t5_mask, clip_mask)
+
+        # Sample the diffusion timesteps
+        timesteps = self._generate_timesteps(latents)
+        noised_latents, targets = self.diffusion_forward(latents, timesteps)
 
         # Prepare added time ids & embeddings
         add_time_ids = torch.cat(
