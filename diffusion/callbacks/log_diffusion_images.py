@@ -121,8 +121,9 @@ class LogDiffusionImages(Callback):
                 clip_attention_mask = clip_attention_mask.cpu().to(torch.long)
 
                 latent_batch['T5_LATENTS'] = t5_latents
+                latent_batch['T5_ATTENTION_MASK'] = t5_attention_mask
                 latent_batch['CLIP_LATENTS'] = clip_latents
-                latent_batch['ATTENTION_MASK'] = torch.cat([t5_attention_mask, clip_attention_mask], dim=1)
+                latent_batch['CLIP_ATTENTION_MASK'] = clip_attention_mask
                 latent_batch['CLIP_POOLED'] = clip_pooled
                 self.batched_latents.append(latent_batch)
 
@@ -144,11 +145,10 @@ class LogDiffusionImages(Callback):
             if self.precomputed_latents:
                 for batch in self.batched_latents:
                     pooled_prompt = batch['CLIP_POOLED'].cuda()
-                    prompt_mask = batch['ATTENTION_MASK'].cuda()
-                    t5_embeds = model.t5_proj(batch['T5_LATENTS'].cuda())
-                    clip_embeds = model.clip_proj(batch['CLIP_LATENTS'].cuda())
-                    prompt_embeds = torch.cat([t5_embeds, clip_embeds], dim=1)
-
+                    prompt_embeds, prompt_mask = model.prepare_text_embeddings(batch['T5_LATENTS'].cuda(),
+                                                                               batch['CLIP_LATENTS'].cuda(),
+                                                                               batch['T5_ATTENTION_MASK'].cuda(),
+                                                                               batch['CLIP_ATTENTION_MASK'].cuda())
                     gen_images = model.generate(prompt_embeds=prompt_embeds,
                                                 pooled_prompt=pooled_prompt,
                                                 prompt_mask=prompt_mask,
