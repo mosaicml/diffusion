@@ -48,7 +48,6 @@ class DiffusionV1(ComposerModel):
             noise scheduler. Used during the forward diffusion process (training).
         inference_scheduler (diffusers.SchedulerMixin): HuggingFace diffusers
             noise scheduler. Used during the backward diffusion process (inference).
-        loss_fn (torch.nn.Module): torch loss function. Default: `F.mse_loss`.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
         latent_mean (Optional[tuple[float]]): The means of the latent space. If not specified, defaults to
@@ -74,7 +73,6 @@ class DiffusionV1(ComposerModel):
         vae,
         noise_scheduler,
         inference_noise_scheduler,
-        loss_fn=F.mse_loss,
         prediction_type: str = 'epsilon',
         latent_mean: Tuple[float] = (0.0,) * 4,
         latent_std: Tuple[float] = (1 / 0.13025,) * 4,
@@ -92,7 +90,6 @@ class DiffusionV1(ComposerModel):
         self.unet = unet
         self.vae = vae
         self.noise_scheduler = noise_scheduler
-        self.loss_fn = loss_fn
         self.prediction_type = prediction_type.lower()
         if self.prediction_type not in ['sample', 'epsilon', 'v_prediction']:
             raise ValueError(f'prediction type must be one of sample, epsilon, or v_prediction. Got {prediction_type}')
@@ -165,6 +162,12 @@ class DiffusionV1(ComposerModel):
         latents = (latents - self.latent_mean) / self.latent_std  # scale latents
         return latents
 
+    def decode_latents (self, latents):
+        latents = latents * self.latent_std + self.latent_mean
+        image = self.vae.decode(latents).sample
+        image = (image / 2 + 0.5).clamp(0, 1)
+        return self.vae.decode(latents)
+
     def prepare_text_embeddings(self, t5_embed, clip_embed, t5_mask, clip_mask):
         if t5_embed.shape[1] > self.max_seq_len:
             t5_embed = t5_embed[:, :self.max_seq_len]
@@ -231,7 +234,8 @@ class DiffusionV1(ComposerModel):
 
     def loss(self, outputs, batch):
         """Loss between unet output and added noise, typically mse."""
-        return self.loss_fn(outputs[0], outputs[1])
+        loss = F.mse_loss(outputs[0], outputs[1])
+        return loss
 
     def eval_forward(self, batch, outputs=None):
         """For stable diffusion, eval forward computes unet outputs as well as some samples."""
@@ -431,9 +435,7 @@ class DiffusionV1(ComposerModel):
 
         # We now use the vae to decode the generated latents back into the image.
         # scale and decode the image latents with vae
-        latents = latents * self.latent_std + self.latent_mean
-        image = self.vae.decode(latents).sample
-        image = (image / 2 + 0.5).clamp(0, 1)
+        image = self.decode_latents(latents)
         return image.detach()  # (batch*num_images_per_prompt, channel, h, w)
 
 
