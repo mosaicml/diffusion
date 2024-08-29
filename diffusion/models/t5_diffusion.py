@@ -48,6 +48,10 @@ class DiffusionV1(ComposerModel):
             noise scheduler. Used during the forward diffusion process (training).
         inference_scheduler (diffusers.SchedulerMixin): HuggingFace diffusers
             noise scheduler. Used during the backward diffusion process (inference).
+        t5_tokenizer (Optional): Tokenizer for T5. Should only be specified during inference. Default: `None`.
+        t5_encoder (Optional): T5 text encoder. Should only be specified during inference. Default: `None`.
+        clip_tokenizer (Optional): Tokenizer for CLIP. Should only be specified during inference. Default: `None`.
+        clip_encoder (Optional): CLIP text encoder. Should only be specified during inference. Default: `None`.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
         latent_mean (Optional[tuple[float]]): The means of the latent space. If not specified, defaults to
@@ -73,6 +77,10 @@ class DiffusionV1(ComposerModel):
         vae,
         noise_scheduler,
         inference_noise_scheduler,
+        t5_tokenizer: Optional = None,
+        t5_encoder: Optional = None,
+        clip_tokenizer: Optional = None,
+        clip_encoder: Optional = None,
         prediction_type: str = 'epsilon',
         latent_mean: Tuple[float] = (0.0,) * 4,
         latent_std: Tuple[float] = (1 / 0.13025,) * 4,
@@ -89,6 +97,10 @@ class DiffusionV1(ComposerModel):
         super().__init__()
         self.unet = unet
         self.vae = vae
+        self.t5_tokenizer = t5_tokenizer
+        self.t5_encoder = t5_encoder
+        self.clip_tokenizer = clip_tokenizer
+        self.clip_encoder = clip_encoder
         self.noise_scheduler = noise_scheduler
         self.prediction_type = prediction_type.lower()
         if self.prediction_type not in ['sample', 'epsilon', 'v_prediction']:
@@ -136,20 +148,28 @@ class DiffusionV1(ComposerModel):
         return self
 
     def _generate_timesteps(self, latents: torch.Tensor):
-        if self.quasirandomness:
-            # Generate a quasirandom sequence of timesteps equal to the global batch size
+        if not self.model.training:
+            # Sample equally spaced timesteps across all devices
             global_batch_size = latents.shape[0] * dist.get_world_size()
-            sampled_fractions = torch.tensor(self.sobol.random(global_batch_size), device=latents.device)
-            timesteps = (len(self.noise_scheduler) * sampled_fractions).squeeze()
-            timesteps = torch.floor(timesteps).long()
+            global_timesteps = torch.linspace(0, len(self.noise_scheduler), global_batch_size)
             # Get this device's subset of all the timesteps
             idx_offset = dist.get_global_rank() * latents.shape[0]
-            timesteps = timesteps[idx_offset:idx_offset + latents.shape[0]].to(latents.device)
+            timesteps = global_timesteps[idx_offset:idx_offset + latents.shape[0]].to(latents.device)
         else:
-            timesteps = torch.randint(0,
-                                      len(self.noise_scheduler), (latents.shape[0],),
-                                      device=latents.device,
-                                      generator=self.rng_generator)
+            if self.quasirandomness:
+                # Generate a quasirandom sequence of timesteps equal to the global batch size
+                global_batch_size = latents.shape[0] * dist.get_world_size()
+                sampled_fractions = torch.tensor(self.sobol.random(global_batch_size), device=latents.device)
+                timesteps = (len(self.noise_scheduler) * sampled_fractions).squeeze()
+                timesteps = torch.floor(timesteps).long()
+                # Get this device's subset of all the timesteps
+                idx_offset = dist.get_global_rank() * latents.shape[0]
+                timesteps = timesteps[idx_offset:idx_offset + latents.shape[0]].to(latents.device)
+            else:
+                timesteps = torch.randint(0,
+                                        len(self.noise_scheduler), (latents.shape[0],),
+                                        device=latents.device,
+                                        generator=self.rng_generator)
         return timesteps
 
     def set_rng_generator(self, rng_generator: torch.Generator):
@@ -162,12 +182,12 @@ class DiffusionV1(ComposerModel):
         latents = (latents - self.latent_mean) / self.latent_std  # scale latents
         return latents
 
-    def decode_latents (self, latents):
+    def decode_latents(self, latents):
         latents = latents * self.latent_std + self.latent_mean
         image = self.vae.decode(latents).sample
         image = (image / 2 + 0.5).clamp(0, 1)
-        return self.vae.decode(latents)
-
+        return image
+        
     def prepare_text_embeddings(self, t5_embed, clip_embed, t5_mask, clip_mask):
         if t5_embed.shape[1] > self.max_seq_len:
             t5_embed = t5_embed[:, :self.max_seq_len]
