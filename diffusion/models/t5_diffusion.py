@@ -381,8 +381,6 @@ class DiffusionV1(ComposerModel):
             raise ValueError('pooled_prompt should be provided if and only if using embeddings')
         if (prompt_mask is None) != (prompt_embeds is None):
             raise ValueError('prompt_mask should be provided if and only if using embeddings')
-        if (neg_prompt_embeds is None) == (negative_prompt is None):
-            raise ValueError('One and only one of negative_prompt or neg_prompt_embeds should be provided.')
         if (neg_prompt_mask is None) != (neg_prompt_embeds is None):
             raise ValueError('neg_prompt_mask should be provided if and only if using embeddings')
         if (pooled_neg_prompt is None) != (neg_prompt_embeds is None):
