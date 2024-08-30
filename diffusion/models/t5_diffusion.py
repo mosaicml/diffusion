@@ -143,7 +143,7 @@ class DiffusionV1(ComposerModel):
         if not self.unet.training:
             # Sample equally spaced timesteps across all devices
             global_batch_size = latents.shape[0] * dist.get_world_size()
-            global_timesteps = torch.linspace(0, len(self.noise_scheduler), global_batch_size).to(torch.int64)
+            global_timesteps = torch.linspace(0, len(self.noise_scheduler) - 1, global_batch_size).to(torch.int64)
             # Get this device's subset of all the timesteps
             idx_offset = dist.get_global_rank() * latents.shape[0]
             timesteps = global_timesteps[idx_offset:idx_offset + latents.shape[0]].to(latents.device)
