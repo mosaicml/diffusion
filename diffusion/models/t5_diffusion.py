@@ -125,6 +125,9 @@ class DiffusionV1(ComposerModel):
         # Projection layers for the text embeddings
         self.clip_proj = nn.Linear(768, text_embed_dim)
         self.t5_proj = nn.Linear(4096, text_embed_dim)
+        # Layernorms for the text embeddings
+        self.clip_ln = nn.LayerNorm(text_embed_dim)
+        self.t5_ln = nn.LayerNorm(text_embed_dim)
         # Learnable position embeddings for the conitioning sequences
         t5_position_embeddings = torch.randn(self.max_seq_len, text_embed_dim)
         t5_position_embeddings /= math.sqrt(text_embed_dim)
@@ -219,6 +222,9 @@ class DiffusionV1(ComposerModel):
         # Add position embeddings
         t5_embed = 0.707 * t5_embed + 0.707 * self.t5_position_embedding[:t5_embed.shape[1]].unsqueeze(0)
         clip_embed = 0.707 * clip_embed + 0.707 * self.clip_position_embedding[:clip_embed.shape[1]].unsqueeze(0)
+        # Apply layernorms
+        t5_embed = self.t5_ln(t5_embed)
+        clip_embed = self.clip_ln(clip_embed)
         # Concatenate the text embeddings
         text_embeds = torch.cat([t5_embed, clip_embed], dim=1)
         encoder_attention_mask = torch.cat([t5_mask, clip_mask], dim=1)
