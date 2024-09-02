@@ -111,7 +111,7 @@ class DiffusionV1(ComposerModel):
         self.inference_scheduler = inference_noise_scheduler
         # freeze VAE during diffusion training
         self.vae.requires_grad_(False)
-        self.vae = self.vae.half()
+        self.vae = self.vae.bfloat16()
         if fsdp:
             # only wrap models we are training
             self.vae._fsdp_wrap = False
@@ -171,9 +171,9 @@ class DiffusionV1(ComposerModel):
         """Sets the rng generator for the model."""
         self.rng_generator = rng_generator
 
-    def encode_images(self, inputs):
+    def encode_images(self, inputs, dtype=torch.bfloat16):
         with torch.cuda.amp.autocast(enabled=False):
-            latents = self.vae.encode(inputs.half())['latent_dist'].sample().data
+            latents = self.vae.encode(inputs.to(dtype))['latent_dist'].sample().data
         latents = (latents - self.latent_mean) / self.latent_std  # scale latents
         return latents
 
@@ -489,7 +489,7 @@ class DiffusionV1(ComposerModel):
         # We now use the vae to decode the generated latents back into the image.
         # scale and decode the image latents with vae
         image = self.decode_latents(latents)
-        return image.detach()  # (batch*num_images_per_prompt, channel, h, w)
+        return image.detach().float()  # (batch*num_images_per_prompt, channel, h, w)
 
 
 def _duplicate_tensor(tensor, num_images_per_prompt):
