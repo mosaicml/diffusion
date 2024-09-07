@@ -207,23 +207,28 @@ def train(config: DictConfig) -> None:
                 print(f'Instantiating callbacks <{call_conf._target_}>')
                 callbacks.append(hydra.utils.instantiate(call_conf))
 
+    if 'fsdp_config' in config.trainer:
+        fsdp_config = config.trainer.pop('fsdp_config')
+        fsdp_config = dict(fsdp_config)
+    else:
+        fsdp_config = None
+
     if 'lora_rank' in config.model:
-        assert 'fsdp_config' in config.trainer
-        config.trainer.fsdp_config.load_planner = LoraPlanner
+        assert fsdp_config is not None
+        fsdp_config['load_planner'] = LoraPlanner
 
     scheduler = hydra.utils.instantiate(config.scheduler)
 
-    trainer: Trainer = hydra.utils.instantiate(
-        config.trainer,
-        train_dataloader=train_dataloader,
-        eval_dataloader=eval_set,
-        optimizers=optimizer,
-        model=model,
-        loggers=logger,
-        algorithms=algorithms,
-        schedulers=scheduler,
-        callbacks=callbacks,
-    )
+    trainer: Trainer = hydra.utils.instantiate(config.trainer,
+                                               train_dataloader=train_dataloader,
+                                               eval_dataloader=eval_set,
+                                               optimizers=optimizer,
+                                               model=model,
+                                               loggers=logger,
+                                               algorithms=algorithms,
+                                               schedulers=scheduler,
+                                               callbacks=callbacks,
+                                               fsdp_config=fsdp_config)
 
     def eval_and_then_train():
         if config.get('eval_first', True):
