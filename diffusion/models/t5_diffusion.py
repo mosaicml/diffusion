@@ -25,17 +25,15 @@ except:
 
 
 class DiffusionV1(ComposerModel):
-    """Stable Diffusion ComposerModel.
+    """Diffusion ComposerModel for running with precomputed T5 and CLIP embeddings.
 
     This is a Latent Diffusion model conditioned on text prompts that are run through
-    a pre-trained CLIP or LLM model. The CLIP outputs are then passed to as an
-    additional input to our Unet during training and can later be used to guide
-    the image generation process.
+    a pre-trained CLIP and T5 text encoder.
 
     Args:
         unet (torch.nn.Module): HuggingFace conditional unet, must accept a
             (B, C, H, W) input, (B,) timestep array of noise timesteps,
-            and (B, 77, 768) text conditioning vectors.
+            and (B, 77, text_embed_dim) text conditioning vectors.
         vae (torch.nn.Module): HuggingFace or compatible vae.
             must support `.encode()` and `decode()` functions.
         noise_scheduler (diffusers.SchedulerMixin): HuggingFace diffusers
@@ -46,13 +44,14 @@ class DiffusionV1(ComposerModel):
         t5_encoder (Optional): T5 text encoder. Should only be specified during inference. Default: `None`.
         clip_tokenizer (Optional): Tokenizer for CLIP. Should only be specified during inference. Default: `None`.
         clip_encoder (Optional): CLIP text encoder. Should only be specified during inference. Default: `None`.
+        text_embed_dim (int): The common dimension to project the text embeddings to. Default: `4096`.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
         latent_mean (Optional[tuple[float]]): The means of the latent space. If not specified, defaults to
             . Default: ``(0.0,) * 4``.
         latent_std (Optional[tuple[float]]): The standard deviations of the latent space. Default: ``(1/0.13025,)*4``.
         downsample_factor (int): The factor by which the image is downsampled by the autoencoder. Default `8`.
-        max_seq_len (int): The maximum sequence length for the text encoder. Default: `77`.
+        max_seq_len (int): The maximum sequence length for the text encoder. Default: `256`.
         train_metrics (list): List of torchmetrics to calculate during training.
             Default: `None`.
         val_metrics (list): List of torchmetrics to calculate during validation.
@@ -75,17 +74,17 @@ class DiffusionV1(ComposerModel):
         t5_encoder: Optional[torch.nn.Module] = None,
         clip_tokenizer: Optional[PreTrainedTokenizer] = None,
         clip_encoder: Optional[torch.nn.Module] = None,
+        text_embed_dim: int = 4096,
         prediction_type: str = 'epsilon',
         latent_mean: Tuple[float] = (0.0,) * 4,
         latent_std: Tuple[float] = (1 / 0.13025,) * 4,
         downsample_factor: int = 8,
-        max_seq_len: int = 77,
+        max_seq_len: int = 256,
         train_metrics: Optional[List] = None,
         val_metrics: Optional[List] = None,
         quasirandomness: bool = False,
         train_seed: int = 42,
         val_seed: int = 1138,
-        text_embed_dim: int = 4096,
         fsdp: bool = False,
     ):
         super().__init__()
@@ -210,7 +209,8 @@ class DiffusionV1(ComposerModel):
         pooled_embeddings = clip_out[1]
         return t5_embed, clip_embed, t5_attn_mask, clip_attn_mask, pooled_embeddings
 
-    def prepare_text_embeddings(self, t5_embed, clip_embed, t5_mask, clip_mask):
+    def prepare_text_embeddings(self, t5_embed: torch.Tensor, clip_embed: torch.Tensor, t5_mask: torch.Tensor,
+                                clip_mask: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         if t5_embed.shape[1] > self.max_seq_len:
             t5_embed = t5_embed[:, :self.max_seq_len]
             t5_mask = t5_mask[:, :self.max_seq_len]
@@ -305,20 +305,20 @@ class DiffusionV1(ComposerModel):
         self,
         prompt: Optional[list] = None,
         negative_prompt: Optional[list] = None,
-        prompt_embeds: Optional[torch.FloatTensor] = None,
-        pooled_prompt: Optional[torch.FloatTensor] = None,
-        prompt_mask: Optional[torch.LongTensor] = None,
-        neg_prompt_embeds: Optional[torch.FloatTensor] = None,
-        pooled_neg_prompt: Optional[torch.FloatTensor] = None,
-        neg_prompt_mask: Optional[torch.LongTensor] = None,
-        height: Optional[int] = None,
-        width: Optional[int] = None,
-        num_inference_steps: Optional[int] = 50,
-        guidance_scale: Optional[float] = 3.0,
+        prompt_embeds: Optional[torch.Tensor] = None,
+        pooled_prompt: Optional[torch.Tensor] = None,
+        prompt_mask: Optional[torch.Tensor] = None,
+        neg_prompt_embeds: Optional[torch.Tensor] = None,
+        pooled_neg_prompt: Optional[torch.Tensor] = None,
+        neg_prompt_mask: Optional[torch.Tensor] = None,
+        height: int = 1024,
+        width: int = 1024,
+        num_inference_steps: int = 50,
+        guidance_scale: float = 3.0,
         rescaled_guidance: Optional[float] = None,
-        num_images_per_prompt: Optional[int] = 1,
+        num_images_per_prompt: int = 1,
         seed: Optional[int] = None,
-        progress_bar: Optional[bool] = True,
+        progress_bar: bool = True,
         crop_params: Optional[torch.Tensor] = None,
         input_size_params: Optional[torch.Tensor] = None,
     ):
@@ -328,21 +328,28 @@ class DiffusionV1(ComposerModel):
         one forward pass through the unet.
 
         Args:
-            prompt (List[str]): The prompts to guide the image generation.
+            prompt (List[str]): The prompts to guide the image generation. Only use if not
+                using embeddings. Default: `None`.
             negative_prompt (str or List[str]): The prompt or prompts to guide the
                 image generation away from. Ignored when not using guidance
-                (i.e., ignored if guidance_scale is less than 1).
-                Must be the same length as list of prompts. Default: `None`.
-            prompt_embeds (torch.FloatTensor): Optionally pass pre-tokenized prompts instead
-                of string prompts. If both prompt and prompt_embeds
-                are passed, prompt_embeds will be used. Default: `None`.
-            neg_prompt_embeds (torch.FloatTensor): Optionally pass pre-embedded negative
-                prompts instead of string negative prompts. If both negative_prompt and
-                negative_prompt_embeds are passed, prompt_embeds will be used.  Default: `None`.
+                (i.e., ignored if guidance_scale is less than 1). Must be the same length
+                as list of prompts. Only use if not using negative embeddings. Default: `None`.
+            prompt_embeds (torch.Tensor): Optionally pass pre-tokenized prompts instead
+                of string prompts. Default: `None`.
+            pooled_prompt (torch.Tensor): Optionally pass a precomputed pooled prompt embedding
+                if using embeddings. Default: `None`.
+            prompt_mask (torch.Tensor): Optionally pass a precomputed attention mask for the
+                prompt embeddings. Default: `None`.
+            neg_prompt_embeds (torch.Tensor): Optionally pass pre-embedded negative
+                prompts instead of string negative prompts.  Default: `None`.
+            pooled_neg_prompt (torch.Tensor): Optionally pass a precomputed pooled negative
+                prompt embedding if using embeddings. Default: `None`.
+            neg_prompt_mask (torch.Tensor): Optionally pass a precomputed attention mask for the
+                negative prompt embeddings. Default: `None`.
             height (int, optional): The height in pixels of the generated image.
-                Default: `self.unet.config.sample_size * 8)`.
+                Default: `1024`.
             width (int, optional): The width in pixels of the generated image.
-                Default: `self.unet.config.sample_size * 8)`.
+                Default: `1024`.
             num_inference_steps (int): The number of denoising steps.
                 More denoising steps usually lead to a higher quality image at the expense
                 of slower inference. Default: `50`.
@@ -360,9 +367,9 @@ class DiffusionV1(ComposerModel):
                 Default: `True`.
             seed (int): Random seed to use for generation. Set a seed for reproducible generation.
                 Default: `None`.
-            crop_params (torch.FloatTensor of size [Bx2], optional): Crop parameters to use
+            crop_params (torch.Tensor of size [Bx2], optional): Crop parameters to use
                 when generating images with SDXL. Default: `None`.
-            input_size_params (torch.FloatTensor of size [Bx2], optional): Size parameters
+            input_size_params (torch.Tensor of size [Bx2], optional): Size parameters
                 (representing original size of input image) to use when generating images with SDXL.
                 Default: `None`.
         """
@@ -370,14 +377,7 @@ class DiffusionV1(ComposerModel):
         device = self.vae.device
         rng_generator = torch.Generator(device=device)
         if seed:
-            rng_generator = rng_generator.manual_seed(seed)  # type: ignore
-
-        if height is None:
-            height = self.unet.config.sample_size * self.downsample_factor
-        if width is None:
-            width = self.unet.config.sample_size * self.downsample_factor
-
-        do_classifier_free_guidance = guidance_scale > 1.0  # type: ignore
+            rng_generator = rng_generator.manual_seed(seed)
 
         # Check that inputs are consistent with all embeddings or text inputs. All embeddings should be provided if using
         # embeddings, and none if using text.
@@ -409,24 +409,23 @@ class DiffusionV1(ComposerModel):
         pooled_embeddings = _duplicate_tensor(pooled_prompt, num_images_per_prompt)
         encoder_attn_mask = _duplicate_tensor(prompt_mask, num_images_per_prompt)
 
-        batch_size = len(prompt_embeds)  # len prompts * num_images_per_prompt
+        batch_size = len(text_embeddings)  # len prompts * num_images_per_prompt
         # classifier free guidance + negative prompts
         # negative prompt is given in place of the unconditional input in classifier free guidance
-        if do_classifier_free_guidance:
-            if not neg_prompt_embeds:
-                # Negative prompt is empty and we want to zero it out
-                neg_prompt_embeds = torch.zeros_like(text_embeddings)
-                pooled_neg_prompt = torch.zeros_like(pooled_embeddings)
-                neg_prompt_mask = torch.zeros_like(encoder_attn_mask)
-            else:
-                neg_prompt_embeds = _duplicate_tensor(neg_prompt_embeds, num_images_per_prompt)
-                pooled_neg_prompt = _duplicate_tensor(pooled_neg_prompt, num_images_per_prompt)
-                neg_prompt_mask = _duplicate_tensor(neg_prompt_mask, num_images_per_prompt)
+        if not neg_prompt_embeds:
+            # Negative prompt is empty and we want to zero it out
+            neg_prompt_embeds = torch.zeros_like(text_embeddings)
+            pooled_neg_prompt = torch.zeros_like(pooled_embeddings)
+            neg_prompt_mask = torch.zeros_like(encoder_attn_mask)
+        else:
+            neg_prompt_embeds = _duplicate_tensor(neg_prompt_embeds, num_images_per_prompt)
+            pooled_neg_prompt = _duplicate_tensor(pooled_neg_prompt, num_images_per_prompt)
+            neg_prompt_mask = _duplicate_tensor(neg_prompt_mask, num_images_per_prompt)
 
-            # concat uncond + prompt
-            text_embeddings = torch.cat([neg_prompt_embeds, text_embeddings])
-            pooled_embeddings = torch.cat([pooled_neg_prompt, pooled_embeddings])
-            encoder_attn_mask = torch.cat([neg_prompt_mask, encoder_attn_mask])
+        # concat uncond + prompt
+        text_embeddings = torch.cat([neg_prompt_embeds, text_embeddings])
+        pooled_embeddings = torch.cat([pooled_neg_prompt, pooled_embeddings])
+        encoder_attn_mask = torch.cat([neg_prompt_mask, encoder_attn_mask])
 
         # prepare for diffusion generation process
         latents = torch.randn(
@@ -450,21 +449,16 @@ class DiffusionV1(ComposerModel):
             input_size_params = torch.tensor([[width, height]] * batch_size, dtype=text_embeddings.dtype)
         output_size_params = torch.tensor([[width, height]] * batch_size, dtype=text_embeddings.dtype)
 
-        if do_classifier_free_guidance:
-            crop_params = torch.cat([crop_params, crop_params])
-            input_size_params = torch.cat([input_size_params, input_size_params])
-            output_size_params = torch.cat([output_size_params, output_size_params])
+        crop_params = torch.cat([crop_params, crop_params])
+        input_size_params = torch.cat([input_size_params, input_size_params])
+        output_size_params = torch.cat([output_size_params, output_size_params])
 
         add_time_ids = torch.cat([input_size_params, crop_params, output_size_params], dim=1).to(device)
         added_cond_kwargs = {'text_embeds': pooled_embeddings, 'time_ids': add_time_ids}
 
         # backward diffusion process
         for t in tqdm(self.inference_scheduler.timesteps, disable=not progress_bar):
-            if do_classifier_free_guidance:
-                latent_model_input = torch.cat([latents] * 2)
-            else:
-                latent_model_input = latents
-
+            latent_model_input = torch.cat([latents] * 2)
             latent_model_input = self.inference_scheduler.scale_model_input(latent_model_input, t)
             # Model prediction
             pred = self.unet(latent_model_input,
@@ -473,16 +467,15 @@ class DiffusionV1(ComposerModel):
                              encoder_attention_mask=encoder_attn_mask,
                              added_cond_kwargs=added_cond_kwargs).sample
 
-            if do_classifier_free_guidance:
-                # perform guidance. Note this is only techincally correct for prediction_type 'epsilon'
-                pred_uncond, pred_text = pred.chunk(2)
-                pred = pred_uncond + guidance_scale * (pred_text - pred_uncond)
-                # Optionally rescale the classifer free guidance
-                if rescaled_guidance is not None:
-                    std_pos = torch.std(pred_text, dim=(1, 2, 3), keepdim=True)
-                    std_cfg = torch.std(pred, dim=(1, 2, 3), keepdim=True)
-                    pred_rescaled = pred * (std_pos / std_cfg)
-                    pred = pred_rescaled * rescaled_guidance + pred * (1 - rescaled_guidance)
+            # perform guidance. Note this is only techincally correct for prediction_type 'epsilon'
+            pred_uncond, pred_text = pred.chunk(2)
+            pred = pred_uncond + guidance_scale * (pred_text - pred_uncond)
+            # Optionally rescale the classifer free guidance
+            if rescaled_guidance is not None:
+                std_pos = torch.std(pred_text, dim=(1, 2, 3), keepdim=True)
+                std_cfg = torch.std(pred, dim=(1, 2, 3), keepdim=True)
+                pred_rescaled = pred * (std_pos / std_cfg)
+                pred = pred_rescaled * rescaled_guidance + pred * (1 - rescaled_guidance)
             # compute the previous noisy sample x_t -> x_t-1
             latents = self.inference_scheduler.step(pred, t, latents, generator=rng_generator).prev_sample
 
