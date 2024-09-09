@@ -140,6 +140,14 @@ class StreamingImageCaptionLatentsDataset(StreamingDataset):
                 if 'CLIP_LATENTS' in latent_key:
                     clip_pooled = np.frombuffer(sample[f'{caption_key}_CLIP_POOLED_TEXT'], dtype=np.float32).copy()
                     out['CLIP_POOLED'] = torch.from_numpy(clip_pooled).to(self.latent_dtype).reshape(latent_shape[1])
+        if out['CLIP_POOLED'].isnan().any():
+            out['CLIP_POOLED'] = torch.zeros_like(out['CLIP_POOLED'])
+        if out['T5_LATENTS'].isnan().any():
+            out['T5_LATENTS'] = torch.zeros_like(out['T5_LATENTS'])
+            out['T5_ATTENTION_MASK'] = torch.zeros_like(out['T5_ATTENTION_MASK'])
+        if out['CLIP_LATENTS'].isnan().any():
+            out['CLIP_LATENTS'] = torch.zeros_like(out['CLIP_LATENTS'])
+            out['CLIP_ATTENTION_MASK'] = torch.zeros_like(out['CLIP_ATTENTION_MASK'])
         return out
 
 
