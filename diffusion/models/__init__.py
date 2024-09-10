@@ -20,5 +20,6 @@ __all__ = [
     'stable_diffusion_2',
     'stable_diffusion_xl',
     'StableDiffusion',
+    'TextLatentDiffusion',
     'text_to_image_transformer',
 ]

@@ -20,8 +20,8 @@ from diffusion.models.layers import ClippedAttnProcessor2_0, ClippedXFormersAttn
 from diffusion.models.pixel_diffusion import PixelDiffusion
 from diffusion.models.stable_diffusion import StableDiffusion
 from diffusion.models.t2i_transformer import ComposerTextToImageMMDiT
-from diffusion.models.t5_diffusion import DiffusionV1
 from diffusion.models.text_encoder import MultiTextEncoder, MultiTokenizer
+from diffusion.models.text_latent_diffusion import PrecomputedTextLatentDiffusion
 from diffusion.models.transformer import DiffusionTransformer
 from diffusion.schedulers.schedulers import ContinuousTimeScheduler
 from diffusion.schedulers.utils import shift_noise_schedule
@@ -581,7 +581,7 @@ def stable_diffusion_xl(
     return model
 
 
-def build_diffusion_v1(
+def build_text_latent_diffusion(
     unet_model_name: str = 'stabilityai/stable-diffusion-xl-base-1.0',
     vae_model_name: str = 'madebyollin/sdxl-vae-fp16-fix',
     autoencoder_path: Optional[str] = None,
@@ -779,7 +779,7 @@ def build_diffusion_v1(
                                                      cache_dir=cache_dir,
                                                      local_files_only=True).cuda().eval()
     # Make the composer model
-    model = DiffusionV1(
+    model = PrecomputedTextLatentDiffusion(
         unet=unet,
         vae=vae,
         t5_tokenizer=t5_tokenizer,

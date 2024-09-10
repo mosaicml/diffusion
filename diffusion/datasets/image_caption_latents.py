@@ -40,6 +40,7 @@ class StreamingImageCaptionLatentsDataset(StreamingDataset):
         attention_mask_keys (Tuple[str, ...]): Key(s) associated with attention masks in the streaming dataset.
             Default: ``('T5_ATTENTION_MASK', 'CLIP_ATTENTION_MASK')``.
         latent_dtype (torch.dtype): The dtype to cast the text latents to. Default: ``torch.bfloat16``.
+        drop_nans (bool): Whether to treat samples with NaN latents as dropped captions. Default: ``True``.
         **streaming_kwargs: Additional arguments to pass in the construction of the StreamingDataloader
     """
 
@@ -57,6 +58,7 @@ class StreamingImageCaptionLatentsDataset(StreamingDataset):
         text_latent_shapes: Tuple[Tuple[int, int], ...] = ((512, 4096), (77, 768)),
         attention_mask_keys: Tuple[str, ...] = ('T5_ATTENTION_MASK', 'CLIP_ATTENTION_MASK'),
         latent_dtype: torch.dtype = torch.bfloat16,
+        drop_nans: bool = True,
         **streaming_kwargs,
     ):
 
@@ -76,6 +78,7 @@ class StreamingImageCaptionLatentsDataset(StreamingDataset):
         self.text_latent_shapes = text_latent_shapes
         self.attention_mask_keys = attention_mask_keys
         self.latent_dtype = latent_dtype
+        self.drop_nans = drop_nans
 
     def __getitem__(self, index):
         sample = super().__getitem__(index)
@@ -140,14 +143,15 @@ class StreamingImageCaptionLatentsDataset(StreamingDataset):
                 if 'CLIP_LATENTS' in latent_key:
                     clip_pooled = np.frombuffer(sample[f'{caption_key}_CLIP_POOLED_TEXT'], dtype=np.float32).copy()
                     out['CLIP_POOLED'] = torch.from_numpy(clip_pooled).to(self.latent_dtype).reshape(latent_shape[1])
-        if out['CLIP_POOLED'].isnan().any():
-            out['CLIP_POOLED'] = torch.zeros_like(out['CLIP_POOLED'])
-        if out['T5_LATENTS'].isnan().any():
-            out['T5_LATENTS'] = torch.zeros_like(out['T5_LATENTS'])
-            out['T5_ATTENTION_MASK'] = torch.zeros_like(out['T5_ATTENTION_MASK'])
-        if out['CLIP_LATENTS'].isnan().any():
-            out['CLIP_LATENTS'] = torch.zeros_like(out['CLIP_LATENTS'])
-            out['CLIP_ATTENTION_MASK'] = torch.zeros_like(out['CLIP_ATTENTION_MASK'])
+        if self.drop_nans:
+            if out['CLIP_POOLED'].isnan().any():
+                out['CLIP_POOLED'] = torch.zeros_like(out['CLIP_POOLED'])
+            if out['T5_LATENTS'].isnan().any():
+                out['T5_LATENTS'] = torch.zeros_like(out['T5_LATENTS'])
+                out['T5_ATTENTION_MASK'] = torch.zeros_like(out['T5_ATTENTION_MASK'])
+            if out['CLIP_LATENTS'].isnan().any():
+                out['CLIP_LATENTS'] = torch.zeros_like(out['CLIP_LATENTS'])
+                out['CLIP_ATTENTION_MASK'] = torch.zeros_like(out['CLIP_ATTENTION_MASK'])
         return out
 
 

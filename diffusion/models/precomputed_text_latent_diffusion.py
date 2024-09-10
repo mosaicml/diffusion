@@ -24,7 +24,7 @@ except:
     is_xformers_installed = False
 
 
-class DiffusionV1(ComposerModel):
+class PrecomputedTextLatentDiffusion(ComposerModel):
     """Diffusion ComposerModel for running with precomputed T5 and CLIP embeddings.
 
     This is a Latent Diffusion model conditioned on text prompts that are run through
@@ -136,7 +136,7 @@ class DiffusionV1(ComposerModel):
         self.clip_position_embedding = torch.nn.Parameter(clip_position_embeddings, requires_grad=True)
 
     def _apply(self, fn):
-        super(DiffusionV1, self)._apply(fn)
+        super(PrecomputedTextLatentDiffusion, self)._apply(fn)
         self.latent_mean = fn(self.latent_mean)
         self.latent_std = fn(self.latent_std)
         return self
