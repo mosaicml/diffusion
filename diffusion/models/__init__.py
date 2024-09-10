@@ -8,6 +8,7 @@ from diffusion.models.models import (build_autoencoder, build_diffusers_autoenco
                                      text_to_image_transformer)
 from diffusion.models.noop import NoOpModel
 from diffusion.models.pixel_diffusion import PixelDiffusion
+from diffusion.models.precomputed_text_latent_diffusion import PrecomputedTextLatentDiffusion
 from diffusion.models.stable_diffusion import StableDiffusion
 
 __all__ = [
@@ -20,6 +21,6 @@ __all__ = [
     'stable_diffusion_2',
     'stable_diffusion_xl',
     'StableDiffusion',
-    'TextLatentDiffusion',
+    'PrecomputedTextLatentDiffusion',
     'text_to_image_transformer',
 ]

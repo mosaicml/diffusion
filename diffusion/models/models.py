@@ -18,10 +18,10 @@ from diffusion.models.autoencoder import (AutoEncoder, AutoEncoderLoss, Composer
                                           ComposerDiffusersAutoEncoder, load_autoencoder)
 from diffusion.models.layers import ClippedAttnProcessor2_0, ClippedXFormersAttnProcessor, zero_module
 from diffusion.models.pixel_diffusion import PixelDiffusion
+from diffusion.models.precomputed_text_latent_diffusion import PrecomputedTextLatentDiffusion
 from diffusion.models.stable_diffusion import StableDiffusion
 from diffusion.models.t2i_transformer import ComposerTextToImageMMDiT
 from diffusion.models.text_encoder import MultiTextEncoder, MultiTokenizer
-from diffusion.models.text_latent_diffusion import PrecomputedTextLatentDiffusion
 from diffusion.models.transformer import DiffusionTransformer
 from diffusion.schedulers.schedulers import ContinuousTimeScheduler
 from diffusion.schedulers.utils import shift_noise_schedule
@@ -627,6 +627,7 @@ def build_text_latent_diffusion(
         latent_std (float, Tuple, str): The std. dev. of the autoencoder latents. Either a float for a single value,
             a tuple of std_devs, or or `'latent_statistics'` to try to use the value from the autoencoder
             checkpoint. Defaults to `1/0.13025`.
+        text_embed_dim (int): The dimension to project the text embeddings to. Default: `4096`.
         beta_schedule (str): The beta schedule to use. Must be one of 'scaled_linear', 'linear', or 'squaredcos_cap_v2'.
             Default: `scaled_linear`.
         zero_terminal_snr (bool): Whether to enforce zero terminal SNR. Default: `False`.
@@ -681,7 +682,7 @@ def build_text_latent_diffusion(
         unet_config['in_channels'] = vae.config['latent_channels']
         unet_config['out_channels'] = vae.config['latent_channels']
     unet_config['cross_attention_dim'] = text_embed_dim
-    # This config variable is the sum of the text encoder projection dimension (768 for CLIP) and
+    # This config variable is the sum of the text encoder projection dimension and
     # the number of additional time embeddings (6) * addition_time_embed_dim (256)
     unet_config['projection_class_embeddings_input_dim'] = 2304
     # Init the unet from the config
