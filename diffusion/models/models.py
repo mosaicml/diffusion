@@ -5,7 +5,7 @@
 
 import logging
 import math
-from typing import List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 from composer.devices import DeviceGPU
@@ -592,8 +592,8 @@ def precomputed_text_latent_diffusion(
     latent_mean: Union[float, Tuple, str] = 0.0,
     latent_std: Union[float, Tuple, str] = 7.67754318618,
     text_embed_dim: int = 4096,
-    beta_schedule: str = 'scaled_linear',
-    zero_terminal_snr: bool = False,
+    train_noise_scheduler_params: Optional[Dict[str, Any]] = None,
+    inference_noise_scheduler_params: Optional[Dict[str, Any]] = None,
     train_metrics: Optional[List] = None,
     val_metrics: Optional[List] = None,
     quasirandomness: bool = False,
@@ -625,9 +625,10 @@ def precomputed_text_latent_diffusion(
             a tuple of std_devs, or or `'latent_statistics'` to try to use the value from the autoencoder
             checkpoint. Defaults to `1/0.13025`.
         text_embed_dim (int): The dimension to project the text embeddings to. Default: `4096`.
-        beta_schedule (str): The beta schedule to use. Must be one of 'scaled_linear', 'linear', or 'squaredcos_cap_v2'.
-            Default: `scaled_linear`.
-        zero_terminal_snr (bool): Whether to enforce zero terminal SNR. Default: `False`.
+        train_noise_scheduler_params (Dict): Parameters to overried in the training noise scheduler. Anything not
+            specified will default to SDXL values. Default: `None`.
+        inference_noise_scheduler_params (Dict): Parameters to overried in the inference noise scheduler. Anything
+            not specified will default to SDXL values. Default: `None`.
         train_metrics (list, optional): List of metrics to compute during training. If None, defaults to
             [MeanSquaredError()].
         val_metrics (list, optional): List of metrics to compute during validation. If None, defaults to
@@ -724,40 +725,40 @@ def precomputed_text_latent_diffusion(
                 resnet._fsdp_wrap = True
 
     # Make the noise schedulers
-    noise_scheduler = DDPMScheduler(num_train_timesteps=1000,
-                                    beta_start=0.00085,
-                                    beta_end=0.012,
-                                    beta_schedule=beta_schedule,
-                                    trained_betas=None,
-                                    variance_type='fixed_small',
-                                    clip_sample=False,
-                                    prediction_type=prediction_type,
-                                    sample_max_value=1.0,
-                                    timestep_spacing='leading',
-                                    steps_offset=1,
-                                    rescale_betas_zero_snr=zero_terminal_snr)
-    if beta_schedule == 'squaredcos_cap_v2':
-        inference_noise_scheduler = DDIMScheduler(num_train_timesteps=1000,
-                                                  beta_start=0.00085,
-                                                  beta_end=0.012,
-                                                  beta_schedule=beta_schedule,
-                                                  trained_betas=None,
-                                                  clip_sample=False,
-                                                  set_alpha_to_one=False,
-                                                  prediction_type=prediction_type,
-                                                  rescale_betas_zero_snr=zero_terminal_snr)
-    else:
-        inference_noise_scheduler = EulerDiscreteScheduler(num_train_timesteps=1000,
-                                                           beta_start=0.00085,
-                                                           beta_end=0.012,
-                                                           beta_schedule=beta_schedule,
-                                                           trained_betas=None,
-                                                           prediction_type=prediction_type,
-                                                           interpolation_type='linear',
-                                                           use_karras_sigmas=False,
-                                                           timestep_spacing='leading',
-                                                           steps_offset=1,
-                                                           rescale_betas_zero_snr=zero_terminal_snr)
+    train_scheduler_params: Dict[str, Any] = {
+        'num_train_timesteps': 1000,
+        'beta_start': 0.00085,
+        'beta_end': 0.012,
+        'beta_schedule': 'scaled_linear',
+        'variance_type': 'fixed_small',
+        'clip_sample': False,
+        'prediction_type': prediction_type,
+        'sample_max_value': 1.0,
+        'timestep_spacing': 'leading',
+        'steps_offset': 1,
+        'rescale_betas_zero_snr': False,
+    }
+    if train_noise_scheduler_params is not None:
+        train_scheduler_params.update(train_noise_scheduler_params)
+    noise_scheduler = DDPMScheduler(**train_scheduler_params)
+
+    inference_scheduler_params: Dict[str, Any] = {
+        'num_train_timesteps': 1000,
+        'beta_start': 0.00085,
+        'beta_end': 0.012,
+        'beta_schedule': 'scaled_linear',
+        'trained_betas': None,
+        'prediction_type': prediction_type,
+        'interpolation_type': 'linear',
+        'use_karras_sigmas': False,
+        'timestep_spacing': 'leading',
+        'steps_offset': 1,
+        'rescale_betas_zero_snr': False,
+    }
+
+    if inference_noise_scheduler_params is not None:
+        inference_scheduler_params.update(inference_noise_scheduler_params)
+    inference_noise_scheduler = EulerDiscreteScheduler(**inference_scheduler_params)
 
     # Optionally load the tokenizers and text encoders
     t5_tokenizer, t5_encoder, clip_tokenizer, clip_encoder = None, None, None, None
