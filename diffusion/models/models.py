@@ -602,6 +602,8 @@ def precomputed_text_latent_diffusion(
     val_seed: int = 1138,
     fsdp: bool = True,
     use_xformers: bool = True,
+    lora_rank: Optional[int] = None,
+    lora_alpha: Optional[int] = None,
 ):
     """Latent diffusion model training using precomputed text latents from T5-XXL and CLIP.
 
@@ -642,6 +644,8 @@ def precomputed_text_latent_diffusion(
         val_seed (int): Seed to use for generating evaluation images. Defaults to 1138.
         fsdp (bool): Whether to use FSDP. Defaults to True.
         use_xformers (bool): Whether to use xformers for attention. Defaults to True.
+        lora_rank (int, optional): If not None, the rank to use for LoRA finetuning. Defaults to None.
+        lora_alpha (int, optional): If not None, the alpha to use for LoRA finetuning. Defaults to None.
     """
     latent_mean, latent_std = _parse_latent_statistics(latent_mean), _parse_latent_statistics(latent_std)
 
@@ -809,6 +813,41 @@ def precomputed_text_latent_diffusion(
         text_embed_dim=text_embed_dim,
         fsdp=fsdp,
     )
+
+    if lora_rank is not None:
+        assert lora_alpha is not None
+        model.unet.requires_grad_(False)
+        for param in model.unet.parameters():
+            param.requires_grad_(False)
+
+        unet_lora_config = LoraConfig(
+            r=lora_rank,
+            lora_alpha=lora_alpha,
+            init_lora_weights='gaussian',
+            target_modules=['to_k', 'to_q', 'to_v', 'to_out.0'],
+        )
+        model.unet.add_adapter(unet_lora_config)
+        model.unet._fsdp_wrap = True
+        if hasattr(model.unet, 'mid_block') and model.unet.mid_block is not None:
+            for attention in model.unet.mid_block.attentions:
+                attention._fsdp_wrap = True
+            for resnet in model.unet.mid_block.resnets:
+                resnet._fsdp_wrap = True
+        for block in model.unet.up_blocks:
+            if hasattr(block, 'attentions'):
+                for attention in block.attentions:
+                    attention._fsdp_wrap = True
+            if hasattr(block, 'resnets'):
+                for resnet in block.resnets:
+                    resnet._fsdp_wrap = True
+        for block in model.unet.down_blocks:
+            if hasattr(block, 'attentions'):
+                for attention in block.attentions:
+                    attention._fsdp_wrap = True
+            if hasattr(block, 'resnets'):
+                for resnet in block.resnets:
+                    resnet._fsdp_wrap = True
+
     if torch.cuda.is_available():
         model = DeviceGPU().module_to_device(model)
         if is_xformers_installed and use_xformers:
