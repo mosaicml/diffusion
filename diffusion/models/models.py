@@ -581,7 +581,7 @@ def stable_diffusion_xl(
     return model
 
 
-def build_text_latent_diffusion(
+def precomputed_text_latent_diffusion(
     unet_model_name: str = 'stabilityai/stable-diffusion-xl-base-1.0',
     vae_model_name: str = 'madebyollin/sdxl-vae-fp16-fix',
     autoencoder_path: Optional[str] = None,
