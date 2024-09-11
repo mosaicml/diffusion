@@ -594,6 +594,7 @@ def precomputed_text_latent_diffusion(
     text_embed_dim: int = 4096,
     train_noise_scheduler_params: Optional[Dict[str, Any]] = None,
     inference_noise_scheduler_params: Optional[Dict[str, Any]] = None,
+    scheduler_shift_resolution: int = 256,
     train_metrics: Optional[List] = None,
     val_metrics: Optional[List] = None,
     quasirandomness: bool = False,
@@ -629,6 +630,7 @@ def precomputed_text_latent_diffusion(
             specified will default to SDXL values. Default: `None`.
         inference_noise_scheduler_params (Dict): Parameters to overried in the inference noise scheduler. Anything
             not specified will default to SDXL values. Default: `None`.
+        scheduler_shift_resolution (int): The resolution to shift the noise scheduler to. Default: `256`.
         train_metrics (list, optional): List of metrics to compute during training. If None, defaults to
             [MeanSquaredError()].
         val_metrics (list, optional): List of metrics to compute during validation. If None, defaults to
@@ -759,6 +761,14 @@ def precomputed_text_latent_diffusion(
     if inference_noise_scheduler_params is not None:
         inference_scheduler_params.update(inference_noise_scheduler_params)
     inference_noise_scheduler = EulerDiscreteScheduler(**inference_scheduler_params)
+
+    # Shift noise scheduler to correct for resolution changes
+    noise_scheduler = shift_noise_schedule(noise_scheduler,
+                                           base_dim=32,
+                                           shift_dim=scheduler_shift_resolution // downsample_factor)
+    inference_noise_scheduler = shift_noise_schedule(inference_noise_scheduler,
+                                                     base_dim=32,
+                                                     shift_dim=scheduler_shift_resolution // downsample_factor)
 
     # Optionally load the tokenizers and text encoders
     t5_tokenizer, t5_encoder, clip_tokenizer, clip_encoder = None, None, None, None
