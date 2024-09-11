@@ -769,16 +769,16 @@ def precomputed_text_latent_diffusion(
         clip_tokenizer = AutoTokenizer.from_pretrained('stabilityai/stable-diffusion-xl-base-1.0',
                                                        subfolder='tokenizer',
                                                        cache_dir=cache_dir,
-                                                       local_files_only=True)
+                                                       local_files_only=False)
         t5_encoder = AutoModel.from_pretrained('google/t5-v1_1-xxl',
-                                               torch_dtype=torch.bfloat16,
+                                               torch_dtype=torch.float16,
                                                cache_dir=cache_dir,
-                                               local_files_only=True).encoder.eval()
+                                               local_files_only=False).encoder.eval()
         clip_encoder = CLIPTextModel.from_pretrained('stabilityai/stable-diffusion-xl-base-1.0',
                                                      subfolder='text_encoder',
-                                                     torch_dtype=torch.bfloat16,
+                                                     torch_dtype=torch.float16,
                                                      cache_dir=cache_dir,
-                                                     local_files_only=True).cuda().eval()
+                                                     local_files_only=False).cuda().eval()
     # Make the composer model
     model = PrecomputedTextLatentDiffusion(
         unet=unet,

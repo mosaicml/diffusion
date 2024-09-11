@@ -191,18 +191,18 @@ class PrecomputedTextLatentDiffusion(ComposerModel):
                                              max_length=self.t5_tokenizer.model_max_length,
                                              truncation=True,
                                              return_tensors='pt')
-        tokenized_captions = t5_tokenizer_out['input_ids'].to(device)
+        t5_tokenized_captions = t5_tokenizer_out['input_ids'].to(device)
         t5_attn_mask = t5_tokenizer_out['attention_mask'].to(torch.bool).to(device)
-        t5_embed = self.t5_encoder(input_ids=tokenized_captions, attention_mask=t5_attn_mask)
+        t5_embed = self.t5_encoder(input_ids=t5_tokenized_captions, attention_mask=t5_attn_mask)[0]
         # Encode with CLIP
         clip_tokenizer_out = self.clip_tokenizer(text,
                                                  padding='max_length',
                                                  max_length=self.clip_tokenizer.model_max_length,
                                                  truncation=True,
                                                  return_tensors='pt')
-        tokenized_captions = clip_tokenizer_out['input_ids'].to(device)
+        clip_tokenized_captions = clip_tokenizer_out['input_ids'].to(device)
         clip_attn_mask = clip_tokenizer_out['attention_mask'].to(torch.bool).to(device)
-        clip_out = self.clip_encoder(input_ids=tokenized_captions,
+        clip_out = self.clip_encoder(input_ids=clip_tokenized_captions,
                                      attention_mask=clip_attn_mask,
                                      output_hidden_states=True)
         clip_embed = clip_out.hidden_states[-2]
@@ -412,7 +412,7 @@ class PrecomputedTextLatentDiffusion(ComposerModel):
         batch_size = len(text_embeddings)  # len prompts * num_images_per_prompt
         # classifier free guidance + negative prompts
         # negative prompt is given in place of the unconditional input in classifier free guidance
-        if not neg_prompt_embeds:
+        if neg_prompt_embeds is None:
             # Negative prompt is empty and we want to zero it out
             neg_prompt_embeds = torch.zeros_like(text_embeddings)
             pooled_neg_prompt = torch.zeros_like(pooled_embeddings)
