@@ -602,10 +602,7 @@ def precomputed_text_latent_diffusion(
     fsdp: bool = True,
     use_xformers: bool = True,
 ):
-    """Stable diffusion 2 training setup + SDXL UNet and VAE.
-
-    Requires batches of matched images and text prompts to train. Generates images from text
-    prompts. Currently uses UNet and VAE config from SDXL, but text encoder/tokenizer from SD2.
+    """Latent diffusion model training using precomputed text latents from T5-XXL and CLIP.
 
     Args:
         unet_model_name (str): Name of the UNet model to load. Defaults to
