@@ -128,7 +128,7 @@ class GenevalImageGenerator:
         for sample_id in tqdm(range(start_idx, end_idx)):
             metadata = self.prompt_metadata[sample_id]
             # Write the metadata jsonl
-            output_dir = os.path.join(self.local_prefix, self.output_prefix, f'{sample_id:0>5}')
+            output_dir = os.path.join(self.local_prefix, f'{sample_id:0>5}')
             os.makedirs(output_dir, exist_ok=True)
             with open(os.path.join(output_dir, 'metadata.jsonl'), 'w') as f:
                 json.dump(metadata, f)
@@ -158,8 +158,8 @@ class GenevalImageGenerator:
                                                               **self.additional_generate_kwargs)  # type: ignore
                     img = to_pil_image(generated_image[0])
                 # Save the images and metadata locally
-                image_name = f'{sample_id:05}.png'
-                data_name = f'{sample_id:05}.json'
+                image_name = f'{i:05}.png'
+                data_name = f'{i:05}.json'
                 img_local_path = os.path.join(sample_dir, image_name)
                 data_local_path = os.path.join(sample_dir, data_name)
                 img.save(img_local_path)
