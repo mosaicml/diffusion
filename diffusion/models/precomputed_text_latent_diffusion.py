@@ -460,9 +460,11 @@ class PrecomputedTextLatentDiffusion(ComposerModel):
         for t in tqdm(self.inference_scheduler.timesteps, disable=not progress_bar):
             latent_model_input = torch.cat([latents] * 2)
             latent_model_input = self.inference_scheduler.scale_model_input(latent_model_input, t)
+            # Make timestep
+            timestep = t.unsqueeze(0).repeat(latent_model_input.shape[0]).to(device)
             # Model prediction
             pred = self.unet(latent_model_input,
-                             t,
+                             timestep,
                              encoder_hidden_states=text_embeddings,
                              encoder_attention_mask=encoder_attn_mask,
                              added_cond_kwargs=added_cond_kwargs).sample
