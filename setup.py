@@ -16,7 +16,7 @@ install_requires = [
     'wandb>=0.18.1',
     'xformers==0.0.27post2',
     'triton==2.1.0',
-    'torchmetrics[image]==1.4.2',
+    'torchmetrics[image]>=1.4.0.post0',
     'lpips==0.1.4',
     'clean-fid==0.1.35',
     'clip@git+https://github.com/openai/CLIP.git@a1d071733d7111c9c014f024669f959182114e33',
