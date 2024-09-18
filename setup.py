@@ -23,7 +23,7 @@ install_requires = [
     'gradio==4.44.0',
     'datasets==2.19.2',
     'peft==0.12.0',
-    'sentencepeice',
+    'sentencepiece',
     'mlflow',
     'pynvml',
 ]
