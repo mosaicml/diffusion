@@ -15,7 +15,7 @@ install_requires = [
     'huggingface-hub[hf_transfer]>=0.23.2',
     'wandb>=0.18.1',
     'xformers==0.0.27post2',
-    'triton==2.1.0',
+    'triton>=2.1.0',
     'torchmetrics[image]>=1.4.0.post0',
     'lpips==0.1.4',
     'clean-fid==0.1.35',
