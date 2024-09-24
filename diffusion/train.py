@@ -208,8 +208,8 @@ def train(config: DictConfig) -> None:
                 callbacks.append(hydra.utils.instantiate(call_conf))
 
     if 'fsdp_config' in config.trainer:
-        fsdp_config = config.trainer.pop('fsdp_config')
-        fsdp_config = dict(fsdp_config)
+        fsdp_config = dict(config.trainer.fsdp_config)
+        config.trainer.__delattr__("fsdp_config")
     else:
         fsdp_config = None
 
