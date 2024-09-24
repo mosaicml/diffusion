@@ -21,6 +21,7 @@ from torch.optim import Optimizer
 
 from diffusion.models.autoencoder import ComposerAutoEncoder, ComposerDiffusersAutoEncoder
 from diffusion.models.t2i_transformer import ComposerTextToImageMMDiT
+from diffusion.planners import LoraPlanner
 
 
 def make_autoencoder_optimizer(config: DictConfig, model: ComposerModel) -> Optimizer:
@@ -206,19 +207,28 @@ def train(config: DictConfig) -> None:
                 print(f'Instantiating callbacks <{call_conf._target_}>')
                 callbacks.append(hydra.utils.instantiate(call_conf))
 
+    if 'fsdp_config' in config.trainer:
+        fsdp_config = dict(config.trainer.fsdp_config)
+        config.trainer.__delattr__("fsdp_config")
+    else:
+        fsdp_config = None
+
+    if 'lora_rank' in config.model:
+        assert fsdp_config is not None
+        fsdp_config['load_planner'] = LoraPlanner
+
     scheduler = hydra.utils.instantiate(config.scheduler)
 
-    trainer: Trainer = hydra.utils.instantiate(
-        config.trainer,
-        train_dataloader=train_dataloader,
-        eval_dataloader=eval_set,
-        optimizers=optimizer,
-        model=model,
-        loggers=logger,
-        algorithms=algorithms,
-        schedulers=scheduler,
-        callbacks=callbacks,
-    )
+    trainer: Trainer = hydra.utils.instantiate(config.trainer,
+                                               train_dataloader=train_dataloader,
+                                               eval_dataloader=eval_set,
+                                               optimizers=optimizer,
+                                               model=model,
+                                               loggers=logger,
+                                               algorithms=algorithms,
+                                               schedulers=scheduler,
+                                               callbacks=callbacks,
+                                               fsdp_config=fsdp_config)
 
     def eval_and_then_train():
         if config.get('eval_first', True):
