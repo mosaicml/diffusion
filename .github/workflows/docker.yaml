@@ -17,14 +17,20 @@ jobs:
     strategy:
       matrix:
         include:
+        - name: "2.1.2_cu121"
+          base_image: mosaicml/pytorch:2.1.2_cu121-python3.10-ubuntu20.04
+          dep_groups: "[all]"
+        - name: "2.1.2_cu121_aws"
+          base_image: mosaicml/pytorch:2.1.2_cu121-python3.10-ubuntu20.04-aws
+          dep_groups: "[all]"
         - name: "2.4.0_cu124"
           base_image: mosaicml/pytorch:2.4.0_cu124-python3.11-ubuntu20.04
           dep_groups: "[all]"
         - name: "2.4.0_cu124_aws"
-          base_image: mosaicml/pytorch:2.4.0_cu124-python3.11-ubuntu20.04
+          base_image: mosaicml/pytorch:2.4.0_cu124-python3.11-ubuntu20.04-aws
           dep_groups: "[all]"
     steps:
-    
+
     - name: Checkout
       uses: actions/checkout@v3
 
