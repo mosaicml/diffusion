@@ -62,3 +62,4 @@ jobs:
         with:
           name: coverage-${{ github.sha }}-${{ inputs.name }}
           path: .coverage
+          include-hidden-files: true
