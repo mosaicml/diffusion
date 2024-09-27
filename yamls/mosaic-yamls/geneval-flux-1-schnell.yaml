@@ -1,0 +1,77 @@
+# Example yaml for running geneval on FLUX.1-schnell model
+name: geneval-flux-1-schnell
+compute:
+  cluster: # your cluster name
+  instance: # your instance name
+  gpus: # number of gpus
+env_variables:
+  HYDRA_FULL_ERROR: '1'
+image: mosaicml/pytorch:2.4.0_cu124-python3.11-ubuntu20.04
+scheduling:
+  resumable: false
+  priority: medium
+  max_retries: 0
+integrations:
+- integration_type: git_repo
+  git_repo: mosaicml/diffusion
+  git_branch: main
+  pip_install: .[all] --no-deps # We install with no deps to use only specific deps needed for geneval
+- integration_type: pip_packages
+  packages:
+    - huggingface-hub[hf_transfer]>=0.23.2
+    - numpy==1.26.4
+    - pandas
+    - open_clip_torch
+    - clip-benchmark
+    - openmim
+    - sentencepiece
+    - mosaicml
+    - mosaicml-streaming
+    - hydra-core
+    - hydra-colorlog
+    - diffusers[torch]==0.30.3
+    - transformers[torch]==4.44.2
+    - torchmetrics[image]
+    - lpips
+    - clean-fid
+    - gradio
+    - datasets
+    - peft
+command: 'cd diffusion
+
+  pip install clip@git+https://github.com/openai/CLIP.git@a1d071733d7111c9c014f024669f959182114e33
+
+  mim install mmengine mmcv-full==1.7.2
+
+  apt-get update && apt-get install libgl1-mesa-glx -y
+
+  git clone https://github.com/djghosh13/geneval.git
+
+  git clone https://github.com/open-mmlab/mmdetection.git
+
+  cd mmdetection; git checkout 2.x; pip install -v -e .; cd ..
+
+  composer run_generation.py --config-path /mnt/config --config-name parameters
+
+  cd geneval
+
+  ./evaluation/download_models.sh eval_models
+
+  python evaluation/evaluate_images.py /tmp/geneval-images --outfile outputs.jsonl --model-path eval_models
+
+  python evaluation/summary_scores.py outputs.jsonl
+  '
+parameters:
+  seed: 18
+  dist_timeout: 300
+  hf_model: true # We will use a model from huggingface
+  model:
+    name: black-forest-labs/FLUX.1-schnell # Model name from huggingface
+  generator:
+    _target_: diffusion.evaluation.generate_geneval_images.GenevalImageGenerator
+    geneval_prompts: geneval/prompts/evaluation_metadata.jsonl # Path to geneval prompts json
+    height: 1024 # Generated image height
+    width: 1024 # Generated image width
+    local_prefix: /tmp/geneval-images # Local path to save images to. Needed for geneval to read images from.
+    output_bucket: # Your output oci bucket name (optional)
+    output_prefix: # Your output prefix (optional)
