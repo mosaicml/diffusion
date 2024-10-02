@@ -587,6 +587,7 @@ def precomputed_text_latent_diffusion(
     autoencoder_path: Optional[str] = None,
     autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
     include_text_encoders: bool = False,
+    text_encoder_dtype: str = 'float16',
     cache_dir: str = '/tmp/hf_files',
     prediction_type: str = 'epsilon',
     latent_mean: Union[float, Tuple, str] = 0.0,
@@ -618,6 +619,8 @@ def precomputed_text_latent_diffusion(
         autoencoder_local_path (optional, str): Path to autoencoder weights. Default: `/tmp/autoencoder_weights.pt`.
         include_text_encoders (bool): Whether to include text encoders in the model. Should only do this for running
             inference. Default: `False`.
+        text_encoder_dtype (str): The dtype to use for the text encoder. One of [`float32`, `float16`, `bfloat16`].
+            Default: `float16`.
         cache_dir (str): Directory to cache the model in if using `include_text_encoders`. Default: `'/tmp/hf_files'`.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
@@ -777,18 +780,20 @@ def precomputed_text_latent_diffusion(
     # Optionally load the tokenizers and text encoders
     t5_tokenizer, t5_encoder, clip_tokenizer, clip_encoder = None, None, None, None
     if include_text_encoders:
+        dtype_map = {'float32': torch.float32, 'float16': torch.float16, 'bfloat16': torch.bfloat16}
+        dtype = dtype_map[text_encoder_dtype]
         t5_tokenizer = AutoTokenizer.from_pretrained('google/t5-v1_1-xxl', cache_dir=cache_dir, local_files_only=True)
         clip_tokenizer = AutoTokenizer.from_pretrained('stabilityai/stable-diffusion-xl-base-1.0',
                                                        subfolder='tokenizer',
                                                        cache_dir=cache_dir,
                                                        local_files_only=False)
         t5_encoder = AutoModel.from_pretrained('google/t5-v1_1-xxl',
-                                               torch_dtype=torch.float16,
+                                               torch_dtype=dtype,
                                                cache_dir=cache_dir,
                                                local_files_only=False).encoder.eval()
         clip_encoder = CLIPTextModel.from_pretrained('stabilityai/stable-diffusion-xl-base-1.0',
                                                      subfolder='text_encoder',
-                                                     torch_dtype=torch.float16,
+                                                     torch_dtype=dtype,
                                                      cache_dir=cache_dir,
                                                      local_files_only=False).cuda().eval()
     # Make the composer model
