@@ -4,7 +4,7 @@
 """Generate images from a model."""
 
 import operator
-from typing import List
+from typing import Any, List, Optional
 
 import hydra
 from composer import Algorithm, ComposerModel
@@ -16,7 +16,20 @@ from datasets import load_dataset
 from omegaconf import DictConfig
 from torch.utils.data import Dataset
 
-from diffusion.evaluation.generate_images import ImageGenerator
+
+def _make_dataset(config: DictConfig, tokenizer: Optional[Any] = None) -> Dataset:
+    if config.hf_dataset:
+        if dist.get_local_rank() == 0:
+            dataset = load_dataset(config.dataset.name, split=config.dataset.split)
+        dist.barrier()
+        dataset = load_dataset(config.dataset.name, split=config.dataset.split)
+        dist.barrier()
+    elif tokenizer:
+        dataset = hydra.utils.instantiate(config.dataset)
+
+    else:
+        dataset: Dataset = hydra.utils.instantiate(config.dataset)
+    return dataset
 
 
 def generate(config: DictConfig) -> None:
@@ -36,20 +49,6 @@ def generate(config: DictConfig) -> None:
         model = config.model.name
 
     tokenizer = model.tokenizer if hasattr(model, 'tokenizer') else None
-
-    # The dataset to use for evaluation
-
-    if config.hf_dataset:
-        if dist.get_local_rank() == 0:
-            dataset = load_dataset(config.dataset.name, split=config.dataset.split)
-        dist.barrier()
-        dataset = load_dataset(config.dataset.name, split=config.dataset.split)
-        dist.barrier()
-    elif tokenizer:
-        dataset = hydra.utils.instantiate(config.dataset)
-
-    else:
-        dataset: Dataset = hydra.utils.instantiate(config.dataset)
 
     # Build list of algorithms.
     algorithms: List[Algorithm] = []
@@ -78,12 +77,15 @@ def generate(config: DictConfig) -> None:
                     precision=Precision(ag_conf['precision']),
                     optimizers=None,
                 )
-
-    image_generator: ImageGenerator = hydra.utils.instantiate(config.generator,
-                                                              model=model,
-                                                              dataset=dataset,
-                                                              hf_model=config.hf_model,
-                                                              hf_dataset=config.hf_dataset)
+    if 'dataset' in config:
+        dataset = _make_dataset(config, tokenizer)
+        image_generator = hydra.utils.instantiate(config.generator,
+                                                  model=model,
+                                                  dataset=dataset,
+                                                  hf_model=config.hf_model,
+                                                  hf_dataset=config.hf_dataset)
+    else:
+        image_generator = hydra.utils.instantiate(config.generator, model=model, hf_model=config.hf_model)
 
     def generate_from_model():
         image_generator.generate()
