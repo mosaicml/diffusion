@@ -590,6 +590,12 @@ def precomputed_text_latent_diffusion(
     text_encoder_dtype: str = 'float16',
     cache_dir: str = '/tmp/hf_files',
     prediction_type: str = 'epsilon',
+    image_key: str = 'image',
+    t5_latent_key: str = 'T5_LATENTS',
+    t5_mask_key: str = 'T5_ATTENTION_MASK',
+    clip_latent_key: str = 'CLIP_LATENTS',
+    clip_mask_key: str = 'CLIP_ATTENTION_MASK',
+    clip_pooled_key: str = 'CLIP_POOLED',
     latent_mean: Union[float, Tuple, str] = 0.0,
     latent_std: Union[float, Tuple, str] = 7.67754318618,
     text_embed_dim: int = 4096,
@@ -624,6 +630,12 @@ def precomputed_text_latent_diffusion(
         cache_dir (str): Directory to cache the model in if using `include_text_encoders`. Default: `'/tmp/hf_files'`.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
+        image_key (str): The key to use for the image in the precomputed latents. Default: `'image'`.
+        t5_latent_key (str): The key to use for the T5 latents in the precomputed latents. Default: `'T5_LATENTS'`.
+        t5_mask_key (str): The key to use for the T5 attention mask in the precomputed latents. Default: `'T5_ATTENTION_MASK'`.
+        clip_latent_key (str): The key to use for the CLIP latents in the precomputed latents. Default: `'CLIP_LATENTS'`.
+        clip_mask_key (str): The key to use for the CLIP attention mask in the precomputed latents. Default: `'CLIP_ATTENTION_MASK'`.
+        clip_pooled_key (str): The key to use for the CLIP pooled in the precomputed latents. Default: `'CLIP_POOLED'`.
         latent_mean (float, Tuple, str): The mean of the autoencoder latents. Either a float for a single value,
             a tuple of means, or or `'latent_statistics'` to try to use the value from the autoencoder
             checkpoint. Defaults to `0.0`.
@@ -807,6 +819,12 @@ def precomputed_text_latent_diffusion(
         noise_scheduler=noise_scheduler,
         inference_noise_scheduler=inference_noise_scheduler,
         prediction_type=prediction_type,
+        image_key=image_key,
+        t5_latent_key=t5_latent_key,
+        t5_mask_key=t5_mask_key,
+        clip_latent_key=clip_latent_key,
+        clip_mask_key=clip_mask_key,
+        clip_pooled_key=clip_pooled_key,
         latent_mean=latent_mean,
         latent_std=latent_std,
         downsample_factor=downsample_factor,

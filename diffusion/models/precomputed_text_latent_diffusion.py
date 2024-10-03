@@ -47,6 +47,12 @@ class PrecomputedTextLatentDiffusion(ComposerModel):
         text_embed_dim (int): The common dimension to project the text embeddings to. Default: `4096`.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
+        image_key (str): The key in the batch dict that contains the image. Default: `'image'`.
+        t5_latent_key (str): The key in the batch dict that contains the T5 latents. Default: `'T5_LATENTS'`.
+        t5_mask_key (str): The key in the batch dict that contains the T5 attention mask. Default: `'T5_ATTENTION_MASK'`.
+        clip_latent_key (str): The key in the batch dict that contains the CLIP latents. Default: `'CLIP_LATENTS'`.
+        clip_mask_key (str): The key in the batch dict that contains the CLIP attention mask. Default: `'CLIP_ATTENTION_MASK'`.
+        clip_pooled_key (str): The key in the batch dict that contains the CLIP pooled embeddings. Default: `'CLIP_POOLED'`.
         latent_mean (Optional[tuple[float]]): The means of the latent space. If not specified, defaults to
             . Default: ``(0.0,) * 4``.
         latent_std (Optional[tuple[float]]): The standard deviations of the latent space. Default: ``(1/0.13025,)*4``.
@@ -76,6 +82,12 @@ class PrecomputedTextLatentDiffusion(ComposerModel):
         clip_encoder: Optional[torch.nn.Module] = None,
         text_embed_dim: int = 4096,
         prediction_type: str = 'epsilon',
+        image_key: str = 'image',
+        t5_latent_key: str = 'T5_LATENTS',
+        t5_mask_key: str = 'T5_ATTENTION_MASK',
+        clip_latent_key: str = 'CLIP_LATENTS',
+        clip_mask_key: str = 'CLIP_ATTENTION_MASK',
+        clip_pooled_key: str = 'CLIP_POOLED',
         latent_mean: Tuple[float] = (0.0,) * 4,
         latent_std: Tuple[float] = (1 / 0.13025,) * 4,
         downsample_factor: int = 8,
@@ -103,6 +115,12 @@ class PrecomputedTextLatentDiffusion(ComposerModel):
         self.quasirandomness = quasirandomness
         self.train_seed = train_seed
         self.val_seed = val_seed
+        self.image_key = image_key
+        self.t5_latent_key = t5_latent_key
+        self.t5_mask_key = t5_mask_key
+        self.clip_latent_key = clip_latent_key
+        self.clip_mask_key = clip_mask_key
+        self.clip_pooled_key = clip_pooled_key
         self.latent_mean = torch.tensor(latent_mean).view(1, -1, 1, 1)
         self.latent_std = torch.tensor(latent_std).view(1, -1, 1, 1)
         self.train_metrics = train_metrics if train_metrics is not None else [MeanSquaredError()]
@@ -250,15 +268,15 @@ class PrecomputedTextLatentDiffusion(ComposerModel):
         latents, text_embeds, text_pooled_embeds, encoder_attention_mask = None, None, None, None
 
         # Encode the images with the autoencoder encoder
-        inputs = batch['image']
+        inputs = batch[self.image_key]
         latents = self.encode_images(inputs)
 
         # Text embeddings are shape (B, seq_len, emb_dim), optionally truncate to a max length
-        t5_embed = batch['T5_LATENTS']
-        t5_mask = batch['T5_ATTENTION_MASK']
-        clip_embed = batch['CLIP_LATENTS']
-        clip_mask = batch['CLIP_ATTENTION_MASK']
-        text_pooled_embeds = batch['CLIP_POOLED']
+        t5_embed = batch[self.t5_latent_key]
+        t5_mask = batch[self.t5_mask_key]
+        clip_embed = batch[self.clip_latent_key]
+        clip_mask = batch[self.clip_mask_key]
+        text_pooled_embeds = batch[self.clip_pooled_key]
         text_embeds, encoder_attention_mask = self.prepare_text_embeddings(t5_embed, clip_embed, t5_mask, clip_mask)
 
         # Sample the diffusion timesteps
