@@ -587,7 +587,7 @@ def precomputed_text_latent_diffusion(
     autoencoder_path: Optional[str] = None,
     autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
     include_text_encoders: bool = False,
-    text_encoder_dtype: str = 'float16',
+    text_encoder_dtype: str = 'bfloat16',
     cache_dir: str = '/tmp/hf_files',
     prediction_type: str = 'epsilon',
     image_key: str = 'image',
@@ -626,7 +626,7 @@ def precomputed_text_latent_diffusion(
         include_text_encoders (bool): Whether to include text encoders in the model. Should only do this for running
             inference. Default: `False`.
         text_encoder_dtype (str): The dtype to use for the text encoder. One of [`float32`, `float16`, `bfloat16`].
-            Default: `float16`.
+            Default: `bfloat16`.
         cache_dir (str): Directory to cache the model in if using `include_text_encoders`. Default: `'/tmp/hf_files'`.
         prediction_type (str): The type of prediction to use. Must be one of 'sample',
             'epsilon', or 'v_prediction'. Default: `epsilon`.
