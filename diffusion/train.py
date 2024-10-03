@@ -103,19 +103,22 @@ def train(config: DictConfig) -> None:
     else:
         optimizer = hydra.utils.instantiate(config.optimizer, params=model.parameters())
 
-    # Load train dataset. Currently this expects to load according to the datasetHparam method.
-    # This means adding external datasets is currently not super easy. Will refactor or check for
-    # upstream composer changes that could make this easier.
+    # Load train dataset. Need to ensure that the per-device batch size is added as a streaming kwarg
+    per_device_train_batch_size = config.dataset.train_batch_size // dist.get_world_size()
+    if hasattr(config.dataset.train_dataset, 'streaming_kwargs'):
+        config.dataset.train_dataset.streaming_kwargs['batch_size'] = per_device_train_batch_size
+    else:
+        config.dataset.train_dataset.streaming_kwargs = {'batch_size': per_device_train_batch_size}
     if tokenizer:
         train_dataloader: Union[Iterable, DataSpec, Dict[str, Any]] = hydra.utils.instantiate(
             config.dataset.train_dataset,
             tokenizer=tokenizer,
-            batch_size=config.dataset.train_batch_size // dist.get_world_size(),
+            batch_size=per_device_train_batch_size,
         )
     else:
         train_dataloader: Union[Iterable, DataSpec, Dict[str, Any]] = hydra.utils.instantiate(
             config.dataset.train_dataset,
-            batch_size=config.dataset.train_batch_size // dist.get_world_size(),
+            batch_size=per_device_train_batch_size,
         )
     # Need to sleep for a bit to avoid dataloader crash
     time.sleep(10)
@@ -148,13 +151,18 @@ def train(config: DictConfig) -> None:
         eval_set = evaluators
 
     else:
+        # Need to ensure that the per-device batch size is added as a streaming kwarg
+        per_device_eval_batch_size = config.dataset.eval_batch_size // dist.get_world_size()
+        if hasattr(config.dataset.eval_dataset, 'streaming_kwargs'):
+            config.dataset.eval_dataset.streaming_kwargs['batch_size'] = per_device_eval_batch_size
+        else:
+            config.dataset.eval_dataset.streaming_kwargs = {'batch_size': per_device_eval_batch_size}
         if tokenizer:
             eval_set = hydra.utils.instantiate(config.dataset.eval_dataset,
                                                tokenizer=model.tokenizer,
-                                               batch_size=config.dataset.eval_batch_size // dist.get_world_size())
+                                               batch_size=per_device_eval_batch_size)
         else:
-            eval_set = hydra.utils.instantiate(config.dataset.eval_dataset,
-                                               batch_size=config.dataset.eval_batch_size // dist.get_world_size())
+            eval_set = hydra.utils.instantiate(config.dataset.eval_dataset, batch_size=per_device_eval_batch_size)
 
         # Need to sleep for a bit to avoid dataloader crash
         time.sleep(10)
