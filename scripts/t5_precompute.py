@@ -3,9 +3,9 @@
 
 """Script to stream text from a dataset, compute CLIP and T5 latents, and write the latents to streaming dataset."""
 
-import re
 import json
 import os
+import re
 import threading
 from argparse import ArgumentParser
 
@@ -72,13 +72,18 @@ def load_models_and_tokenizers(cache_dir, device=None):
 
 
 def filter_before_keywords(text):
+    """Filter and throw away text before "keywords". Used for removing extra text when LLMs get chatty.
+
+    Args:
+        text (str): Input text.
+    """
     # Split the text into sentences, accounting for cases with and without spaces after periods
     sentences = re.split(r'(?<=[.!?])(?:\s+|\s*(?=[A-Z]))', text)
-    
+
     # Find the index of the first sentence containing "keyword" or "keywords" (case-insensitive)
-    keyword_index = next((i for i, sentence in enumerate(sentences) 
-                          if re.search(r'\bkeywords?\b', sentence, re.IGNORECASE)), None)
-    
+    keyword_index = next(
+        (i for i, sentence in enumerate(sentences) if re.search(r'\bkeywords?\b', sentence, re.IGNORECASE)), None)
+
     if keyword_index is not None:
         # Join sentences before the keyword sentence
         return ' '.join(sentences[:keyword_index]).strip()
@@ -86,20 +91,31 @@ def filter_before_keywords(text):
         # If no keyword found, return the original text
         return text.strip()
 
+
 def split_before_note_string_method(text):
+    """Filter and throw away text after "Note". Used for removing extra text when LLMs get chatty.
+
+    Args:
+        text (str): Input text.
+    """
     # Find the index of "Note:" or "(Note:"
     note_index = min(
-        text.find("Note:") if text.find("Note:") != -1 else float('inf'),
-        text.find("(Note:") if text.find("(Note:") != -1 else float('inf')
-    )
-    
+        text.find('Note:') if text.find('Note:') != -1 else float('inf'),
+        text.find('(Note:') if text.find('(Note:') != -1 else float('inf'))
+
     # If either "Note:" or "(Note:" is found, return everything before it
     if note_index != float('inf'):
         return text[:note_index].strip()
     else:
         return text.strip()
-    
+
+
 def preprocess_model_description(description):
+    """Preproccess text to remove bad things.
+
+    Args:
+        description (str): Input text.
+    """
     # Cut off anything after a \n\n
     description = description.split('\n\n')[0]
 

@@ -164,7 +164,7 @@ class ResizeAndPad:
             resize_width = round(resize_height * aspect_ratio)
         else:
             raise ValueError('Invalid image dimensions')
-        resized_image = image.resize((resize_width, resize_height), Image.Resampling.LANCZOS)
+        resized_image = image.resize((resize_width, resize_height), Image.Resampling.LANCZOS)  # type: ignore
 
         # Calculate padding
         pad_width_left = (self.width - resize_width) // 2
