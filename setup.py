@@ -6,7 +6,7 @@
 from setuptools import find_packages, setup
 
 install_requires = [
-    'mosaicml==0.24.1',
+    'mosaicml==0.25.0',
     'mosaicml-streaming==0.8.1',
     'hydra-core>=1.2',
     'hydra-colorlog>=1.1.0',
