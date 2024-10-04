@@ -39,6 +39,11 @@ class LogDiffusionImages(Callback):
         use_table (bool): Whether to make a table of the images or not. Default: ``False``.
         t5_encoder (str, optional): path to the T5 encoder to as a second text encoder.
         clip_encoder (str, optional): path to the CLIP encoder as the first text encoder.
+        t5_latent_key: (str): key to use for the T5 latents in the batch. Default: ``'T5_LATENTS'``.
+        t5_mask_key: (str): key to use for the T5 attention mask in the batch. Default: ``'T5_ATTENTION_MASK'``.
+        clip_latent_key: (str): key to use for the CLIP latents in the batch. Default: ``'CLIP_LATENTS'``.
+        clip_mask_key: (str): key to use for the CLIP attention mask in the batch. Default: ``'CLIP_ATTENTION_MASK'``.
+        clip_pooled_key: (str): key to use for the CLIP pooled in the batch. Default: ``'CLIP_POOLED'``.
         cache_dir: (str, optional): path for HF to cache files while downloading model
     """
 
@@ -53,6 +58,11 @@ class LogDiffusionImages(Callback):
                  use_table: bool = False,
                  t5_encoder: Optional[str] = None,
                  clip_encoder: Optional[str] = None,
+                 t5_latent_key: str = 'T5_LATENTS',
+                 t5_mask_key: str = 'T5_ATTENTION_MASK',
+                 clip_latent_key: str = 'CLIP_LATENTS',
+                 clip_mask_key: str = 'CLIP_ATTENTION_MASK',
+                 clip_pooled_key: str = 'CLIP_POOLED',
                  cache_dir: Optional[str] = '/tmp/hf_files'):
         self.prompts = prompts
         self.size = (size, size) if isinstance(size, int) else size
@@ -61,6 +71,11 @@ class LogDiffusionImages(Callback):
         self.rescaled_guidance = rescaled_guidance
         self.seed = seed
         self.use_table = use_table
+        self.t5_latent_key = t5_latent_key
+        self.t5_mask_key = t5_mask_key
+        self.clip_latent_key = clip_latent_key
+        self.clip_mask_key = clip_mask_key
+        self.clip_pooled_key = clip_pooled_key
         self.cache_dir = cache_dir
 
         # Batch prompts
@@ -120,10 +135,11 @@ class LogDiffusionImages(Callback):
                 clip_pooled = clip_outputs[1].cpu()
                 clip_attention_mask = clip_attention_mask.cpu().to(torch.long)
 
-                latent_batch['T5_LATENTS'] = t5_latents
-                latent_batch['CLIP_LATENTS'] = clip_latents
-                latent_batch['ATTENTION_MASK'] = torch.cat([t5_attention_mask, clip_attention_mask], dim=1)
-                latent_batch['CLIP_POOLED'] = clip_pooled
+                latent_batch[self.t5_latent_key] = t5_latents
+                latent_batch[self.t5_mask_key] = t5_attention_mask
+                latent_batch[self.clip_latent_key] = clip_latents
+                latent_batch[self.clip_mask_key] = clip_attention_mask
+                latent_batch[self.clip_pooled_key] = clip_pooled
                 self.batched_latents.append(latent_batch)
 
             del t5_model
@@ -143,12 +159,11 @@ class LogDiffusionImages(Callback):
             all_gen_images = []
             if self.precomputed_latents:
                 for batch in self.batched_latents:
-                    pooled_prompt = batch['CLIP_POOLED'].cuda()
-                    prompt_mask = batch['ATTENTION_MASK'].cuda()
-                    t5_embeds = model.t5_proj(batch['T5_LATENTS'].cuda())
-                    clip_embeds = model.clip_proj(batch['CLIP_LATENTS'].cuda())
-                    prompt_embeds = torch.cat([t5_embeds, clip_embeds], dim=1)
-
+                    pooled_prompt = batch[self.clip_pooled_key].cuda()
+                    prompt_embeds, prompt_mask = model.prepare_text_embeddings(batch[self.t5_latent_key].cuda(),
+                                                                               batch[self.clip_latent_key].cuda(),
+                                                                               batch[self.t5_mask_key].cuda(),
+                                                                               batch[self.clip_mask_key].cuda())
                     gen_images = model.generate(prompt_embeds=prompt_embeds,
                                                 pooled_prompt=pooled_prompt,
                                                 prompt_mask=prompt_mask,
