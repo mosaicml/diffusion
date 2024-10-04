@@ -19,12 +19,12 @@ jobs:
     strategy:
       matrix:
         include:
-          - name: 'cpu-3.9-1.12'
-            container: mosaicml/pytorch:1.12.1_cpu-python3.9-ubuntu20.04
+          - name: 'cpu-3.10-2.1'
+            container: mosaicml/pytorch:2.1.2_cpu-python3.10-ubuntu20.04
             markers: 'not gpu'
             pytest_command: 'coverage run -m pytest'
-          - name: 'cpu-3.10-1.13'
-            container: mosaicml/pytorch:1.13.1_cpu-python3.10-ubuntu20.04
+          - name: 'cpu-3.11-2.4'
+            container: mosaicml/pytorch:2.4.1_cpu-python3.11-ubuntu20.04
             markers: 'not gpu'
             pytest_command: 'coverage run -m pytest'
     name: ${{ matrix.name }}
