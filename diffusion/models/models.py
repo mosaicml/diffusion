@@ -1020,7 +1020,7 @@ def precomputed_text_latents_to_image_transformer(
     num_layers: int = 28,
     max_image_side: int = 1280,
     conditioning_features: int = 768,
-    conditioning_max_sequence_length: int = 77,
+    conditioning_max_sequence_length: int = 512 + 77,
     patch_size: int = 2,
     latent_mean: Union[float, Tuple, str] = 0.0,
     latent_std: Union[float, Tuple, str] = 7.67754318618,
@@ -1113,7 +1113,7 @@ def precomputed_text_latents_to_image_transformer(
                                        input_features=autoencoder_channels * (patch_size**2),
                                        input_max_sequence_length=input_max_sequence_length,
                                        input_dimension=2,
-                                       conditioning_features=conditioning_features,
+                                       conditioning_features=64 * num_layers,
                                        conditioning_max_sequence_length=conditioning_max_sequence_length,
                                        conditioning_dimension=1,
                                        expansion_factor=4)
