@@ -559,9 +559,9 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
         self.pooled_embedding_features = pooled_embedding_features
 
         # Embedding MLPs and norms for the pooled text embeddings
-        self.t5_proj = VectorEmbedding(4096, model.num_features)
+        self.t5_proj = torch.nn.Linear(4096, model.num_features)
         self.t5_ln = torch.nn.LayerNorm(model.num_features)
-        self.clip_proj = VectorEmbedding(768, model.num_features)
+        self.clip_proj = torch.nn.Linear(768, model.num_features)
         self.clip_ln = torch.nn.LayerNorm(model.num_features)
         self.pooled_embedding_mlp = VectorEmbedding(pooled_embedding_features, model.num_features)
         self.pooled_embedding_layernorm = torch.nn.LayerNorm(model.num_features)
