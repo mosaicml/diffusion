@@ -882,6 +882,16 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
             pooled_neg_prompt = _duplicate_tensor(pooled_neg_prompt, num_images_per_prompt)
             neg_prompt_mask = _duplicate_tensor(neg_prompt_mask, num_images_per_prompt)
 
+        # Generate initial noise
+        latent_height = height // self.downsample_factor
+        latent_width = width // self.downsample_factor
+        latents = torch.randn(text_embeddings.shape[0] * num_images_per_prompt,
+                              self.latent_channels,
+                              latent_height,
+                              latent_width,
+                              device=device)
+        latent_patches, latent_coords = patchify(latents, self.patch_size)
+        latent_coords_input = torch.cat([latent_coords, latent_coords], dim=0)
         # concat uncond + prompt
         text_embeddings = torch.cat([neg_prompt_embeds, text_embeddings])
         pooled_embeddings = torch.cat([pooled_neg_prompt, pooled_embeddings])
@@ -890,17 +900,6 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
         pooled_embeddings = self.pooled_embedding_mlp(pooled_embeddings)
         # Make the text embeddings coords
         text_embeddings_coords = self.make_text_embeddings_coords(text_embeddings)
-
-        # Generate initial noise
-        latent_height = height // self.downsample_factor
-        latent_width = width // self.downsample_factor
-        latents = torch.randn(text_embeddings.shape[0],
-                              self.latent_channels,
-                              latent_height,
-                              latent_width,
-                              device=device)
-        latent_patches, latent_coords = patchify(latents, self.patch_size)
-        latent_coords_input = torch.cat([latent_coords, latent_coords], dim=0)
 
         # backward diffusion process
         timesteps, delta_t = self.make_sampling_timesteps(num_inference_steps)
