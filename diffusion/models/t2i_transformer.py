@@ -3,7 +3,6 @@
 
 """Composer model for text to image generation with a multimodal transformer."""
 
-import math
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -564,15 +563,6 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
         self.clip_proj = torch.nn.Linear(768, model.num_features)
         self.clip_ln = torch.nn.LayerNorm(model.num_features)
         self.pooled_embedding_mlp = VectorEmbedding(pooled_embedding_features, model.num_features)
-        self.pooled_embedding_layernorm = torch.nn.LayerNorm(model.num_features)
-        # Learnable position embeddings for the text sequences
-        # Note these will differ from the model's position embeddings as they are specific to the text encoders
-        t5_position_embeddings = torch.randn(512, model.num_features)
-        t5_position_embeddings /= math.sqrt(model.num_features)
-        self.t5_position_embedding = torch.nn.Parameter(t5_position_embeddings, requires_grad=True)
-        clip_position_embeddings = torch.randn(77, model.num_features)
-        clip_position_embeddings /= math.sqrt(model.num_features)
-        self.clip_position_embedding = torch.nn.Parameter(clip_position_embeddings, requires_grad=True)
         # freeze text_encoder during diffusion training and use half precision
         self.autoencoder.requires_grad_(False)
         self.autoencoder = self.autoencoder.half()
@@ -695,9 +685,6 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
             clip_mask = clip_mask[:, :self.max_seq_len]
         t5_embed = self.t5_proj(t5_embed)
         clip_embed = self.clip_proj(clip_embed)
-        # Add position embeddings
-        t5_embed = 0.707 * t5_embed + 0.707 * self.t5_position_embedding[:t5_embed.shape[1]].unsqueeze(0)
-        clip_embed = 0.707 * clip_embed + 0.707 * self.clip_position_embedding[:clip_embed.shape[1]].unsqueeze(0)
         # Apply layernorms
         t5_embed = self.t5_ln(t5_embed)
         clip_embed = self.clip_ln(clip_embed)
@@ -749,7 +736,6 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
         clip_mask = batch[self.clip_mask_key]
         pooled_text_embeddings = batch[self.clip_pooled_key]
         pooled_text_embeddings = self.pooled_embedding_mlp(pooled_text_embeddings)
-        pooled_text_embeddings = self.pooled_embedding_layernorm(pooled_text_embeddings)
         text_embeddings, caption_mask = self.prepare_text_embeddings(t5_embed, clip_embed, t5_mask, clip_mask)
         text_embeddings_coords = self.make_text_embeddings_coords(text_embeddings)
 
