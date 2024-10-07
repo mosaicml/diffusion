@@ -888,7 +888,6 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
         text_embeddings_mask = torch.cat([neg_prompt_mask, encoder_attn_mask])
         # Encode the pooled embeddings
         pooled_embeddings = self.pooled_embedding_mlp(pooled_embeddings)
-        pooled_embeddings = self.pooled_embedding_layernorm(pooled_embeddings)
         # Make the text embeddings coords
         text_embeddings_coords = self.make_text_embeddings_coords(text_embeddings)
 
