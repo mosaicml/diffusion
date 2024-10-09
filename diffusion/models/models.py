@@ -125,7 +125,7 @@ def stable_diffusion_2(
     precision = torch.float16 if encode_latents_in_fp16 else None
     # Make the text encoder
     text_encoder = CLIPTextModel.from_pretrained(model_name, subfolder='text_encoder', torch_dtype=precision)
-    tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer')
+    tokenizer = CLIPTokenizer.from_pretrained(model_name, subfolder='tokenizer', clean_up_tokenization_spaces=True)
 
     # Make the autoencoder
     if autoencoder_path is None:

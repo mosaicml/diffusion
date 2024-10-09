@@ -273,6 +273,7 @@ def build_streaming_image_caption_latents_dataloader(
         text_latent_shapes=text_latent_shapes,
         attention_mask_keys=attention_mask_keys,
         latent_dtype=dtype,
+        batch_size=batch_size,
         **streaming_kwargs,
     )
 

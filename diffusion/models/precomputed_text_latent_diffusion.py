@@ -189,7 +189,7 @@ class PrecomputedTextLatentDiffusion(ComposerModel):
         self.rng_generator = rng_generator
 
     def encode_images(self, inputs, dtype=torch.bfloat16):
-        with torch.amp.autocast('cuda', enabled=False):
+        with torch.autocast(device_type='cuda', enabled=False):
             latents = self.vae.encode(inputs.to(dtype))['latent_dist'].sample().data
         latents = (latents - self.latent_mean) / self.latent_std  # scale latents
         return latents
