@@ -20,7 +20,7 @@ install_requires = [
     'lpips==0.1.4',
     'clean-fid==0.1.35',
     'clip@git+https://github.com/openai/CLIP.git@a1d071733d7111c9c014f024669f959182114e33',
-    'gradio==4.44.0',
+    'gradio==5.0.0',
     'datasets==2.19.2',
     'peft==0.12.0',
     'numpy<2.0.0',
