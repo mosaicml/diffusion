@@ -460,7 +460,6 @@ class DiffusionTransformer(nn.Module):
         # Concatenate the masks
         if conditioning_mask is None:
             conditioning_mask = torch.ones(conditioning.shape[0], conditioning.shape[1], device=conditioning.device)
-        print('MASK SHAPES:', mask.shape, conditioning_mask.shape)
         mask = torch.cat([mask, conditioning_mask], dim=1)  # (B, T1 + T2)
 
         # Expand the mask to the right shape
