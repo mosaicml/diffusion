@@ -607,7 +607,7 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
         batch_size = batch[self.image_key].shape[0]
         height, width = batch[self.image_key].shape[2:]
         input_seq_len = height * width / (self.patch_size**2 * self.downsample_factor**2)
-        cond_seq_len = batch[self.caption_key].shape[1]
+        cond_seq_len = batch[self.t5_latent_key].shape[1] + batch[self.clip_latent_key].shape[1]
         seq_len = input_seq_len + cond_seq_len
         # Calulate forward flops on full sequence excluding attention
         param_flops = 2 * self.n_seq_params * batch_size * seq_len
