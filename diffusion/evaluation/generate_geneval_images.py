@@ -27,6 +27,7 @@ class GenevalImageGenerator:
         load_path (str, optional): The path to load the model from. Default: ``None``.
         local_checkpoint_path (str, optional): The local path to save the model checkpoint. Default: ``'/tmp/model.pt'``.
         load_strict_model_weights (bool): Whether or not to strict load model weights. Default: ``True``.
+        precision (str): The precision to use for evaluation. Default: ``'amp_fp16'``.
         guidance_scale (float): The guidance scale to use for evaluation. Default: ``7.0``.
         height (int): The height of the generated images. Default: ``1024``.
         width (int): The width of the generated images. Default: ``1024``.
@@ -46,6 +47,7 @@ class GenevalImageGenerator:
                  load_path: Optional[str] = None,
                  local_checkpoint_path: str = '/tmp/model.pt',
                  load_strict_model_weights: bool = True,
+                 precision: str = 'amp_fp16',
                  guidance_scale: float = 7.0,
                  height: int = 1024,
                  width: int = 1024,
@@ -77,6 +79,7 @@ class GenevalImageGenerator:
         self.load_path = load_path
         self.local_checkpoint_path = local_checkpoint_path
         self.load_strict_model_weights = load_strict_model_weights
+        self.precision = precision
         self.guidance_scale = guidance_scale
         self.height = height
         self.width = width
@@ -148,7 +151,7 @@ class GenevalImageGenerator:
                                                  **self.additional_generate_kwargs).images[0]
                     img = generated_image
                 else:
-                    with get_precision_context('amp_fp16'):
+                    with get_precision_context(self.precision):
                         generated_image = self.model.generate(prompt=caption,
                                                               height=self.height,
                                                               width=self.width,
