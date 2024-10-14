@@ -235,13 +235,23 @@ class ModelInference():
         model_name (str): Name of the model from `diffusion.models` to load. Ex: for stable diffusion xl, use 'stable_diffusion_xl'.
         local_checkpoint_path (str): Path to the local checkpoint. Default: '/tmp/model.pt'.
         strict (bool): Whether to load the model weights strictly. Default: False.
+        dtype: The data type to use. One of [`float32`, `float16`, `bfloat16`]. Default: `bfloat16`.
         **model_kwargs: Keyword arguments to pass to the model initialization.
     """
 
-    def __init__(self, model_name, local_checkpoint_path: str = LOCAL_CHECKPOINT_PATH, strict=False, **model_kwargs):
+    def __init__(self,
+                 model_name,
+                 local_checkpoint_path: str = LOCAL_CHECKPOINT_PATH,
+                 strict=False,
+                 dtype='bfloat16',
+                 **model_kwargs):
         self.device = torch.cuda.current_device()
         model_factory = getattr(diffusion.models, model_name)
         model = model_factory(**model_kwargs)
+        dtype_map = {'float32': torch.float32, 'float16': torch.float16, 'bfloat16': torch.bfloat16}
+        if dtype not in dtype_map:
+            raise ValueError(f'Invalid dtype: {dtype}. Must be one of {list(dtype_map.keys())}')
+        self.dtype = dtype_map[dtype]
 
         if 'pretrained' in model_kwargs and model_kwargs['pretrained']:
             pass
@@ -290,7 +300,7 @@ class ModelInference():
             raise RuntimeError('There must be the same number of negative prompts as prompts.')
 
         # Generate images
-        with torch.cuda.amp.autocast(True):
+        with torch.cuda.amp.autocast(True, dtype=self.dtype):
             imgs = self.model.generate(prompt=prompts, negative_prompt=negative_prompts, **generate_kwargs).cpu()
 
         # Send as bytes
