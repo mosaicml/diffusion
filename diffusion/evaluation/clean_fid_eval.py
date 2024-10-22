@@ -51,6 +51,7 @@ class CleanFIDEvaluator:
         default_prompt (Optional[str]): An optional default prompt to add before each eval prompt. Default: ``None``.
         default_negative_prompt (Optional[str]): An optional default negative prompt to add before each
             negative prompt. Default: ``None``.
+        sdxl_conditioning (bool): Whether or not to include SDXL conditioning in the evaluation. Default: ``False``.
         additional_generate_kwargs (Dict, optional): Additional keyword arguments to pass to the model.generate method.
 
     """
@@ -74,6 +75,7 @@ class CleanFIDEvaluator:
                  prompts: Optional[List[str]] = None,
                  default_prompt: Optional[str] = None,
                  default_negative_prompt: Optional[str] = None,
+                 sdxl_conditioning: bool = False,
                  additional_generate_kwargs: Optional[Dict] = None):
         self.model = model
         self.dataset = dataset
@@ -92,8 +94,8 @@ class CleanFIDEvaluator:
         self.prompts = prompts if prompts is not None else ['A shiba inu wearing a blue sweater']
         self.default_prompt = default_prompt
         self.default_negative_prompt = default_negative_prompt
+        self.sdxl_conditioning = sdxl_conditioning
         self.additional_generate_kwargs = additional_generate_kwargs if additional_generate_kwargs is not None else {}
-        self.sdxl = model.sdxl
 
         # Load the model
         trainer = Trainer(model=self.model,
@@ -165,7 +167,7 @@ class CleanFIDEvaluator:
             if self.default_negative_prompt:
                 augmented_negative_prompt = [f'{self.default_negative_prompt}' for _ in text_captions]
 
-            if self.sdxl:
+            if self.sdxl_conditioning:
                 crop_params = torch.tensor([0, 0]).unsqueeze(0)
                 input_size_params = torch.tensor([self.size, self.size]).unsqueeze(0)
             else:
