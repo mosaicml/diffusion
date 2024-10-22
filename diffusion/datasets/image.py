@@ -26,8 +26,10 @@ class StreamingImageDataset(StreamingDataset):
     Args:
         streams (Sequence[Stream], optional): One or more Streams to stream/cache samples from.
             ``StreamingImageCaptionDataset`` uses either ``streams`` or ``remote``/``local``. Default:``None``.
-        remote (str, optional): Remote directory (S3 or local filesystem) where dataset is stored. Default: ``None``.
-        local (str, optional): Local filesystem directory where dataset is cached during operation. Default: ``None``.
+        remote (Union[str, Sequence[str]], optional): Remote directory (S3 or local filesystem) where dataset is
+            stored. Default: ``None``.
+        local (Union[str, Sequence[str]], optional): Local filesystem directory where dataset is cached during
+            operation. Default: ``None``.
         transform (Callable, optional): The transforms to apply to the image. Default: ``None``.
         image_key (str): Key associated with the image in the streaming dataset. Default: ``'image'``.
         image_output_key (optional, str): Optional output key for the image. If none, the value of `image_key` will
@@ -41,8 +43,8 @@ class StreamingImageDataset(StreamingDataset):
     def __init__(
         self,
         streams: Optional[Sequence[Stream]] = None,
-        remote: Optional[str] = None,
-        local: Optional[str] = None,
+        remote: Optional[Union[str, Sequence[str]]] = None,
+        local: Optional[Union[str, Sequence[str]]] = None,
         transform: Optional[Callable] = None,
         image_key: str = 'image',
         image_output_key: Optional[str] = None,
@@ -54,10 +56,11 @@ class StreamingImageDataset(StreamingDataset):
         streaming_kwargs.setdefault('shuffle_block_size', 1 << 18)
         streaming_kwargs.setdefault('shuffle_algo', 'py1s')
 
+        # Make the streams if necessary
+        streams = make_streams(remote, local=local) if streams is None else streams
+
         super().__init__(
             streams=streams,
-            remote=remote,
-            local=local,
             **streaming_kwargs,
         )
 
