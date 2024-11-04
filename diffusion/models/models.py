@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 from composer.devices import DeviceGPU
-from diffusers import AutoencoderKL, DDIMScheduler, DDPMScheduler, EulerDiscreteScheduler, UNet2DConditionModel
+from diffusers import AutoencoderKL, DDIMScheduler, DDPMScheduler, DPMSolverMultistepScheduler, EulerDiscreteScheduler, UNet2DConditionModel
 from peft import LoraConfig
 from torchmetrics import MeanSquaredError
 from transformers import AutoModel, AutoTokenizer, CLIPTextModel, CLIPTokenizer, PretrainedConfig
@@ -770,16 +770,13 @@ def precomputed_text_latent_diffusion(
         'beta_schedule': 'scaled_linear',
         'trained_betas': None,
         'prediction_type': prediction_type,
-        'interpolation_type': 'linear',
-        'use_karras_sigmas': False,
         'timestep_spacing': 'leading',
-        'steps_offset': 1,
         'rescale_betas_zero_snr': False,
     }
 
     if inference_noise_scheduler_params is not None:
         inference_scheduler_params.update(inference_noise_scheduler_params)
-    inference_noise_scheduler = EulerDiscreteScheduler(**inference_scheduler_params)
+    inference_noise_scheduler = DPMSolverMultistepScheduler(**inference_scheduler_params)
 
     # Shift noise scheduler to correct for resolution changes
     noise_scheduler = shift_noise_schedule(noise_scheduler,
