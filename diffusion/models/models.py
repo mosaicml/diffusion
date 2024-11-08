@@ -9,7 +9,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 from composer.devices import DeviceGPU
-from diffusers import AutoencoderKL, DDIMScheduler, DDPMScheduler, DPMSolverMultistepScheduler, EulerDiscreteScheduler, UNet2DConditionModel
+from diffusers import (AutoencoderKL, DDIMScheduler, DDPMScheduler, DPMSolverMultistepScheduler, EulerDiscreteScheduler,
+                       UNet2DConditionModel)
 from peft import LoraConfig
 from torchmetrics import MeanSquaredError
 from transformers import AutoModel, AutoTokenizer, CLIPTextModel, CLIPTokenizer, PretrainedConfig
