@@ -203,28 +203,29 @@ class PrecomputedTextLatentDiffusion(ComposerModel):
     def encode_text(self, text, device):
         assert self.t5_tokenizer is not None and self.t5_encoder is not None
         assert self.clip_tokenizer is not None and self.clip_encoder is not None
-        # Encode with T5
-        t5_tokenizer_out = self.t5_tokenizer(text,
-                                             padding='max_length',
-                                             max_length=self.t5_tokenizer.model_max_length,
-                                             truncation=True,
-                                             return_tensors='pt')
-        t5_tokenized_captions = t5_tokenizer_out['input_ids'].to(device)
-        t5_attn_mask = t5_tokenizer_out['attention_mask'].to(torch.bool).to(device)
-        t5_embed = self.t5_encoder(input_ids=t5_tokenized_captions, attention_mask=t5_attn_mask)[0]
-        # Encode with CLIP
-        clip_tokenizer_out = self.clip_tokenizer(text,
+        with torch.autocast(device_type='cuda', enabled=False):
+            # Encode with T5
+            t5_tokenizer_out = self.t5_tokenizer(text,
                                                  padding='max_length',
-                                                 max_length=self.clip_tokenizer.model_max_length,
+                                                 max_length=self.t5_tokenizer.model_max_length,
                                                  truncation=True,
                                                  return_tensors='pt')
-        clip_tokenized_captions = clip_tokenizer_out['input_ids'].to(device)
-        clip_attn_mask = clip_tokenizer_out['attention_mask'].to(torch.bool).to(device)
-        clip_out = self.clip_encoder(input_ids=clip_tokenized_captions,
-                                     attention_mask=clip_attn_mask,
-                                     output_hidden_states=True)
-        clip_embed = clip_out.hidden_states[-2]
-        pooled_embeddings = clip_out[1]
+            t5_tokenized_captions = t5_tokenizer_out['input_ids'].to(device)
+            t5_attn_mask = t5_tokenizer_out['attention_mask'].to(torch.bool).to(device)
+            t5_embed = self.t5_encoder(input_ids=t5_tokenized_captions, attention_mask=t5_attn_mask)[0]
+            # Encode with CLIP
+            clip_tokenizer_out = self.clip_tokenizer(text,
+                                                     padding='max_length',
+                                                     max_length=self.clip_tokenizer.model_max_length,
+                                                     truncation=True,
+                                                     return_tensors='pt')
+            clip_tokenized_captions = clip_tokenizer_out['input_ids'].to(device)
+            clip_attn_mask = clip_tokenizer_out['attention_mask'].to(torch.bool).to(device)
+            clip_out = self.clip_encoder(input_ids=clip_tokenized_captions,
+                                         attention_mask=clip_attn_mask,
+                                         output_hidden_states=True)
+            clip_embed = clip_out.hidden_states[-2]
+            pooled_embeddings = clip_out[1]
         return t5_embed, clip_embed, t5_attn_mask, clip_attn_mask, pooled_embeddings
 
     def prepare_text_embeddings(self, t5_embed: torch.Tensor, clip_embed: torch.Tensor, t5_mask: torch.Tensor,

@@ -14,11 +14,10 @@ from composer import ComposerModel, Trainer
 from composer.core import get_precision_context
 from composer.loggers import LoggerDestination
 from composer.utils import dist
-from torch.utils.data import DataLoader
+from torch.utils.data import Dataset
 from torchmetrics.multimodal import CLIPScore
-from torchvision.transforms.functional import to_pil_image
+from torchvision.transforms.functional import pil_to_tensor, to_pil_image
 from tqdm.auto import tqdm
-from transformers import PreTrainedTokenizerBase
 
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
@@ -32,7 +31,7 @@ class CleanFIDEvaluator:
 
     Args:
         model (ComposerModel): The model to evaluate.
-        eval_dataloader (DataLoader): The dataloader to use for evaluation.
+        dataset (Dataset): The dataset to use the prompts from.
         clip_metric (CLIPScore): The CLIPScore metric to use for evaluation.
         load_path (str, optional): The path to load the model from. Default: ``None``.
         guidance_scales (List[float]): The guidance scales to use for evaluation.
@@ -52,13 +51,14 @@ class CleanFIDEvaluator:
         default_prompt (Optional[str]): An optional default prompt to add before each eval prompt. Default: ``None``.
         default_negative_prompt (Optional[str]): An optional default negative prompt to add before each
             negative prompt. Default: ``None``.
+        sdxl_conditioning (bool): Whether or not to include SDXL conditioning in the evaluation. Default: ``False``.
         additional_generate_kwargs (Dict, optional): Additional keyword arguments to pass to the model.generate method.
 
     """
 
     def __init__(self,
                  model: ComposerModel,
-                 eval_dataloader: DataLoader,
+                 dataset: Dataset,
                  clip_metric: CLIPScore,
                  load_path: Optional[str] = None,
                  guidance_scales: Optional[List[float]] = None,
@@ -75,10 +75,10 @@ class CleanFIDEvaluator:
                  prompts: Optional[List[str]] = None,
                  default_prompt: Optional[str] = None,
                  default_negative_prompt: Optional[str] = None,
+                 sdxl_conditioning: bool = False,
                  additional_generate_kwargs: Optional[Dict] = None):
         self.model = model
-        self.tokenizer: PreTrainedTokenizerBase = model.tokenizer
-        self.eval_dataloader = eval_dataloader
+        self.dataset = dataset
         self.clip_metric = clip_metric
         self.load_path = load_path
         self.guidance_scales = guidance_scales if guidance_scales is not None else [1.0]
@@ -89,20 +89,19 @@ class CleanFIDEvaluator:
         self.loggers = loggers
         self.seed = seed
         self.output_dir = output_dir
-        self.num_samples = num_samples if num_samples is not None else float('inf')
+        self.num_samples = num_samples
         self.precision = precision
         self.prompts = prompts if prompts is not None else ['A shiba inu wearing a blue sweater']
         self.default_prompt = default_prompt
         self.default_negative_prompt = default_negative_prompt
+        self.sdxl_conditioning = sdxl_conditioning
         self.additional_generate_kwargs = additional_generate_kwargs if additional_generate_kwargs is not None else {}
-        self.sdxl = model.sdxl
 
         # Load the model
         trainer = Trainer(model=self.model,
                           load_path=self.load_path,
                           load_weights_only=True,
                           load_strict_model_weights=load_strict_model_weights,
-                          eval_dataloader=self.eval_dataloader,
                           seed=self.seed,
                           loggers=self.loggers)
         self.trainer = trainer
@@ -139,18 +138,27 @@ class CleanFIDEvaluator:
 
         # Storage for prompts
         prompts = {}
-        # Iterate over the eval dataloader
-        num_batches = len(self.eval_dataloader)
-        starting_seed = self.seed + num_batches * dist.get_local_rank()
-        for batch_id, batch in tqdm(enumerate(self.eval_dataloader)):
-            # Break if enough samples have been generated
-            if batch_id * self.batch_size * dist.get_world_size() >= self.num_samples:
-                break
-
-            real_images = batch[self.image_key]
-            tokenized_captions = batch[self.caption_key]
-            # Get the prompts from the tokens
-            text_captions = self.tokenizer.batch_decode(tokenized_captions, skip_special_tokens=True)
+        # Partition the dataset across the ranks
+        dataset_len = self.dataset.num_samples  # type: ignore
+        # Truncate the dataset if num_samples is specified
+        if self.num_samples is not None and self.num_samples <= dataset_len:
+            dataset_len = self.num_samples
+        elif self.num_samples is not None and self.num_samples > dataset_len:
+            raise ValueError(f'num_samples {self.num_samples} is greater than the dataset length {dataset_len}.')
+        samples_per_rank, remainder = divmod(dataset_len, dist.get_world_size())
+        start_idx = dist.get_global_rank() * samples_per_rank + min(remainder, dist.get_global_rank())
+        end_idx = start_idx + samples_per_rank
+        if dist.get_global_rank() < remainder:
+            end_idx += 1
+        print(f'Rank {dist.get_global_rank()} processing samples {start_idx} to {end_idx} of {dataset_len} total.')
+        # Iterate over the dataset
+        for sample_id in tqdm(range(start_idx, end_idx)):
+            # Set a unique seed for this sample to ensure reproducible but different randomness
+            seed = self.seed + sample_id
+            # Image and caption come from the dataset. Note the caption is untokenized
+            sample = self.dataset[sample_id]
+            real_images = pil_to_tensor(sample[self.image_key]).unsqueeze(0) / 255.0
+            text_captions = sample[self.caption_key]
             # Add default prompts if specified
             augmented_captions = text_captions
             augmented_negative_prompt = None
@@ -159,15 +167,12 @@ class CleanFIDEvaluator:
             if self.default_negative_prompt:
                 augmented_negative_prompt = [f'{self.default_negative_prompt}' for _ in text_captions]
 
-            if self.sdxl:
-                crop_params = batch['cond_crops_coords_top_left']
-                input_size_params = batch['cond_original_size']
+            if self.sdxl_conditioning:
+                crop_params = torch.tensor([0, 0]).unsqueeze(0)
+                input_size_params = torch.tensor([self.size, self.size]).unsqueeze(0)
             else:
                 crop_params = None
                 input_size_params = None
-
-            # Ensure a new seed for each batch, as randomness in model.generate is fixed.
-            seed = starting_seed + batch_id
             # Generate images from the captions
             with get_precision_context(self.precision):
                 generated_images = self.model.generate(prompt=augmented_captions,
@@ -188,11 +193,11 @@ class CleanFIDEvaluator:
                     f'Images are expected to be in the range [0, 1]. Got max {real_images.max()} and min {real_images.min()}'
                 )
             for i, img in enumerate(real_images):
-                to_pil_image(img).save(f'{real_image_path}/{batch_id}_{i}_rank_{dist.get_local_rank()}.png')
-                prompts[f'{batch_id}_{i}_rank_{dist.get_local_rank()}'] = text_captions[i]
+                to_pil_image(img).save(f'{real_image_path}/{sample_id}_rank_{dist.get_local_rank()}.png')
+                prompts[f'{sample_id}_rank_{dist.get_local_rank()}'] = text_captions[i]
             # Save the generated images
             for i, img in enumerate(generated_images):
-                to_pil_image(img).save(f'{gen_image_path}/{batch_id}_{i}_rank_{dist.get_local_rank()}.png')
+                to_pil_image(img).save(f'{gen_image_path}/{sample_id}_rank_{dist.get_local_rank()}.png')
 
         # Save the prompts as json
         json.dump(prompts, open(f'{real_image_path}/prompts_rank_{dist.get_local_rank()}.json', 'w'))

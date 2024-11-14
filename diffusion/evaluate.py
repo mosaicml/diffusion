@@ -14,7 +14,7 @@ from composer.core import Precision
 from composer.loggers import LoggerDestination
 from composer.utils import reproducibility
 from omegaconf import DictConfig, OmegaConf
-from torch.utils.data import DataLoader
+from torch.utils.data import Dataset
 from torchmetrics.multimodal import CLIPScore
 
 from diffusion.evaluation.clean_fid_eval import CleanFIDEvaluator
@@ -31,14 +31,8 @@ def evaluate(config: DictConfig) -> None:
     # The model to evaluate
     model: ComposerModel = hydra.utils.instantiate(config.model)
 
-    tokenizer = model.tokenizer if hasattr(model, 'tokenizer') else None
-
-    # The dataloader to use for evaluation
-    if tokenizer:
-        eval_dataloader = hydra.utils.instantiate(config.eval_dataloader, tokenizer=tokenizer)
-
-    else:
-        eval_dataloader: DataLoader = hydra.utils.instantiate(config.eval_dataloader)
+    # The dataset
+    dataset: Dataset = hydra.utils.instantiate(config.dataset)
 
     # The CLIPScores metric to use for evaluation
     clip_metric: CLIPScore = hydra.utils.instantiate(config.clip_metric)
@@ -88,7 +82,7 @@ def evaluate(config: DictConfig) -> None:
     evaluator: CleanFIDEvaluator = hydra.utils.instantiate(
         config.evaluator,
         model=model,
-        eval_dataloader=eval_dataloader,
+        dataset=dataset,
         clip_metric=clip_metric,
         loggers=logger,
     )
