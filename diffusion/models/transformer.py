@@ -472,7 +472,7 @@ class DiffusionTransformer(nn.Module):
             repeated_register = self.register_tokens.repeat(c.shape[0], 1, 1)
             c = torch.cat([c, repeated_register], dim=1)
             register_mask = torch.ones(c.shape[0], self.num_register_tokens, device=mask.device)
-            mask = torch.cat([mask, register_mask])
+            mask = torch.cat([mask, register_mask], dim=1)
 
         # Expand the mask to the right shape
         mask = mask.bool()
