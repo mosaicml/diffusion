@@ -192,7 +192,7 @@ class PreAttentionBlock(nn.Module):
         q, k, v = self.qkv(x).chunk(3, dim=-1)
         q = self.q_norm(q)
         k = self.k_norm(k)
-        return q, k, v
+        return q.contiguous(), k.contiguous(), v.contiguous()
 
 
 class SelfAttention(nn.Module):
@@ -216,9 +216,9 @@ class SelfAttention(nn.Module):
         # Get the shape of the inputs
         B, T, C = v.size()
         # Reshape the query, key, and values for multi-head attention
-        q = q.view(B, T, self.num_heads, C // self.num_heads).transpose(1, 2)
-        k = k.view(B, T, self.num_heads, C // self.num_heads).transpose(1, 2)
-        v = v.view(B, T, self.num_heads, C // self.num_heads).transpose(1, 2)
+        q = q.view(B, T, self.num_heads, C // self.num_heads).transpose(1, 2).contiguous()
+        k = k.view(B, T, self.num_heads, C // self.num_heads).transpose(1, 2).contiguous()
+        v = v.view(B, T, self.num_heads, C // self.num_heads).transpose(1, 2).contiguous()
         # Native torch attention
         attention_out = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)  # (B, H, T, C/H)
         # Swap the sequence length and the head dimension back and get rid of num_heads.
@@ -311,14 +311,15 @@ class MMDiTBlock(nn.Module):
         q1, k1, v1 = self.pre_attention_block_1(x1, t)
         q2, k2, v2 = self.pre_attention_block_2(x2, t)
         # Concat q, k, v along the sequence dimension
-        q = torch.cat([q1, q2], dim=1)
-        k = torch.cat([k1, k2], dim=1)
-        v = torch.cat([v1, v2], dim=1)
+        q = torch.cat([q1, q2], dim=1).contiguous()
+        k = torch.cat([k1, k2], dim=1).contiguous()
+        v = torch.cat([v1, v2], dim=1).contiguous()
         # Self-attention
         v = self.attention(q, k, v, mask=mask)
         # Split the attention output back into the two modalities
         seq_len_1, seq_len_2 = x1.size(1), x2.size(1)
         y1, y2 = v.split([seq_len_1, seq_len_2], dim=1)
+        y1, y2 = y1.contiguous(), y2.contiguous()
         # Post-attention for the two modalities
         y1 = self.post_attention_block_1(y1, x1, t)
         if not self.is_last:
