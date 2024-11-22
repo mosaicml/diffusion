@@ -6,7 +6,7 @@
 from setuptools import find_packages, setup
 
 install_requires = [
-    'mosaicml==0.25.0',
+    'mosaicml==0.27.0',
     'mosaicml-streaming==0.9.0',
     'hydra-core>=1.2',
     'hydra-colorlog>=1.1.0',
@@ -14,7 +14,7 @@ install_requires = [
     'transformers[torch]==4.44.2',
     'huggingface-hub[hf_transfer]>=0.23.2',
     'wandb>=0.18.1',
-    'xformers==0.0.28.post1',
+    'xformers==0.0.28.post3',
     'triton>=2.1.0',
     'torchmetrics[image]>=1.4.0.post0',
     'lpips==0.1.4',

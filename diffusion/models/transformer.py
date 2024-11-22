@@ -342,6 +342,7 @@ class DiffusionTransformer(nn.Module):
         conditioning_max_sequence_length (int): Maximum sequence length for the conditioning sequence. Default: `77`.
         conditioning_dimension (int): Dimension of the conditioning sequence. Default: `1`.
         expansion_factor (int): Expansion factor for the MLPs. Default: `4`.
+        num_register_tokens (int): Number of register tokens to use. Default: `0`.
     """
 
     def __init__(self,
@@ -354,7 +355,8 @@ class DiffusionTransformer(nn.Module):
                  conditioning_features: int = 1024,
                  conditioning_max_sequence_length: int = 77,
                  conditioning_dimension: int = 1,
-                 expansion_factor: int = 4):
+                 expansion_factor: int = 4,
+                 num_register_tokens: int = 0):
         super().__init__()
         # Params for the network architecture
         self.num_features = num_features
@@ -369,7 +371,7 @@ class DiffusionTransformer(nn.Module):
         self.conditioning_features = conditioning_features
         self.conditioning_dimension = conditioning_dimension
         self.conditioning_max_sequence_length = conditioning_max_sequence_length
-
+        self.num_register_tokens = num_register_tokens
         # Embedding block for the timestep
         self.timestep_embedding = ScalarEmbedding(self.num_features)
         # Projection layer for the input sequence
@@ -385,6 +387,10 @@ class DiffusionTransformer(nn.Module):
                                                       self.conditioning_max_sequence_length, self.num_features)
         conditioning_position_embedding /= math.sqrt(self.num_features)
         self.conditioning_position_embedding = torch.nn.Parameter(conditioning_position_embedding, requires_grad=True)
+        # Optional register tokens
+        if self.num_register_tokens > 0:
+            register_tokens = torch.randn(1, self.num_register_tokens, self.num_features) / math.sqrt(self.num_features)
+            self.register_tokens = torch.nn.Parameter(register_tokens, requires_grad=True)
         # Transformer blocks
         self.transformer_blocks = nn.ModuleList([
             MMDiTBlock(self.num_features, self.num_heads, expansion_factor=self.expansion_factor)
@@ -461,6 +467,12 @@ class DiffusionTransformer(nn.Module):
         if conditioning_mask is None:
             conditioning_mask = torch.ones(conditioning.shape[0], conditioning.shape[1], device=conditioning.device)
         mask = torch.cat([mask, conditioning_mask], dim=1)  # (B, T1 + T2)
+        # Optionally add the register tokens
+        if self.num_register_tokens > 0:
+            repeated_register = self.register_tokens.repeat(c.shape[0], 1, 1)
+            c = torch.cat([c, repeated_register], dim=1)
+            register_mask = torch.ones(c.shape[0], self.num_register_tokens, device=mask.device)
+            mask = torch.cat([mask, register_mask], dim=1)
 
         # Expand the mask to the right shape
         mask = mask.bool()
