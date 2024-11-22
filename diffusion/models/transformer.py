@@ -192,7 +192,7 @@ class PreAttentionBlock(nn.Module):
         q, k, v = self.qkv(x).chunk(3, dim=-1)
         q = self.q_norm(q)
         k = self.k_norm(k)
-        return q.contiguous(), k.contiguous(), v.contiguous()
+        return q, k, v
 
 
 class SelfAttention(nn.Module):
