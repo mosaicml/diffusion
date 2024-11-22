@@ -886,6 +886,7 @@ def text_to_image_transformer(
     autoencoder_path: Optional[str] = None,
     autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
     num_layers: int = 28,
+    attention_implementation: Optional[str] = None,
     max_image_side: int = 1280,
     conditioning_features: int = 768,
     conditioning_max_sequence_length: int = 77,
@@ -913,6 +914,8 @@ def text_to_image_transformer(
         autoencoder_local_path (optional, str): Path to autoencoder weights. Default: `/tmp/autoencoder_weights.pt`.
         num_layers (int): Number of layers in the transformer. Number of heads and layer width are determined by
             this according to `num_features = 64 * num_layers`, and `num_heads = num_layers`. Default: `28`.
+        attention_implementation (optional, str): Attention implementation. One of ('flash', 'mem_efficient', 'math').
+            If not specified, will let SDPA decide. Default: 'None'.
         max_image_side (int): Maximum side length of the image. Default: `1280`.
         conditioning_features (int): Number of features in the conditioning transformer. Default: `768`.
         conditioning_max_sequence_length (int): Maximum sequence length for the conditioning transformer. Default: `77`.
@@ -979,6 +982,7 @@ def text_to_image_transformer(
     transformer = DiffusionTransformer(num_features=64 * num_layers,
                                        num_heads=num_layers,
                                        num_layers=num_layers,
+                                       attention_implementation=attention_implementation,
                                        input_features=autoencoder_channels * (patch_size**2),
                                        input_max_sequence_length=input_max_sequence_length,
                                        input_dimension=2,
@@ -1020,6 +1024,7 @@ def precomputed_text_latents_to_image_transformer(
     conditioning_features: int = 768,
     conditioning_max_sequence_length: int = 512 + 77,
     num_register_tokens: int = 0,
+    attention_implementation: Optional[str] = None,
     patch_size: int = 2,
     latent_mean: Union[float, Tuple, str] = 0.0,
     latent_std: Union[float, Tuple, str] = 7.67754318618,
@@ -1052,6 +1057,8 @@ def precomputed_text_latents_to_image_transformer(
         conditioning_features (int): Number of features in the conditioning transformer. Default: `768`.
         conditioning_max_sequence_length (int): Maximum sequence length for the conditioning transformer. Default: `77`.
         num_register_tokens (int): Number of additional register tokens to use. Default: `0`.
+        attention_implementation (optional, str): Attention implementation. One of ('flash', 'mem_efficient', 'math').
+            If not specified, will let SDPA decide. Default: 'None'.
         patch_size (int): Patch size for the transformer. Default: `2`.
         latent_mean (float, Tuple, str): The mean of the autoencoder latents. Either a float for a single value,
             a tuple of means, or or `'latent_statistics'` to try to use the value from the autoencoder
@@ -1110,6 +1117,7 @@ def precomputed_text_latents_to_image_transformer(
     transformer = DiffusionTransformer(num_features=64 * num_layers,
                                        num_heads=num_layers,
                                        num_layers=num_layers,
+                                       attention_implementation=attention_implementation,
                                        input_features=autoencoder_channels * (patch_size**2),
                                        input_max_sequence_length=input_max_sequence_length,
                                        input_dimension=2,

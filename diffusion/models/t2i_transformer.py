@@ -569,7 +569,7 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
         self.autoencoder = self.autoencoder.half()
 
         # Only FSDP wrap models we are training
-        self.model._fsdp_wrap = False
+        self.model._fsdp_wrap = True
         self.autoencoder._fsdp_wrap = False
 
         # Param counts relevant for MFU computation

@@ -9,6 +9,7 @@ from typing import Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.attention import SDPBackend, sdpa_kernel
 
 
 def modulate(x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
@@ -214,17 +215,38 @@ class PreAttentionBlock(nn.Module):
 
 
 class SelfAttention(nn.Module):
-    """Standard multihead self attention layer that supports masking.
+    """Multi-head self-attention layer with selectable attention implementations.
 
     Args:
         num_features (int): Number of input features.
         num_heads (int): Number of attention heads.
+        attention_implementation (str): Attention implementation ('flash', 'mem_efficient', 'math'). If not specified, will let
+            SDPA decide. Default: 'None'.
     """
 
-    def __init__(self, num_features: int, num_heads: int):
+    def __init__(self, num_features: int, num_heads: int, attention_implementation: Optional[str] = None):
         super().__init__()
         self.num_features = num_features
         self.num_heads = num_heads
+        self.head_dim = num_features // num_heads
+        assert self.num_features % self.num_heads == 0, 'num_features must be divisible by num_heads'
+        if attention_implementation is not None:
+            assert attention_implementation in ('flash', 'mem_efficient', 'math'), (
+                "attention_implementation must be 'flash', 'mem_efficient', or 'math', or None")
+        self.attention_implementation = attention_implementation
+        self.sdp_backends = self._get_sdp_backends()
+
+    def _get_sdp_backends(self):
+        if self.attention_implementation == 'flash':
+            backends = [SDPBackend.FLASH_ATTENTION]
+        elif self.attention_implementation == 'mem_efficient':
+            backends = [SDPBackend.EFFICIENT_ATTENTION]
+        elif self.attention_implementation == 'math':
+            backends = [SDPBackend.MATH]
+        else:
+            # Let SDPA take the wheel
+            backends = [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]
+        return backends
 
     @torch.compile()
     def forward(self,
@@ -232,16 +254,24 @@ class SelfAttention(nn.Module):
                 k: torch.Tensor,
                 v: torch.Tensor,
                 mask: Optional[torch.Tensor] = None) -> torch.Tensor:
-        # Get the shape of the inputs
-        B, T, C = v.size()
-        # Reshape the query, key, and values for multi-head attention
-        q = q.view(B, T, self.num_heads, C // self.num_heads).transpose(1, 2)
-        k = k.view(B, T, self.num_heads, C // self.num_heads).transpose(1, 2)
-        v = v.view(B, T, self.num_heads, C // self.num_heads).transpose(1, 2)
-        # Native torch attention
-        attention_out = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)  # (B, H, T, C/H)
-        # Swap the sequence length and the head dimension back and get rid of num_heads.
-        attention_out = attention_out.transpose(1, 2).contiguous().view(B, T, C)  # (B, T, C)
+        B, T, C = q.size()
+        H = self.num_heads
+        D = self.head_dim
+
+        # Reshape q, k, v for multi-head attention
+        q = q.view(B, T, H, D).transpose(1, 2)  # (B, H, T, D)
+        k = k.view(B, T, H, D).transpose(1, 2)  # (B, H, T, D)
+        v = v.view(B, T, H, D).transpose(1, 2)  # (B, H, T, D)
+
+        # Attention with selectable implementation
+        if self.attention_implementation is None:
+            attention_out = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+        else:
+            with sdpa_kernel(self.sdp_backends):
+                attention_out = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+
+        # Reshape back to (B, T, C)
+        attention_out = attention_out.transpose(1, 2).reshape(B, T, C)
         return attention_out
 
 
@@ -304,19 +334,32 @@ class MMDiTBlock(nn.Module):
         num_heads (int): Number of attention heads.
         expansion_factor (int): Expansion factor for the MLP. Default: `4`.
         is_last (bool): Whether this is the last block in the network. Default: `False`.
+        attention_implementation (str): Attention implementation ('flash', 'mem_efficient', 'math'). If not specified, will let
+            SDPA decide. Default: 'None'.
     """
 
-    def __init__(self, num_features: int, num_heads: int, expansion_factor: int = 4, is_last: bool = False):
+    def __init__(self,
+                 num_features: int,
+                 num_heads: int,
+                 expansion_factor: int = 4,
+                 is_last: bool = False,
+                 attention_implementation: Optional[str] = None):
         super().__init__()
         self.num_features = num_features
         self.num_heads = num_heads
         self.expansion_factor = expansion_factor
         self.is_last = is_last
+        if attention_implementation is not None:
+            assert attention_implementation in ('flash', 'mem_efficient', 'math'), (
+                "attention_implementation must be 'flash', 'mem_efficient', or 'math', or None")
+        self.attention_implementation = attention_implementation
         # Pre-attention blocks for two modalities
         self.pre_attention_block_1 = PreAttentionBlock(self.num_features)
         self.pre_attention_block_2 = PreAttentionBlock(self.num_features)
         # Self-attention
-        self.attention = SelfAttention(self.num_features, self.num_heads)
+        self.attention = SelfAttention(self.num_features,
+                                       self.num_heads,
+                                       attention_implementation=self.attention_implementation)
         # Post-attention blocks for two modalities
         self.post_attention_block_1 = PostAttentionBlock(self.num_features, self.expansion_factor)
         if not self.is_last:
@@ -356,6 +399,8 @@ class DiffusionTransformer(nn.Module):
         num_features (int): Number of hidden features.
         num_heads (int): Number of attention heads.
         num_layers (int): Number of transformer layers.
+        attention_implementation (str): Attention implementation ('flash', 'mem_efficient', 'math'). If not specified, will let
+            SDPA decide. Default: 'None'.
         input_features (int): Number of features in the input sequence. Default: `192`.
         input_max_sequence_length (int): Maximum sequence length for the input sequence. Default: `1024`.
         input_dimension (int): Dimension of the input sequence. Default: `2`.
@@ -370,6 +415,7 @@ class DiffusionTransformer(nn.Module):
                  num_features: int,
                  num_heads: int,
                  num_layers: int,
+                 attention_implementation: Optional[str] = None,
                  input_features: int = 192,
                  input_max_sequence_length: int = 1024,
                  input_dimension: int = 2,
@@ -384,6 +430,10 @@ class DiffusionTransformer(nn.Module):
         self.num_heads = num_heads
         self.num_layers = num_layers
         self.expansion_factor = expansion_factor
+        if attention_implementation is not None:
+            assert attention_implementation in ('flash', 'mem_efficient', 'math'), (
+                "attention_implementation must be 'flash', 'mem_efficient', or 'math', or None")
+        self.attention_implementation = attention_implementation
         # Params for input embeddings
         self.input_features = input_features
         self.input_dimension = input_dimension
@@ -414,8 +464,10 @@ class DiffusionTransformer(nn.Module):
             self.register_tokens = torch.nn.Parameter(register_tokens, requires_grad=True)
         # Transformer blocks
         self.transformer_blocks = nn.ModuleList([
-            MMDiTBlock(self.num_features, self.num_heads, expansion_factor=self.expansion_factor)
-            for _ in range(self.num_layers - 1)
+            MMDiTBlock(self.num_features,
+                       self.num_heads,
+                       expansion_factor=self.expansion_factor,
+                       attention_implementation=self.attention_implementation) for _ in range(self.num_layers - 1)
         ])
         # Turn off post attn layers for conditioning sequence in final block
         self.transformer_blocks.append(
