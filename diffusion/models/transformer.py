@@ -662,6 +662,7 @@ class DiffusionTransformer(nn.Module):
         # Optionally add constant conditioning. This assumes it has been embedded already.
         if constant_conditioning is not None:
             t = t + constant_conditioning
+        # Unsqueeze for use in adaptive norm layers
         t = t.unsqueeze(1)
         # Embed the input
         y = self.input_embedding(x)  # (B, T1, C)
@@ -669,12 +670,6 @@ class DiffusionTransformer(nn.Module):
         y_position_embeddings = get_multidimensional_position_embeddings(self.input_position_embedding, input_coords)
         y_position_embeddings = y_position_embeddings.sum(dim=-1)  # (B, T1, C)
         y = y + y_position_embeddings  # (B, T1, C)
-
-        if input_mask is None:
-            mask = torch.ones(x.shape[0], x.shape[1], device=x.device)
-        else:
-            mask = input_mask
-
         # Embed the conditioning
         c = self.conditioning_embedding(conditioning)  # (B, T2, C)
         # Get the conditioning position embeddings and add them to the conditioning
@@ -682,37 +677,21 @@ class DiffusionTransformer(nn.Module):
                                                                          conditioning_coords)
         c_position_embeddings = c_position_embeddings.sum(dim=-1)  # (B, T2, C)
         c = c + c_position_embeddings  # (B, T2, C)
-
-        # Concatenate the masks
-        if conditioning_mask is None:
-            conditioning_mask = torch.ones(conditioning.shape[0], conditioning.shape[1], device=conditioning.device)
-        mask = torch.cat([mask, conditioning_mask], dim=1)  # (B, T1 + T2)
-
         # Optionally add the register tokens
         if self.num_register_tokens > 0:
             repeated_register = self.register_tokens.repeat(c.shape[0], 1, 1)
             c = torch.cat([c, repeated_register], dim=1)
-            register_mask = torch.ones(c.shape[0], self.num_register_tokens, device=mask.device)
-            mask = torch.cat([mask, register_mask], dim=1)
-
-        # Expand the mask to the right shape
-        mask = mask.bool()
-        mask = mask.unsqueeze(-1) & mask.unsqueeze(1)  # (B, T1 + T2, T1 + T2)
-        identity = torch.eye(mask.shape[1], device=mask.device, dtype=mask.dtype).unsqueeze(0)
-        mask = mask | identity
-        mask = mask.unsqueeze(1)  # (B, 1, T1 + T2, T1 + T2)
-        #mask = None
 
         # Pass through the MMDiT blocks
         for mmdit_group in self.mmdit_groups:
-            y, c = mmdit_group(y, c, t, mask=mask)
+            y, c = mmdit_group(y, c, t, mask=None)
         # Pass through the DiT blocks
         if self.num_dit_layers > 0:
             # Initial concat since DiT does not separate modalities
             img_len = y.shape[1]
             y = torch.cat([y, c], dim=1)
             for dit_group in self.dit_groups:
-                y = dit_group(y, t, mask=mask)
+                y = dit_group(y, t, mask=None)
             # Chop off the conditioning
             y = y[:, :img_len]
         # Pass through the output layers to get the right number of elements
