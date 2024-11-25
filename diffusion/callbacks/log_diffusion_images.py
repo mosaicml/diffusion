@@ -111,39 +111,39 @@ class LogDiffusionImages(Callback):
                                                        torch_dtype=torch.bfloat16,
                                                        cache_dir=self.cache_dir,
                                                        local_files_only=True).cuda().eval()
-
-            for batch in self.batched_prompts:
-                latent_batch = {}
-                tokenized_t5 = t5_tokenizer(batch,
-                                            padding='max_length',
-                                            max_length=t5_tokenizer.model_max_length,
-                                            truncation=True,
-                                            return_tensors='pt')
-                t5_attention_mask = tokenized_t5['attention_mask'].to(torch.bool).cuda()
-                t5_ids = tokenized_t5['input_ids'].cuda()
-                t5_latents = t5_model(input_ids=t5_ids, attention_mask=t5_attention_mask)[0].cpu()
-                t5_attention_mask = t5_attention_mask.cpu().to(torch.long)
-
-                tokenized_clip = clip_tokenizer(batch,
+            with torch.no_grad():
+                for batch in self.batched_prompts:
+                    latent_batch = {}
+                    tokenized_t5 = t5_tokenizer(batch,
                                                 padding='max_length',
-                                                max_length=clip_tokenizer.model_max_length,
+                                                max_length=t5_tokenizer.model_max_length,
                                                 truncation=True,
                                                 return_tensors='pt')
-                clip_attention_mask = tokenized_clip['attention_mask'].cuda()
-                clip_ids = tokenized_clip['input_ids'].cuda()
-                clip_outputs = clip_model(input_ids=clip_ids,
-                                          attention_mask=clip_attention_mask,
-                                          output_hidden_states=True)
-                clip_latents = clip_outputs.hidden_states[-2].cpu()
-                clip_pooled = clip_outputs[1].cpu()
-                clip_attention_mask = clip_attention_mask.cpu().to(torch.long)
+                    t5_attention_mask = tokenized_t5['attention_mask'].to(torch.bool).cuda()
+                    t5_ids = tokenized_t5['input_ids'].cuda()
+                    t5_latents = t5_model(input_ids=t5_ids, attention_mask=t5_attention_mask)[0].cpu()
+                    t5_attention_mask = t5_attention_mask.cpu().to(torch.long)
 
-                latent_batch[self.t5_latent_key] = t5_latents
-                latent_batch[self.t5_mask_key] = t5_attention_mask
-                latent_batch[self.clip_latent_key] = clip_latents
-                latent_batch[self.clip_mask_key] = clip_attention_mask
-                latent_batch[self.clip_pooled_key] = clip_pooled
-                self.batched_latents.append(latent_batch)
+                    tokenized_clip = clip_tokenizer(batch,
+                                                    padding='max_length',
+                                                    max_length=clip_tokenizer.model_max_length,
+                                                    truncation=True,
+                                                    return_tensors='pt')
+                    clip_attention_mask = tokenized_clip['attention_mask'].cuda()
+                    clip_ids = tokenized_clip['input_ids'].cuda()
+                    clip_outputs = clip_model(input_ids=clip_ids,
+                                              attention_mask=clip_attention_mask,
+                                              output_hidden_states=True)
+                    clip_latents = clip_outputs.hidden_states[-2].cpu()
+                    clip_pooled = clip_outputs[1].cpu()
+                    clip_attention_mask = clip_attention_mask.cpu().to(torch.long)
+
+                    latent_batch[self.t5_latent_key] = t5_latents
+                    latent_batch[self.t5_mask_key] = t5_attention_mask
+                    latent_batch[self.clip_latent_key] = clip_latents
+                    latent_batch[self.clip_mask_key] = clip_attention_mask
+                    latent_batch[self.clip_pooled_key] = clip_pooled
+                    self.batched_latents.append(latent_batch)
 
             del t5_model
             del clip_model
