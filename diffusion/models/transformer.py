@@ -639,8 +639,6 @@ class DiffusionTransformer(nn.Module):
                 t: torch.Tensor,
                 conditioning: torch.Tensor,
                 conditioning_coords: torch.Tensor,
-                input_mask: Optional[torch.Tensor] = None,
-                conditioning_mask: Optional[torch.Tensor] = None,
                 constant_conditioning: Optional[torch.Tensor] = None) -> torch.Tensor:
         """Forward pass through the diffusion transformer.
 
@@ -650,8 +648,6 @@ class DiffusionTransformer(nn.Module):
             t (torch.Tensor): The scalar timesteps of shape (B, 1).
             conditioning (torch.Tensor): The conditioning sequence of shape (B, T2, C2).
             conditioning_coords (torch.Tensor): The coordinates of the D dimensional conditioning sequence of shape (B, T2, D).
-            input_mask (Optional[torch.Tensor]): The mask for the input sequence of shape (B, T1).
-            conditioning_mask (Optional[torch.Tensor]): The mask for the conditioning sequence of shape (B, T2).
             constant_conditioning (Optional[torch.Tensor]): Optional additional constant conditioning (B, num_features).
 
         Returns:

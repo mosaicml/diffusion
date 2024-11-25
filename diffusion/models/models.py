@@ -902,7 +902,6 @@ def text_to_image_transformer(
     timestep_shift: float = 1.0,
     image_key: str = 'image',
     caption_key: str = 'captions',
-    caption_mask_key: str = 'attention_mask',
     pretrained: bool = False,
 ):
     """Text to image transformer training setup.
@@ -940,7 +939,6 @@ def text_to_image_transformer(
         timestep_shift (float): The shift of the timesteps. Default: `1.0`.
         image_key (str): The key for the image in the batch. Default: `image`.
         caption_key (str): The key for the captions in the batch. Default: `captions`.
-        caption_mask_key (str): The key for the caption mask in the batch. Default: `attention_mask`.
         pretrained (bool): Whether to load pretrained weights. Not used. Defaults to False.
     """
     latent_mean, latent_std = _parse_latent_statistics(latent_mean), _parse_latent_statistics(latent_std)
@@ -1018,8 +1016,7 @@ def text_to_image_transformer(
                                      timestep_std=timestep_std,
                                      timestep_shift=timestep_shift,
                                      image_key=image_key,
-                                     caption_key=caption_key,
-                                     caption_mask_key=caption_mask_key)
+                                     caption_key=caption_key)
 
     if torch.cuda.is_available():
         model = DeviceGPU().module_to_device(model)
@@ -1050,9 +1047,7 @@ def precomputed_text_latents_to_image_transformer(
     timestep_shift: float = 1.0,
     image_key: str = 'image',
     t5_latent_key: str = 'T5_LATENTS',
-    t5_mask_key: str = 'T5_ATTENTION_MASK',
     clip_latent_key: str = 'CLIP_LATENTS',
-    clip_mask_key: str = 'CLIP_ATTENTION_MASK',
     clip_pooled_key: str = 'CLIP_POOLED',
     pretrained: bool = False,
 ):
@@ -1189,9 +1184,7 @@ def precomputed_text_latents_to_image_transformer(
                                                        timestep_shift=timestep_shift,
                                                        image_key=image_key,
                                                        t5_latent_key=t5_latent_key,
-                                                       t5_mask_key=t5_mask_key,
                                                        clip_latent_key=clip_latent_key,
-                                                       clip_mask_key=clip_mask_key,
                                                        clip_pooled_key=clip_pooled_key)
 
     if torch.cuda.is_available():

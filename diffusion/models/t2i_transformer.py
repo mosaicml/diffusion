@@ -108,7 +108,6 @@ class ComposerTextToImageMMDiT(ComposerModel):
             A value of `1.0` is no shift. Default: `1.0`.
         image_key (str): The name of the images in the dataloader batch. Default: `image`.
         caption_key (str): The name of the caption in the dataloader batch. Default: `caption`.
-        caption_mask_key (str): The name of the caption mask in the dataloader batch. Default: `caption_mask`.
         pooled_embedding_features (int): The number of features in the pooled text embeddings. Default: `768`.
     """
 
@@ -128,7 +127,6 @@ class ComposerTextToImageMMDiT(ComposerModel):
         timestep_shift: float = 1.0,
         image_key: str = 'image',
         caption_key: str = 'caption',
-        caption_mask_key: str = 'caption_mask',
         pooled_embedding_features: int = 768,
     ):
         super().__init__()
@@ -150,7 +148,6 @@ class ComposerTextToImageMMDiT(ComposerModel):
         self.timestep_shift = timestep_shift
         self.image_key = image_key
         self.caption_key = caption_key
-        self.caption_mask_key = caption_mask_key
         self.pooled_embedding_features = pooled_embedding_features
 
         # Embedding MLP for the pooled text embeddings
@@ -204,7 +201,7 @@ class ComposerTextToImageMMDiT(ComposerModel):
         height, width = batch[self.image_key].shape[2:]
         input_seq_len = height * width / (self.patch_size**2 * self.downsample_factor**2)
         cond_seq_len = batch[self.caption_key].shape[1]
-        seq_len = input_seq_len + cond_seq_len
+        seq_len = input_seq_len + cond_seq_len + self.model.num_register_tokens
         # Calulate forward flops on full sequence excluding attention
         param_flops = 2 * self.n_seq_params * batch_size * seq_len
         # Last block contributes a bit less than other blocks
@@ -272,24 +269,22 @@ class ComposerTextToImageMMDiT(ComposerModel):
         text_embeddings_coords = text_embeddings_coords.unsqueeze(-1)
         return text_embeddings_coords
 
-    def embed_tokenized_prompts(
-            self, tokenized_prompts: torch.Tensor,
-            attention_masks: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def embed_tokenized_prompts(self, tokenized_prompts: torch.Tensor,
+                                attention_masks: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Use the model's text encoder to embed tokenized prompts and create pooled text embeddings."""
-        with torch.cuda.amp.autocast(enabled=False):
+        with torch.amp.autocast('cuda', enabled=False):
             # Ensure text embeddings are not longer than the model can handle
             if tokenized_prompts.shape[1] > self.model.conditioning_max_sequence_length:
                 tokenized_prompts = tokenized_prompts[:, :self.model.conditioning_max_sequence_length]
             text_encoder_out = self.text_encoder(tokenized_prompts, attention_mask=attention_masks)
             text_embeddings, pooled_text_embeddings = text_encoder_out[0], text_encoder_out[1]
-            text_mask = self.combine_attention_masks(attention_masks)
             text_embeddings_coords = self.make_text_embeddings_coords(text_embeddings)
         # Ensure the embeddings are the same dtype as the model
         text_embeddings = text_embeddings.to(next(self.model.parameters()).dtype)
         pooled_text_embeddings = pooled_text_embeddings.to(next(self.pooled_embedding_mlp.parameters()).dtype)
         # Encode the pooled embeddings
         pooled_text_embeddings = self.pooled_embedding_mlp(pooled_text_embeddings)
-        return text_embeddings, text_embeddings_coords, text_mask, pooled_text_embeddings
+        return text_embeddings, text_embeddings_coords, pooled_text_embeddings
 
     def diffusion_forward_process(self, inputs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Diffusion forward process using a rectified flow."""
@@ -320,7 +315,7 @@ class ComposerTextToImageMMDiT(ComposerModel):
         # Get the image latents
         latent_patches, latent_coords = self.encode_image(image)
         # Get the text embeddings and their coords
-        text_embeddings, text_embeddings_coords, caption_mask, pooled_text_embeddings = self.embed_tokenized_prompts(
+        text_embeddings, text_embeddings_coords, pooled_text_embeddings = self.embed_tokenized_prompts(
             caption, caption_mask)
         # Diffusion forward process
         noised_inputs, targets, timesteps = self.diffusion_forward_process(latent_patches)
@@ -330,8 +325,6 @@ class ComposerTextToImageMMDiT(ComposerModel):
                                timesteps,
                                conditioning=text_embeddings,
                                conditioning_coords=text_embeddings_coords,
-                               input_mask=None,
-                               conditioning_mask=caption_mask,
                                constant_conditioning=pooled_text_embeddings)
         return {'predictions': model_out, 'targets': targets, 'timesteps': timesteps}
 
@@ -420,9 +413,9 @@ class ComposerTextToImageMMDiT(ComposerModel):
         negative_prompt_tokens, negative_prompt_mask = negative_prompt_tokens.to(device), negative_prompt_mask.to(
             device)
         # Embed the tokenized prompts and negative prompts
-        text_embeddings, text_embeddings_coords, prompt_mask, pooled_embedding = self.embed_tokenized_prompts(
+        text_embeddings, text_embeddings_coords, pooled_embedding = self.embed_tokenized_prompts(
             prompt_tokens, prompt_mask)
-        neg_text_embeddings, neg_text_embeddings_coords, neg_prompt_mask, pooled_neg_embedding = self.embed_tokenized_prompts(
+        neg_text_embeddings, neg_text_embeddings_coords, pooled_neg_embedding = self.embed_tokenized_prompts(
             negative_prompt_tokens, negative_prompt_mask)
 
         # Generate initial noise
@@ -438,7 +431,6 @@ class ComposerTextToImageMMDiT(ComposerModel):
         # Set up for CFG
         text_embeddings = torch.cat([text_embeddings, neg_text_embeddings], dim=0)
         text_embeddings_coords = torch.cat([text_embeddings_coords, neg_text_embeddings_coords], dim=0)
-        text_embeddings_mask = torch.cat([prompt_mask, neg_prompt_mask], dim=0)
         pooled_embedding = torch.cat([pooled_embedding, pooled_neg_embedding], dim=0)
         latent_coords_input = torch.cat([latent_coords, latent_coords], dim=0)
 
@@ -453,8 +445,6 @@ class ComposerTextToImageMMDiT(ComposerModel):
                                    t.unsqueeze(0),
                                    conditioning=text_embeddings,
                                    conditioning_coords=text_embeddings_coords,
-                                   input_mask=None,
-                                   conditioning_mask=text_embeddings_mask,
                                    constant_conditioning=pooled_embedding)
             # Do CFG
             pred_cond, pred_uncond = model_out.chunk(2, dim=0)
@@ -498,9 +488,7 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
             A value of `1.0` is no shift. Default: `1.0`.
         image_key (str): The name of the images in the dataloader batch. Default: `image`.
         t5_latent_key (str): The key in the batch dict that contains the T5 latents. Default: `'T5_LATENTS'`.
-        t5_mask_key (str): The key in the batch dict that contains the T5 attention mask. Default: `'T5_ATTENTION_MASK'`.
         clip_latent_key (str): The key in the batch dict that contains the CLIP latents. Default: `'CLIP_LATENTS'`.
-        clip_mask_key (str): The key in the batch dict that contains the CLIP attention mask. Default: `'CLIP_ATTENTION_MASK'`.
         clip_pooled_key (str): The key in the batch dict that contains the CLIP pooled embeddings. Default: `'CLIP_POOLED'`.
         pooled_embedding_features (int): The number of features in the pooled text embeddings. Default: `768`.
     """
@@ -524,9 +512,7 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
         timestep_shift: float = 1.0,
         image_key: str = 'image',
         t5_latent_key: str = 'T5_LATENTS',
-        t5_mask_key: str = 'T5_ATTENTION_MASK',
         clip_latent_key: str = 'CLIP_LATENTS',
-        clip_mask_key: str = 'CLIP_ATTENTION_MASK',
         clip_pooled_key: str = 'CLIP_POOLED',
         pooled_embedding_features: int = 768,
     ):
@@ -552,9 +538,7 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
         self.timestep_shift = timestep_shift
         self.image_key = image_key
         self.t5_latent_key = t5_latent_key
-        self.t5_mask_key = t5_mask_key
         self.clip_latent_key = clip_latent_key
-        self.clip_mask_key = clip_mask_key
         self.clip_pooled_key = clip_pooled_key
         self.pooled_embedding_features = pooled_embedding_features
 
@@ -609,7 +593,7 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
         height, width = batch[self.image_key].shape[2:]
         input_seq_len = height * width / (self.patch_size**2 * self.downsample_factor**2)
         cond_seq_len = batch[self.t5_latent_key].shape[1] + batch[self.clip_latent_key].shape[1]
-        seq_len = input_seq_len + cond_seq_len
+        seq_len = input_seq_len + cond_seq_len + self.model.num_register_tokens
         # Calulate forward flops on full sequence excluding attention
         param_flops = 2 * self.n_seq_params * batch_size * seq_len
         # Last block contributes a bit less than other blocks
@@ -674,16 +658,13 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
                                      output_hidden_states=True)
         clip_embed = clip_out.hidden_states[-2]
         pooled_embeddings = clip_out[1]
-        return t5_embed, clip_embed, t5_attn_mask, clip_attn_mask, pooled_embeddings
+        return t5_embed, clip_embed, pooled_embeddings
 
-    def prepare_text_embeddings(self, t5_embed: torch.Tensor, clip_embed: torch.Tensor, t5_mask: torch.Tensor,
-                                clip_mask: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def prepare_text_embeddings(self, t5_embed: torch.Tensor, clip_embed: torch.Tensor) -> torch.Tensor:
         if t5_embed.shape[1] > self.max_seq_len:
             t5_embed = t5_embed[:, :self.max_seq_len]
-            t5_mask = t5_mask[:, :self.max_seq_len]
         if clip_embed.shape[1] > self.max_seq_len:
             clip_embed = clip_embed[:, :self.max_seq_len]
-            clip_mask = clip_mask[:, :self.max_seq_len]
         t5_embed = self.t5_proj(t5_embed)
         clip_embed = self.clip_proj(clip_embed)
         # Apply layernorms
@@ -691,8 +672,7 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
         clip_embed = self.clip_ln(clip_embed)
         # Concatenate the text embeddings
         text_embeds = torch.cat([t5_embed, clip_embed], dim=1)
-        encoder_attention_mask = torch.cat([t5_mask, clip_mask], dim=1)
-        return text_embeds, encoder_attention_mask
+        return text_embeds
 
     def make_text_embeddings_coords(self, text_embeddings: torch.Tensor) -> torch.Tensor:
         """Make text embeddings coordinates for the transformer."""
@@ -732,12 +712,10 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
 
         # Text embeddings are shape (B, seq_len, emb_dim), optionally truncate to a max length
         t5_embed = batch[self.t5_latent_key]
-        t5_mask = batch[self.t5_mask_key]
         clip_embed = batch[self.clip_latent_key]
-        clip_mask = batch[self.clip_mask_key]
         pooled_text_embeddings = batch[self.clip_pooled_key]
         pooled_text_embeddings = self.pooled_embedding_mlp(pooled_text_embeddings)
-        text_embeddings, caption_mask = self.prepare_text_embeddings(t5_embed, clip_embed, t5_mask, clip_mask)
+        text_embeddings = self.prepare_text_embeddings(t5_embed, clip_embed)
         text_embeddings_coords = self.make_text_embeddings_coords(text_embeddings)
 
         # Diffusion forward process
@@ -748,8 +726,6 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
                                timesteps,
                                conditioning=text_embeddings,
                                conditioning_coords=text_embeddings_coords,
-                               input_mask=None,
-                               conditioning_mask=caption_mask,
                                constant_conditioning=pooled_text_embeddings)
         return {'predictions': model_out, 'targets': targets, 'timesteps': timesteps}
 
@@ -790,10 +766,8 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
                  negative_prompt: Optional[list] = None,
                  prompt_embeds: Optional[torch.Tensor] = None,
                  pooled_prompt: Optional[torch.Tensor] = None,
-                 prompt_mask: Optional[torch.Tensor] = None,
                  neg_prompt_embeds: Optional[torch.Tensor] = None,
                  pooled_neg_prompt: Optional[torch.Tensor] = None,
-                 neg_prompt_mask: Optional[torch.Tensor] = None,
                  height: int = 256,
                  width: int = 256,
                  guidance_scale: float = 7.0,
@@ -810,19 +784,14 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
                 image generation away from. Ignored when not using guidance
                 (i.e., ignored if guidance_scale is less than 1). Must be the same length
                 as list of prompts. Only use if not using negative embeddings. Default: `None`.
-            prompt_embeds (torch.Tensor): Optionally pass pre-tokenized prompts instead
+            prompt_embeds (torch.Tensor): Optionally pass pre-embedded prompts instead
                 of string prompts. Default: `None`.
             pooled_prompt (torch.Tensor): Optionally pass a precomputed pooled prompt embedding
                 if using embeddings. Default: `None`.
-            prompt_mask (torch.Tensor): Optionally pass a precomputed attention mask for the
-                prompt embeddings. Default: `None`.
             neg_prompt_embeds (torch.Tensor): Optionally pass pre-embedded negative
                 prompts instead of string negative prompts.  Default: `None`.
             pooled_neg_prompt (torch.Tensor): Optionally pass a precomputed pooled negative
                 prompt embedding if using embeddings. Default: `None`.
-            neg_prompt_mask (torch.Tensor): Optionally pass a precomputed attention mask for the
-                negative prompt embeddings. Default: `None`.
-            prompt_embeds (Optional[torch.Tensor]): Precomputed text embeddings for the prompt. Default: `None`.
             height (int): Height of the generated images. Default: `256`.
             width (int): Width of the generated images. Default: `256`.
             guidance_scale (float): Scale for the guidance. Default: `7.0`.
@@ -847,29 +816,20 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
             raise ValueError('One and only one of prompt or prompt_embeds should be provided.')
         if (pooled_prompt is None) != (prompt_embeds is None):
             raise ValueError('pooled_prompt should be provided if and only if using embeddings')
-        if (prompt_mask is None) != (prompt_embeds is None):
-            raise ValueError('prompt_mask should be provided if and only if using embeddings')
-        if (neg_prompt_mask is None) != (neg_prompt_embeds is None):
-            raise ValueError('neg_prompt_mask should be provided if and only if using embeddings')
         if (pooled_neg_prompt is None) != (neg_prompt_embeds is None):
             raise ValueError('pooled_neg_prompt should be provided if and only if using embeddings')
 
         # If the prompt is specified as text, encode it.
         if prompt is not None:
-            t5_embed, clip_embed, t5_attn_mask, clip_attn_mask, pooled_prompt = self.encode_text(
-                prompt, self.vae.device)
-            prompt_embeds, prompt_mask = self.prepare_text_embeddings(t5_embed, clip_embed, t5_attn_mask,
-                                                                      clip_attn_mask)
+            t5_embed, clip_embed, pooled_prompt = self.encode_text(prompt, self.vae.device)
+            prompt_embeds = self.prepare_text_embeddings(t5_embed, clip_embed)
         # If negative prompt is specified as text, encode it.
         if negative_prompt is not None:
-            t5_embed, clip_embed, t5_attn_mask, clip_attn_mask, pooled_neg_prompt = self.encode_text(
-                negative_prompt, self.vae.device)
-            neg_prompt_embeds, neg_prompt_mask = self.prepare_text_embeddings(t5_embed, clip_embed, t5_attn_mask,
-                                                                              clip_attn_mask)
+            t5_embed, clip_embed, pooled_neg_prompt = self.encode_text(negative_prompt, self.vae.device)
+            neg_prompt_embeds = self.prepare_text_embeddings(t5_embed, clip_embed)
 
         text_embeddings = _duplicate_tensor(prompt_embeds, num_images_per_prompt)
         pooled_embeddings = _duplicate_tensor(pooled_prompt, num_images_per_prompt)
-        encoder_attn_mask = _duplicate_tensor(prompt_mask, num_images_per_prompt)
 
         # classifier free guidance + negative prompts
         # negative prompt is given in place of the unconditional input in classifier free guidance
@@ -877,11 +837,9 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
             # Negative prompt is empty and we want to zero it out
             neg_prompt_embeds = torch.zeros_like(text_embeddings)
             pooled_neg_prompt = torch.zeros_like(pooled_embeddings)
-            neg_prompt_mask = torch.zeros_like(encoder_attn_mask)
         else:
             neg_prompt_embeds = _duplicate_tensor(neg_prompt_embeds, num_images_per_prompt)
             pooled_neg_prompt = _duplicate_tensor(pooled_neg_prompt, num_images_per_prompt)
-            neg_prompt_mask = _duplicate_tensor(neg_prompt_mask, num_images_per_prompt)
 
         # Generate initial noise
         latent_height = height // self.downsample_factor
@@ -896,7 +854,6 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
         # concat uncond + prompt
         text_embeddings = torch.cat([neg_prompt_embeds, text_embeddings])
         pooled_embeddings = torch.cat([pooled_neg_prompt, pooled_embeddings])
-        text_embeddings_mask = torch.cat([neg_prompt_mask, encoder_attn_mask])
         # Encode the pooled embeddings
         pooled_embeddings = self.pooled_embedding_mlp(pooled_embeddings)
         # Make the text embeddings coords
@@ -913,8 +870,6 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
                                    t.unsqueeze(0),
                                    conditioning=text_embeddings,
                                    conditioning_coords=text_embeddings_coords,
-                                   input_mask=None,
-                                   conditioning_mask=text_embeddings_mask,
                                    constant_conditioning=pooled_embeddings)
             # Do CFG
             pred_uncond, pred_cond = model_out.chunk(2, dim=0)
