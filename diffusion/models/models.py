@@ -885,10 +885,15 @@ def text_to_image_transformer(
     vae_model_name: str = 'madebyollin/sdxl-vae-fp16-fix',
     autoencoder_path: Optional[str] = None,
     autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
-    num_layers: int = 28,
+    num_mmdit_layers: int = 28,
+    num_dit_layers: int = 0,
+    mmdit_block_group_size: int = 1,
+    dit_block_group_size: int = 1,
+    attention_implementation: Optional[str] = None,
     max_image_side: int = 1280,
     conditioning_features: int = 768,
     conditioning_max_sequence_length: int = 77,
+    num_register_tokens: int = 0,
     patch_size: int = 2,
     latent_mean: Union[float, Tuple, str] = 0.0,
     latent_std: Union[float, Tuple, str] = 7.67754318618,
@@ -897,7 +902,6 @@ def text_to_image_transformer(
     timestep_shift: float = 1.0,
     image_key: str = 'image',
     caption_key: str = 'captions',
-    caption_mask_key: str = 'attention_mask',
     pretrained: bool = False,
 ):
     """Text to image transformer training setup.
@@ -911,11 +915,18 @@ def text_to_image_transformer(
         autoencoder_path (optional, str): Path to autoencoder weights if using custom autoencoder. If not specified,
             will use the vae from `model_name`. Default `None`.
         autoencoder_local_path (optional, str): Path to autoencoder weights. Default: `/tmp/autoencoder_weights.pt`.
-        num_layers (int): Number of layers in the transformer. Number of heads and layer width are determined by
+        num_mmdit_layers (int): Number of mmdit_layers in the transformer. Number of heads and layer width are determined by
             this according to `num_features = 64 * num_layers`, and `num_heads = num_layers`. Default: `28`.
+        num_dit_layers (int): Number of mmdit_layers in the transformer. Number of heads and layer width are determined by
+            this according to `num_features = 64 * num_layers`, and `num_heads = num_layers`. Default: `0`.
+        mmdit_block_group_size (int): Size of MMDiT block groups. Must be a divisor of num_mmdit_layers. Default: `1`.
+        dit_block_group_size (int): Size of DiT block groups. Must be a divisor of num_mmdit_layers. Default: `1`.
+        attention_implementation (optional, str): Attention implementation. One of ('flash', 'mem_efficient', 'math').
+            If not specified, will let SDPA decide. Default: 'None'.
         max_image_side (int): Maximum side length of the image. Default: `1280`.
         conditioning_features (int): Number of features in the conditioning transformer. Default: `768`.
         conditioning_max_sequence_length (int): Maximum sequence length for the conditioning transformer. Default: `77`.
+        num_register_tokens (int): Number of additional register tokens to use. Default: `0`.
         patch_size (int): Patch size for the transformer. Default: `2`.
         latent_mean (float, Tuple, str): The mean of the autoencoder latents. Either a float for a single value,
             a tuple of means, or or `'latent_statistics'` to try to use the value from the autoencoder
@@ -928,7 +939,6 @@ def text_to_image_transformer(
         timestep_shift (float): The shift of the timesteps. Default: `1.0`.
         image_key (str): The key for the image in the batch. Default: `image`.
         caption_key (str): The key for the captions in the batch. Default: `captions`.
-        caption_mask_key (str): The key for the caption mask in the batch. Default: `attention_mask`.
         pretrained (bool): Whether to load pretrained weights. Not used. Defaults to False.
     """
     latent_mean, latent_std = _parse_latent_statistics(latent_mean), _parse_latent_statistics(latent_std)
@@ -976,16 +986,22 @@ def text_to_image_transformer(
     # Figure out the maximum input sequence length
     input_max_sequence_length = math.ceil(max_image_side / (downsample_factor * patch_size))
     # Make the transformer model
+    num_layers = num_mmdit_layers + num_dit_layers
     transformer = DiffusionTransformer(num_features=64 * num_layers,
                                        num_heads=num_layers,
-                                       num_layers=num_layers,
+                                       num_mmdit_layers=num_mmdit_layers,
+                                       num_dit_layers=num_dit_layers,
+                                       attention_implementation=attention_implementation,
                                        input_features=autoencoder_channels * (patch_size**2),
                                        input_max_sequence_length=input_max_sequence_length,
                                        input_dimension=2,
                                        conditioning_features=conditioning_features,
                                        conditioning_max_sequence_length=conditioning_max_sequence_length,
                                        conditioning_dimension=1,
-                                       expansion_factor=4)
+                                       expansion_factor=4,
+                                       num_register_tokens=num_register_tokens,
+                                       mmdit_block_group_size=mmdit_block_group_size,
+                                       dit_block_group_size=dit_block_group_size)
     # Make the composer model
     model = ComposerTextToImageMMDiT(model=transformer,
                                      autoencoder=vae,
@@ -1000,8 +1016,7 @@ def text_to_image_transformer(
                                      timestep_std=timestep_std,
                                      timestep_shift=timestep_shift,
                                      image_key=image_key,
-                                     caption_key=caption_key,
-                                     caption_mask_key=caption_mask_key)
+                                     caption_key=caption_key)
 
     if torch.cuda.is_available():
         model = DeviceGPU().module_to_device(model)
@@ -1015,11 +1030,15 @@ def precomputed_text_latents_to_image_transformer(
     include_text_encoders: bool = False,
     text_encoder_dtype: str = 'bfloat16',
     cache_dir: str = '/tmp/hf_files',
-    num_layers: int = 28,
+    num_mmdit_layers: int = 28,
+    num_dit_layers: int = 0,
+    mmdit_block_group_size: int = 1,
+    dit_block_group_size: int = 1,
     max_image_side: int = 1280,
     conditioning_features: int = 768,
     conditioning_max_sequence_length: int = 512 + 77,
     num_register_tokens: int = 0,
+    attention_implementation: Optional[str] = None,
     patch_size: int = 2,
     latent_mean: Union[float, Tuple, str] = 0.0,
     latent_std: Union[float, Tuple, str] = 7.67754318618,
@@ -1028,9 +1047,7 @@ def precomputed_text_latents_to_image_transformer(
     timestep_shift: float = 1.0,
     image_key: str = 'image',
     t5_latent_key: str = 'T5_LATENTS',
-    t5_mask_key: str = 'T5_ATTENTION_MASK',
     clip_latent_key: str = 'CLIP_LATENTS',
-    clip_mask_key: str = 'CLIP_ATTENTION_MASK',
     clip_pooled_key: str = 'CLIP_POOLED',
     pretrained: bool = False,
 ):
@@ -1046,12 +1063,18 @@ def precomputed_text_latents_to_image_transformer(
             Default: `bfloat16`.
         cache_dir (str): Directory to cache the model in if using `include_text_encoders`. Default: `'/tmp/hf_files'`.
         autoencoder_local_path (optional, str): Path to autoencoder weights. Default: `/tmp/autoencoder_weights.pt`.
-        num_layers (int): Number of layers in the transformer. Number of heads and layer width are determined by
+        num_mmdit_layers (int): Number of mmdit_layers in the transformer. Number of heads and layer width are determined by
             this according to `num_features = 64 * num_layers`, and `num_heads = num_layers`. Default: `28`.
+        num_dit_layers (int): Number of mmdit_layers in the transformer. Number of heads and layer width are determined by
+            this according to `num_features = 64 * num_layers`, and `num_heads = num_layers`. Default: `0`.
+        mmdit_block_group_size (int): Size of MMDiT block groups. Must be a divisor of num_mmdit_layers. Default: `1`.
+        dit_block_group_size (int): Size of DiT block groups. Must be a divisor of num_mmdit_layers. Default: `1`.
         max_image_side (int): Maximum side length of the image. Default: `1280`.
         conditioning_features (int): Number of features in the conditioning transformer. Default: `768`.
         conditioning_max_sequence_length (int): Maximum sequence length for the conditioning transformer. Default: `77`.
         num_register_tokens (int): Number of additional register tokens to use. Default: `0`.
+        attention_implementation (optional, str): Attention implementation. One of ('flash', 'mem_efficient', 'math').
+            If not specified, will let SDPA decide. Default: 'None'.
         patch_size (int): Patch size for the transformer. Default: `2`.
         latent_mean (float, Tuple, str): The mean of the autoencoder latents. Either a float for a single value,
             a tuple of means, or or `'latent_statistics'` to try to use the value from the autoencoder
@@ -1107,9 +1130,12 @@ def precomputed_text_latents_to_image_transformer(
     # Figure out the maximum input sequence length
     input_max_sequence_length = math.ceil(max_image_side / (downsample_factor * patch_size))
     # Make the transformer model
+    num_layers = num_mmdit_layers + num_dit_layers
     transformer = DiffusionTransformer(num_features=64 * num_layers,
                                        num_heads=num_layers,
-                                       num_layers=num_layers,
+                                       num_mmdit_layers=num_mmdit_layers,
+                                       num_dit_layers=num_dit_layers,
+                                       attention_implementation=attention_implementation,
                                        input_features=autoencoder_channels * (patch_size**2),
                                        input_max_sequence_length=input_max_sequence_length,
                                        input_dimension=2,
@@ -1117,7 +1143,9 @@ def precomputed_text_latents_to_image_transformer(
                                        conditioning_max_sequence_length=conditioning_max_sequence_length,
                                        conditioning_dimension=1,
                                        expansion_factor=4,
-                                       num_register_tokens=num_register_tokens)
+                                       num_register_tokens=num_register_tokens,
+                                       mmdit_block_group_size=mmdit_block_group_size,
+                                       dit_block_group_size=dit_block_group_size)
 
     # Optionally load the tokenizers and text encoders
     t5_tokenizer, t5_encoder, clip_tokenizer, clip_encoder = None, None, None, None
@@ -1156,9 +1184,7 @@ def precomputed_text_latents_to_image_transformer(
                                                        timestep_shift=timestep_shift,
                                                        image_key=image_key,
                                                        t5_latent_key=t5_latent_key,
-                                                       t5_mask_key=t5_mask_key,
                                                        clip_latent_key=clip_latent_key,
-                                                       clip_mask_key=clip_mask_key,
                                                        clip_pooled_key=clip_pooled_key)
 
     if torch.cuda.is_available():
