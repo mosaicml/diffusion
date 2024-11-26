@@ -47,6 +47,42 @@ def _parse_latent_statistics(latent_stat: Union[float, Tuple, str]) -> Union[flo
     return latent_stat
 
 
+def make_autoencoder(model_name: Optional[str] = None,
+                     autoencoder_path: Optional[str] = None,
+                     autoencoder_local_path: str = '/tmp/autoencoder_weights.pt',
+                     precision: torch.dtype = torch.float16) -> Tuple[torch.nn.Module, int, int]:
+    """Create an autoencoder for latent diffusion.
+
+    Args:
+        model_name: (optional, str): Name of huggingface model to load. Default: `None`.
+        autoencoder_path (optional, str): Path to autoencoder weights if using custom autoencoder. If not specified,
+            will use the vae from `model_name`. Default `None`.
+        autoencoder_local_path (optional, str): Path to autoencoder weights. Default: `/tmp/autoencoder_weights.pt`.
+        precision: (torch.dtype): Precision to load the autoencoder in. Default: `torch.float16`
+
+    Returns:
+        autoencoder (torch.nn.Module): The loaded autoencoder module.
+        autoencoder_channels (int): The number of channels in the autoencoder
+        downsample_factor (int): The autoencoder downsampling factor
+    """
+    # Make the autoencoder
+    if autoencoder_path is None:
+        downsample_factor = 8
+        autoencoder_channels = 4
+        # Use the pretrained vae
+        try:
+            autoencoder = AutoencoderKL.from_pretrained(model_name, subfolder='vae', torch_dtype=precision)
+        except:  # for handling SDXL vae fp16 fixed checkpoint
+            autoencoder = AutoencoderKL.from_pretrained(model_name, torch_dtype=precision)
+    else:
+        # Use a custom autoencoder
+        autoencoder, _ = load_autoencoder(autoencoder_path, autoencoder_local_path, torch_dtype=precision)
+        downsample_factor = 2**(len(autoencoder.config['channel_multipliers']) - 1)
+        autoencoder_channels = autoencoder.config['latent_channels']
+    assert isinstance(autoencoder, torch.nn.Module)
+    return autoencoder, autoencoder_channels, downsample_factor
+
+
 def stable_diffusion_2(
     model_name: str = 'stabilityai/stable-diffusion-2-base',
     pretrained: bool = True,
@@ -1030,18 +1066,11 @@ def precomputed_text_latents_to_image_transformer(
     include_text_encoders: bool = False,
     text_encoder_dtype: str = 'bfloat16',
     cache_dir: str = '/tmp/hf_files',
-    num_mmdit_layers: int = 28,
-    num_dit_layers: int = 0,
-    mmdit_block_group_size: int = 1,
-    dit_block_group_size: int = 1,
+    transformer_config: Optional[dict] = None,
     max_image_side: int = 1280,
-    conditioning_features: int = 768,
-    conditioning_max_sequence_length: int = 512 + 77,
-    num_register_tokens: int = 0,
-    attention_implementation: Optional[str] = None,
     patch_size: int = 2,
-    latent_mean: Union[float, Tuple, str] = 0.0,
-    latent_std: Union[float, Tuple, str] = 7.67754318618,
+    latent_mean: Union[float, Tuple] = 0.0,
+    latent_std: Union[float, Tuple] = 7.67754318618,
     timestep_mean: float = 0.0,
     timestep_std: float = 1.0,
     timestep_shift: float = 1.0,
@@ -1063,12 +1092,8 @@ def precomputed_text_latents_to_image_transformer(
             Default: `bfloat16`.
         cache_dir (str): Directory to cache the model in if using `include_text_encoders`. Default: `'/tmp/hf_files'`.
         autoencoder_local_path (optional, str): Path to autoencoder weights. Default: `/tmp/autoencoder_weights.pt`.
-        num_mmdit_layers (int): Number of mmdit_layers in the transformer. Number of heads and layer width are determined by
-            this according to `num_features = 64 * num_layers`, and `num_heads = num_layers`. Default: `28`.
-        num_dit_layers (int): Number of mmdit_layers in the transformer. Number of heads and layer width are determined by
-            this according to `num_features = 64 * num_layers`, and `num_heads = num_layers`. Default: `0`.
-        mmdit_block_group_size (int): Size of MMDiT block groups. Must be a divisor of num_mmdit_layers. Default: `1`.
-        dit_block_group_size (int): Size of DiT block groups. Must be a divisor of num_mmdit_layers. Default: `1`.
+        transformer_config (optional, dict): Config for the transformer. If not specified, will default to a similar
+            config to SD3-medium. Default: `None`.
         max_image_side (int): Maximum side length of the image. Default: `1280`.
         conditioning_features (int): Number of features in the conditioning transformer. Default: `768`.
         conditioning_max_sequence_length (int): Maximum sequence length for the conditioning transformer. Default: `77`.
@@ -1076,12 +1101,10 @@ def precomputed_text_latents_to_image_transformer(
         attention_implementation (optional, str): Attention implementation. One of ('flash', 'mem_efficient', 'math').
             If not specified, will let SDPA decide. Default: 'None'.
         patch_size (int): Patch size for the transformer. Default: `2`.
-        latent_mean (float, Tuple, str): The mean of the autoencoder latents. Either a float for a single value,
-            a tuple of means, or or `'latent_statistics'` to try to use the value from the autoencoder
-            checkpoint. Defaults to `0.0`.
-        latent_std (float, Tuple, str): The std. dev. of the autoencoder latents. Either a float for a single value,
-            a tuple of std_devs, or or `'latent_statistics'` to try to use the value from the autoencoder
-            checkpoint. Defaults to `1/0.13025`.
+        latent_mean (float, Tuple): The mean of the autoencoder latents. Either a float for a single value,
+            or a tuple of means. Defaults to `0.0`.
+        latent_std (float, Tuple): The std. dev. of the autoencoder latents. Either a float for a single value,
+            or a tuple of std_devs. Defaults to `1/0.13025`.
         timestep_mean (float): The mean of the timesteps. Default: `0.0`.
         timestep_std (float): The std. dev. of the timesteps. Default: `1.0`.
         timestep_shift (float): The shift of the timesteps. Default: `1.0`.
@@ -1093,59 +1116,44 @@ def precomputed_text_latents_to_image_transformer(
         clip_pooled_key (str): The key to use for the CLIP pooled in the precomputed latents. Default: `'CLIP_POOLED'`.
         pretrained (bool): Whether to load pretrained weights. Not used. Defaults to False.
     """
-    latent_mean, latent_std = _parse_latent_statistics(latent_mean), _parse_latent_statistics(latent_std)
-
     precision = torch.float16
     # Make the autoencoder
-    if autoencoder_path is None:
-        if latent_mean == 'latent_statistics' or latent_std == 'latent_statistics':
-            raise ValueError('Cannot use tracked latent_statistics when using the pretrained vae.')
-        downsample_factor = 8
-        autoencoder_channels = 4
-        # Use the pretrained vae
-        try:
-            vae = AutoencoderKL.from_pretrained(vae_model_name, subfolder='vae', torch_dtype=precision)
-        except:  # for handling SDXL vae fp16 fixed checkpoint
-            vae = AutoencoderKL.from_pretrained(vae_model_name, torch_dtype=precision)
-    else:
-        # Use a custom autoencoder
-        vae, latent_statistics = load_autoencoder(autoencoder_path, autoencoder_local_path, torch_dtype=precision)
-        if latent_statistics is None and (latent_mean == 'latent_statistics' or latent_std == 'latent_statistics'):
-            raise ValueError(
-                'Must specify latent scale when using a custom autoencoder without tracking latent statistics.')
-        if isinstance(latent_mean, str) and latent_mean == 'latent_statistics':
-            assert isinstance(latent_statistics, dict)
-            latent_mean = tuple(latent_statistics['latent_channel_means'])
-        if isinstance(latent_std, str) and latent_std == 'latent_statistics':
-            assert isinstance(latent_statistics, dict)
-            latent_std = tuple(latent_statistics['latent_channel_stds'])
-        downsample_factor = 2**(len(vae.config['channel_multipliers']) - 1)
-        autoencoder_channels = vae.config['latent_channels']
-    assert isinstance(vae, torch.nn.Module)
+    autoencoder, autoencoder_channels, downsample_factor = make_autoencoder(
+        model_name=vae_model_name,
+        autoencoder_path=autoencoder_path,
+        autoencoder_local_path=autoencoder_local_path,
+        precision=precision)
     if isinstance(latent_mean, float):
-        latent_mean = (latent_mean,) * autoencoder_channels
+        latent_mean = tuple([latent_mean] * autoencoder_channels)
     if isinstance(latent_std, float):
-        latent_std = (latent_std,) * autoencoder_channels
-    assert isinstance(latent_mean, tuple) and isinstance(latent_std, tuple)
+        latent_std = tuple([latent_std] * autoencoder_channels)
+
     # Figure out the maximum input sequence length
     input_max_sequence_length = math.ceil(max_image_side / (downsample_factor * patch_size))
+
     # Make the transformer model
-    num_layers = num_mmdit_layers + num_dit_layers
-    transformer = DiffusionTransformer(num_features=64 * num_layers,
-                                       num_heads=num_layers,
-                                       num_mmdit_layers=num_mmdit_layers,
-                                       num_dit_layers=num_dit_layers,
-                                       attention_implementation=attention_implementation,
-                                       input_features=autoencoder_channels * (patch_size**2),
-                                       input_max_sequence_length=input_max_sequence_length,
-                                       input_dimension=2,
-                                       conditioning_features=64 * num_layers,
-                                       conditioning_max_sequence_length=conditioning_max_sequence_length,
-                                       conditioning_dimension=1,
-                                       expansion_factor=4,
-                                       num_register_tokens=num_register_tokens,
-                                       mmdit_block_group_size=mmdit_block_group_size,
-                                       dit_block_group_size=dit_block_group_size)
+    transformer_config_dict = {
+        'num_features': 64 * 24,
+        'num_heads': 24,
+        'num_mmdit_layers': 24,
+        'num_dit_layers': 0,
+        'attention_implementation': None,
+        'input_features': autoencoder_channels * (patch_size**2),
+        'input_max_sequence_length': input_max_sequence_length,
+        'input_dimension': 2,
+        'conditioning_features': 64 * 24,
+        'conditioning_max_sequence_length': 77 + 512,
+        'conditioning_dimension': 1,
+        'expansion_factor': 4,
+        'num_register_tokens': 0,
+        'mmdit_block_group_size': 1,
+        'dit_block_group_size': 1
+    }
+    if transformer_config is not None:
+        transformer_config_dict.update(transformer_config)
+    for k, v in transformer_config_dict.items():
+        print(k, v)
+    transformer = DiffusionTransformer(**transformer_config_dict)
 
     # Optionally load the tokenizers and text encoders
     t5_tokenizer, t5_encoder, clip_tokenizer, clip_encoder = None, None, None, None
@@ -1169,7 +1177,7 @@ def precomputed_text_latents_to_image_transformer(
 
     # Make the composer model
     model = ComposerPrecomputedTextLatentsToImageMMDiT(model=transformer,
-                                                       autoencoder=vae,
+                                                       autoencoder=autoencoder,
                                                        t5_tokenizer=t5_tokenizer,
                                                        t5_encoder=t5_encoder,
                                                        clip_tokenizer=clip_tokenizer,

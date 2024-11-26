@@ -543,9 +543,9 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
         self.pooled_embedding_features = pooled_embedding_features
 
         # Embedding MLPs and norms for the pooled text embeddings
-        self.t5_proj = torch.nn.Linear(4096, model.num_features)
+        self.t5_proj_linear = torch.nn.Linear(4096, model.num_features)
         self.t5_ln = torch.nn.LayerNorm(model.num_features)
-        self.clip_proj = torch.nn.Linear(768, model.num_features)
+        self.clip_proj_linear = torch.nn.Linear(768, model.num_features)
         self.clip_ln = torch.nn.LayerNorm(model.num_features)
         self.pooled_embedding_mlp = VectorEmbedding(pooled_embedding_features, model.num_features)
         # freeze text_encoder during diffusion training and use half precision
@@ -665,8 +665,8 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
             t5_embed = t5_embed[:, :self.max_seq_len]
         if clip_embed.shape[1] > self.max_seq_len:
             clip_embed = clip_embed[:, :self.max_seq_len]
-        t5_embed = self.t5_proj(t5_embed)
-        clip_embed = self.clip_proj(clip_embed)
+        t5_embed = self.t5_proj_linear(t5_embed)
+        clip_embed = self.clip_proj_linear(clip_embed)
         # Apply layernorms
         t5_embed = self.t5_ln(t5_embed)
         clip_embed = self.clip_ln(clip_embed)
