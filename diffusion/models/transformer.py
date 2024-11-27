@@ -46,6 +46,33 @@ def get_multidimensional_position_embeddings(position_embeddings: torch.Tensor, 
     return embeddings
 
 
+class MuInputLinear(nn.Module):
+    """Linear input layer with the mu parameterization.
+
+    Args:
+        in_features (int): Number of input features.
+        out_features (int): Number of output features.
+        bias (bool): Whether or not to use a bias. Default: `True`.
+    """
+
+    def __init__(self, in_features, out_features, bias=True):
+        super(MuInputLinear, self).__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.mu_input_linear = nn.Linear(in_features, out_features, bias)
+        self.mu_init()
+
+    def mu_init(self):
+        """Initializes a linear layer according to mu-parameterizaion."""
+        scale = 1 / math.sqrt(self.in_features)
+        if self.mu_input_linear.bias is not None:
+            nn.init.zeros_(self.mu_input_linear.bias)
+        nn.init.normal_(self.mu_input_linear.weight, std=scale)
+
+    def forward(self, x):
+        return self.mu_input_linear(x)
+
+
 class MuLinear(nn.Module):
     """Linear layer with the mu parameterization.
 
@@ -57,19 +84,51 @@ class MuLinear(nn.Module):
 
     def __init__(self, in_features, out_features, bias=True):
         super(MuLinear, self).__init__()
+        self.in_features = in_features
+        self.out_features = out_features
         self.mu_linear = nn.Linear(in_features, out_features, bias)
         self.mu_init()
 
     def mu_init(self):
         """Initializes a linear layer according to mu-parameterizaion."""
-        n_out, n_in = self.mu_linear.weight.shape
-        scale = 1 / math.sqrt(n_in) * min(1, math.sqrt(n_out / n_in))
+        scale = 1 / math.sqrt(self.in_features)
         if self.mu_linear.bias is not None:
             nn.init.zeros_(self.mu_linear.bias)
         nn.init.normal_(self.mu_linear.weight, std=scale)
 
     def forward(self, x):
         return self.mu_linear(x)
+
+
+class MuOutputLinear(nn.Module):
+    """Linear outpus layer with the mu parameterization.
+
+    Args:
+        in_features (int): Number of input features.
+        out_features (int): Number of output features.
+        bias (bool): Whether or not to use a bias. Default: `True`.
+    """
+
+    def __init__(self, in_features, out_features, bias=True):
+        super(MuOutputLinear, self).__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.mu_output_linear = nn.Linear(in_features, out_features, bias)
+        self.mu_init()
+
+    def mu_init(self):
+        """Initializes a linear layer according to mu-parameterizaion."""
+        scale = 1 / self.in_features
+        if self.mu_output_linear.bias is not None:
+            nn.init.zeros_(self.mu_output_linear.bias)
+        nn.init.normal_(self.mu_output_linear.weight, std=scale)
+
+    def rescale_init(self, scale):
+        rescale = math.sqrt(1 / (self.in_features * scale))
+        nn.init.normal_(self.mu_output_linear.weight, std=rescale)
+
+    def forward(self, x):
+        return self.mu_output_linear(x)
 
 
 class AdaptiveLayerNorm(nn.Module):
@@ -151,9 +210,7 @@ class ScalarEmbedding(nn.Module):
         self.num_features = num_features
         self.sinusoidal_embedding_dim = sinusoidal_embedding_dim
         self.max_period = max_period
-        self.linear_1 = torch.nn.Linear(self.sinusoidal_embedding_dim, self.num_features)
-        nn.init.zeros_(self.linear_1.bias)
-        nn.init.normal_(self.linear_1.weight, std=1 / math.sqrt(self.sinusoidal_embedding_dim))
+        self.linear_1 = MuInputLinear(self.sinusoidal_embedding_dim, self.num_features)
         self.linear_2 = MuLinear(self.num_features, self.num_features)
         self.mlp = nn.Sequential(self.linear_1, nn.SiLU(), self.linear_2)
         # Make the freqs
@@ -198,9 +255,7 @@ class VectorEmbedding(nn.Module):
         super().__init__()
         self.input_features = input_features
         self.num_features = num_features
-        self.linear_1 = torch.nn.Linear(self.input_features, self.num_features)
-        nn.init.zeros_(self.linear_1.bias)
-        nn.init.normal_(self.linear_1.weight, std=1 / math.sqrt(self.input_features))
+        self.linear_1 = MuInputLinear(self.input_features, self.num_features)
         self.linear_2 = MuLinear(self.num_features, self.num_features)
         self.mlp = nn.Sequential(self.linear_1, nn.SiLU(), self.linear_2)
 
@@ -641,7 +696,7 @@ class DiffusionTransformer(nn.Module):
                          attention_implementation=self.attention_implementation))
         # Output projection layer
         self.final_norm = AdaptiveLayerNorm(self.num_features)
-        self.final_linear = MuLinear(self.num_features, self.input_features)
+        self.final_linear = MuOutputLinear(self.num_features, self.input_features)
 
     def fsdp_wrap_fn(self, module: nn.Module) -> bool:
         if isinstance(module, (MMDiTGroup, DiTGroup)):

@@ -3,7 +3,6 @@
 
 """Composer model for text to image generation with a multimodal transformer."""
 
-import math
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -14,7 +13,7 @@ from torchmetrics import MeanSquaredError
 from tqdm.auto import tqdm
 from transformers import PreTrainedTokenizer
 
-from diffusion.models.transformer import DiffusionTransformer, VectorEmbedding
+from diffusion.models.transformer import DiffusionTransformer, MuInputLinear, VectorEmbedding
 
 
 def _duplicate_tensor(tensor, num_images_per_prompt):
@@ -548,13 +547,9 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
         self.width_scale = width_scale
 
         # Embedding MLPs and norms for the pooled text embeddings
-        self.t5_proj_linear = torch.nn.Linear(4096, model.num_features)
-        torch.nn.init.zeros_(self.t5_proj_linear.bias)
-        torch.nn.init.normal_(self.t5_proj_linear.weight, std=1 / math.sqrt(4096))
+        self.t5_proj_linear = MuInputLinear(4096, model.num_features)
         self.t5_ln = torch.nn.LayerNorm(model.num_features)
-        self.clip_proj_linear = torch.nn.Linear(768, model.num_features)
-        torch.nn.init.zeros_(self.clip_proj_linear.bias)
-        torch.nn.init.normal_(self.clip_proj_linear.weight, std=1 / math.sqrt(768))
+        self.clip_proj_linear = MuInputLinear(768, model.num_features)
         self.clip_ln = torch.nn.LayerNorm(model.num_features)
         self.pooled_embedding_mlp = VectorEmbedding(pooled_embedding_features, model.num_features)
         # freeze text_encoder during diffusion training and use half precision
