@@ -46,6 +46,32 @@ def get_multidimensional_position_embeddings(position_embeddings: torch.Tensor, 
     return embeddings
 
 
+class MuLinear(nn.Module):
+    """Linear layer with the mu parameterization.
+
+    Args:
+        in_features (int): Number of input features.
+        out_features (int): Number of output features.
+        bias (bool): Whether or not to use a bias. Default: `True`.
+    """
+
+    def __init__(self, in_features, out_features, bias=True):
+        super(MuLinear, self).__init__()
+        self.mu_linear = nn.Linear(in_features, out_features, bias)
+        self.mu_init()
+
+    def mu_init(self):
+        """Initializes a linear layer according to mu-parameterizaion."""
+        n_out, n_in = self.mu_linear.weight.shape
+        scale = 1 / math.sqrt(n_in) * min(1, math.sqrt(n_out / n_in))
+        if self.mu_linear.bias is not None:
+            nn.init.zeros_(self.mu_linear.bias)
+        nn.init.normal_(self.mu_linear.weight, std=scale)
+
+    def forward(self, x):
+        return self.mu_linear(x)
+
+
 class AdaptiveLayerNorm(nn.Module):
     """Adaptive LayerNorm.
 
@@ -125,8 +151,10 @@ class ScalarEmbedding(nn.Module):
         self.num_features = num_features
         self.sinusoidal_embedding_dim = sinusoidal_embedding_dim
         self.max_period = max_period
-        self.linear_1 = nn.Linear(self.sinusoidal_embedding_dim, self.num_features)
-        self.linear_2 = nn.Linear(self.num_features, self.num_features)
+        self.linear_1 = torch.nn.Linear(self.sinusoidal_embedding_dim, self.num_features)
+        nn.init.zeros_(self.linear_1.bias)
+        nn.init.normal_(self.linear_1.weight, std=1 / math.sqrt(self.sinusoidal_embedding_dim))
+        self.linear_2 = MuLinear(self.num_features, self.num_features)
         self.mlp = nn.Sequential(self.linear_1, nn.SiLU(), self.linear_2)
         # Make the freqs
         half_dim = self.sinusoidal_embedding_dim // 2
@@ -170,8 +198,10 @@ class VectorEmbedding(nn.Module):
         super().__init__()
         self.input_features = input_features
         self.num_features = num_features
-        self.linear_1 = nn.Linear(self.input_features, self.num_features)
-        self.linear_2 = nn.Linear(self.num_features, self.num_features)
+        self.linear_1 = torch.nn.Linear(self.input_features, self.num_features)
+        nn.init.zeros_(self.linear_1.bias)
+        nn.init.normal_(self.linear_1.weight, std=1 / math.sqrt(self.input_features))
+        self.linear_2 = MuLinear(self.num_features, self.num_features)
         self.mlp = nn.Sequential(self.linear_1, nn.SiLU(), self.linear_2)
 
     @torch.compile()
@@ -194,17 +224,12 @@ class PreAttentionBlock(nn.Module):
         # Adaptive layernorm
         self.adaptive_layernorm = AdaptiveLayerNorm(self.num_features)
         # Linear layer to get q, k, and v
-        self.q_proj = nn.Linear(self.num_features, self.num_features)
-        self.k_proj = nn.Linear(self.num_features, self.num_features)
-        self.v_proj = nn.Linear(self.num_features, self.num_features)
+        self.q_proj = MuLinear(self.num_features, self.num_features)
+        self.k_proj = MuLinear(self.num_features, self.num_features)
+        self.v_proj = MuLinear(self.num_features, self.num_features)
         # QK layernorms. Original MMDiT used RMSNorm here.
         self.q_norm = nn.LayerNorm(self.num_features, elementwise_affine=True, eps=1e-6)
         self.k_norm = nn.LayerNorm(self.num_features, elementwise_affine=True, eps=1e-6)
-        for l in [self.q_proj, self.k_proj, self.v_proj]:
-            # Initialize all biases to zero
-            nn.init.zeros_(l.bias)
-            # Init the standard deviation of the weights to 0.02 as is tradition
-            nn.init.normal_(l.weight, std=0.02)
 
     @torch.compile()
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -229,6 +254,7 @@ class SelfAttention(nn.Module):
         self.num_features = num_features
         self.num_heads = num_heads
         self.head_dim = num_features // num_heads
+        self.attn_scale = 1 / self.head_dim
         assert self.num_features % self.num_heads == 0, 'num_features must be divisible by num_heads'
         if attention_implementation is not None:
             assert attention_implementation in ('flash', 'mem_efficient', 'math'), (
@@ -292,16 +318,13 @@ class PostAttentionBlock(nn.Module):
         # Input modulation
         self.modulate_v = ModulationLayer(self.num_features)
         # Linear layer to process v
-        self.linear_v = nn.Linear(self.num_features, self.num_features)
+        self.linear_v = MuLinear(self.num_features, self.num_features)
         # Layernorm for the output
         self.output_norm = AdaptiveLayerNorm(self.num_features)
         # Transformer style MLP layers
-        self.linear_1 = nn.Linear(self.num_features, self.expansion_factor * self.num_features)
+        self.linear_1 = MuLinear(self.num_features, self.expansion_factor * self.num_features)
         self.nonlinearity = nn.GELU(approximate='tanh')
-        self.linear_2 = nn.Linear(self.expansion_factor * self.num_features, self.num_features)
-        # Initialize all biases to zero
-        nn.init.zeros_(self.linear_1.bias)
-        nn.init.zeros_(self.linear_2.bias)
+        self.linear_2 = MuLinear(self.expansion_factor * self.num_features, self.num_features)
         # Output MLP
         self.output_mlp = nn.Sequential(self.linear_1, self.nonlinearity, self.linear_2)
         # Output modulation
@@ -569,13 +592,13 @@ class DiffusionTransformer(nn.Module):
         # Embedding block for the timestep
         self.timestep_embedding = ScalarEmbedding(self.num_features)
         # Projection layer for the input sequence
-        self.input_embedding = nn.Linear(self.input_features, self.num_features)
+        self.input_embedding = MuLinear(self.input_features, self.num_features)
         # Embedding layer for the input sequence
         input_position_embedding = torch.randn(self.input_dimension, self.input_max_sequence_length, self.num_features)
         input_position_embedding /= math.sqrt(self.num_features)
         self.input_position_embedding = torch.nn.Parameter(input_position_embedding, requires_grad=True)
         # Projection layer for the conditioning sequence
-        self.conditioning_embedding = nn.Linear(self.conditioning_features, self.num_features)
+        self.conditioning_embedding = MuLinear(self.conditioning_features, self.num_features)
         # Embedding layer for the conditioning sequence
         conditioning_position_embedding = torch.randn(self.conditioning_dimension,
                                                       self.conditioning_max_sequence_length, self.num_features)
@@ -618,10 +641,7 @@ class DiffusionTransformer(nn.Module):
                          attention_implementation=self.attention_implementation))
         # Output projection layer
         self.final_norm = AdaptiveLayerNorm(self.num_features)
-        self.final_linear = nn.Linear(self.num_features, self.input_features)
-        # Init the output layer to zero
-        nn.init.zeros_(self.final_linear.weight)
-        nn.init.zeros_(self.final_linear.bias)
+        self.final_linear = MuLinear(self.num_features, self.input_features)
 
     def fsdp_wrap_fn(self, module: nn.Module) -> bool:
         if isinstance(module, (MMDiTGroup, DiTGroup)):

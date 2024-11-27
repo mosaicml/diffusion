@@ -3,6 +3,7 @@
 
 """Composer model for text to image generation with a multimodal transformer."""
 
+import math
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -491,6 +492,8 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
         clip_latent_key (str): The key in the batch dict that contains the CLIP latents. Default: `'CLIP_LATENTS'`.
         clip_pooled_key (str): The key in the batch dict that contains the CLIP pooled embeddings. Default: `'CLIP_POOLED'`.
         pooled_embedding_features (int): The number of features in the pooled text embeddings. Default: `768`.
+        width_scale (float): Scaling factor for scaling with width in mu-parameterization. Ex: when scaling from `width=32`
+            to `width=256`, one should set `width_scale=256/32`. Default: `1.0`
     """
 
     def __init__(
@@ -515,6 +518,7 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
         clip_latent_key: str = 'CLIP_LATENTS',
         clip_pooled_key: str = 'CLIP_POOLED',
         pooled_embedding_features: int = 768,
+        width_scale: float = 1.0,
     ):
         super().__init__()
         self.model = model
@@ -541,11 +545,16 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
         self.clip_latent_key = clip_latent_key
         self.clip_pooled_key = clip_pooled_key
         self.pooled_embedding_features = pooled_embedding_features
+        self.width_scale = width_scale
 
         # Embedding MLPs and norms for the pooled text embeddings
         self.t5_proj_linear = torch.nn.Linear(4096, model.num_features)
+        torch.nn.init.zeros_(self.t5_proj_linear.bias)
+        torch.nn.init.normal_(self.t5_proj_linear.weight, std=1 / math.sqrt(4096))
         self.t5_ln = torch.nn.LayerNorm(model.num_features)
         self.clip_proj_linear = torch.nn.Linear(768, model.num_features)
+        torch.nn.init.zeros_(self.clip_proj_linear.bias)
+        torch.nn.init.normal_(self.clip_proj_linear.weight, std=1 / math.sqrt(768))
         self.clip_ln = torch.nn.LayerNorm(model.num_features)
         self.pooled_embedding_mlp = VectorEmbedding(pooled_embedding_features, model.num_features)
         # freeze text_encoder during diffusion training and use half precision

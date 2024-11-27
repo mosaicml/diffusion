@@ -1067,6 +1067,7 @@ def precomputed_text_latents_to_image_transformer(
     text_encoder_dtype: str = 'bfloat16',
     cache_dir: str = '/tmp/hf_files',
     transformer_config: Optional[dict] = None,
+    width_scale: float = 1.0,
     max_image_side: int = 1280,
     patch_size: int = 2,
     latent_mean: Union[float, Tuple] = 0.0,
@@ -1094,6 +1095,8 @@ def precomputed_text_latents_to_image_transformer(
         autoencoder_local_path (optional, str): Path to autoencoder weights. Default: `/tmp/autoencoder_weights.pt`.
         transformer_config (optional, dict): Config for the transformer. If not specified, will default to a similar
             config to SD3-medium. Default: `None`.
+        width_scale (float): Scaling factor for scaling with width in mu-parameterization. Ex: when scaling from `width=32`
+            to `width=256`, one should set `width_scale=256/32`. Default: `1.0`
         max_image_side (int): Maximum side length of the image. Default: `1280`.
         conditioning_features (int): Number of features in the conditioning transformer. Default: `768`.
         conditioning_max_sequence_length (int): Maximum sequence length for the conditioning transformer. Default: `77`.
@@ -1151,8 +1154,6 @@ def precomputed_text_latents_to_image_transformer(
     }
     if transformer_config is not None:
         transformer_config_dict.update(transformer_config)
-    for k, v in transformer_config_dict.items():
-        print(k, v)
     transformer = DiffusionTransformer(**transformer_config_dict)
 
     # Optionally load the tokenizers and text encoders
@@ -1193,7 +1194,8 @@ def precomputed_text_latents_to_image_transformer(
                                                        image_key=image_key,
                                                        t5_latent_key=t5_latent_key,
                                                        clip_latent_key=clip_latent_key,
-                                                       clip_pooled_key=clip_pooled_key)
+                                                       clip_pooled_key=clip_pooled_key,
+                                                       width_scale=width_scale)
 
     if torch.cuda.is_available():
         model = DeviceGPU().module_to_device(model)
