@@ -22,7 +22,7 @@ class LogActivationStatistics(Callback):
     def activation_hook(self, name):
 
         def hook_fn(module, input, output):
-            self.activations[name] = output.cpu()
+            self.activations[name] = output
 
         return hook_fn
 
