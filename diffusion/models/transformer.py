@@ -346,10 +346,10 @@ class SelfAttention(nn.Module):
 
         # Attention with selectable implementation
         if self.attention_implementation is None:
-            attention_out = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+            attention_out = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, scale=self.attn_scale)
         else:
             with sdpa_kernel(self.sdp_backends):
-                attention_out = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+                attention_out = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, scale=self.attn_scale)
 
         # Reshape back to (B, T, C)
         attention_out = attention_out.transpose(1, 2).reshape(B, T, C)
