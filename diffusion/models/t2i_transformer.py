@@ -219,7 +219,7 @@ class ComposerTextToImageMMDiT(ComposerModel):
     def encode_image(self, image: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """Encode an image tensor with the autoencoder and patchify the latents."""
         with torch.amp.autocast('cuda', enabled=False):
-            latents = self.autoencoder.encode(image.half())['latent_dist'].sample().data
+            latents = self.autoencoder.encode(image.half())['latent_dist'].mean.data
         # Scale and patchify the latents
         latents = (latents - self.latent_mean) / self.latent_std
         latent_patches, latent_coords = patchify(latents, self.patch_size)
@@ -615,7 +615,7 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
     def encode_image(self, image: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """Encode an image tensor with the autoencoder and patchify the latents."""
         with torch.amp.autocast('cuda', enabled=False):
-            latents = self.autoencoder.encode(image.half())['latent_dist'].sample().data
+            latents = self.autoencoder.encode(image.half())['latent_dist'].mean.data
         # Scale and patchify the latents
         latents = (latents - self.latent_mean) / self.latent_std
         latent_patches, latent_coords = patchify(latents, self.patch_size)
