@@ -131,6 +131,28 @@ class MuOutputLinear(nn.Module):
         return self.mu_output_linear(x)
 
 
+class FP32LayerNorm(nn.Module):
+    """LayerNorm in FP32.
+
+    Args:
+        normalized_shape (int): input shape from an expected input of size (..., normalized_shape)
+        eps (float): a value added to the denominator for numerical stability. Default: `1e-5`
+        elementwise_affine (bool): a boolean value that when set to True, this module has learnable
+                            per-element affine parameters initialized to ones (for weights)
+                            and zeros (for biases). Default: `True`.
+    """
+
+    def __init__(self, normalized_shape: int, eps: float = 1e-5, elementwise_affine: bool = True):
+        super().__init__()
+        self.layer_norm = nn.LayerNorm(normalized_shape, eps, elementwise_affine)
+
+    def forward(self, x):
+        original_dtype = x.dtype
+        x = x.to(dtype=torch.float32)
+        x = self.layer_norm(x)
+        return x.to(dtype=original_dtype)
+
+
 class AdaptiveLayerNorm(nn.Module):
     """Adaptive LayerNorm.
 
@@ -154,7 +176,7 @@ class AdaptiveLayerNorm(nn.Module):
         self.adaLN_mlp_shift = nn.Sequential(nn.SiLU(), self.adaLN_mlp_linear_shift)
         self.adaLN_mlp_scale = nn.Sequential(nn.SiLU(), self.adaLN_mlp_linear_scale)
         # LayerNorm
-        self.layernorm = nn.LayerNorm(self.num_features, elementwise_affine=False, eps=1e-6)
+        self.layernorm = FP32LayerNorm(self.num_features, elementwise_affine=False, eps=1e-6)
 
     @torch.compile()
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
@@ -199,13 +221,13 @@ class ScalarEmbedding(nn.Module):
     Args:
         num_features (int): The size of the output vector.
         sinusoidal_embedding_dim (int): The size of the intermediate sinusoidal embedding. Default: `256`.
-        max_period (int): The maximum period of the sinusoidal embedding. Default: `10000`.
+        max_period (float): The maximum period of the sinusoidal embedding. Default: `10000.0`.
 
     Returns:
         torch.Tensor: The embedded scalar
     """
 
-    def __init__(self, num_features: int, sinusoidal_embedding_dim: int = 256, max_period: int = 10000):
+    def __init__(self, num_features: int, sinusoidal_embedding_dim: int = 256, max_period: float = 10000.0):
         super().__init__()
         self.num_features = num_features
         self.sinusoidal_embedding_dim = sinusoidal_embedding_dim
@@ -283,8 +305,8 @@ class PreAttentionBlock(nn.Module):
         self.k_proj = MuLinear(self.num_features, self.num_features)
         self.v_proj = MuLinear(self.num_features, self.num_features)
         # QK layernorms. Original MMDiT used RMSNorm here.
-        self.q_norm = nn.LayerNorm(self.num_features, elementwise_affine=True, eps=1e-6)
-        self.k_norm = nn.LayerNorm(self.num_features, elementwise_affine=True, eps=1e-6)
+        self.q_norm = FP32LayerNorm(self.num_features, elementwise_affine=True, eps=1e-6)
+        self.k_norm = FP32LayerNorm(self.num_features, elementwise_affine=True, eps=1e-6)
 
     @torch.compile()
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -344,12 +366,13 @@ class SelfAttention(nn.Module):
         k = k.view(B, T, H, D).transpose(1, 2)  # (B, H, T, D)
         v = v.view(B, T, H, D).transpose(1, 2)  # (B, H, T, D)
 
-        # Attention with selectable implementation
-        if self.attention_implementation is None:
-            attention_out = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, scale=self.attn_scale)
-        else:
-            with sdpa_kernel(self.sdp_backends):
+        with torch.autocast(device_type='cuda', dtype=torch.float32, enabled=True):
+            # Attention with selectable implementation
+            if self.attention_implementation is None:
                 attention_out = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, scale=self.attn_scale)
+            else:
+                with sdpa_kernel(self.sdp_backends):
+                    attention_out = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, scale=self.attn_scale)
 
         # Reshape back to (B, T, C)
         attention_out = attention_out.transpose(1, 2).reshape(B, T, C)
@@ -645,7 +668,7 @@ class DiffusionTransformer(nn.Module):
         self.conditioning_max_sequence_length = conditioning_max_sequence_length
         self.num_register_tokens = num_register_tokens
         # Embedding block for the timestep
-        self.timestep_embedding = ScalarEmbedding(self.num_features)
+        self.timestep_embedding = ScalarEmbedding(self.num_features, max_period=1 / (2 * math.pi))
         # Projection layer for the input sequence
         self.input_embedding = MuLinear(self.input_features, self.num_features)
         # Embedding layer for the input sequence

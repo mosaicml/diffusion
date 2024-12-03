@@ -13,7 +13,7 @@ from torchmetrics import MeanSquaredError
 from tqdm.auto import tqdm
 from transformers import PreTrainedTokenizer
 
-from diffusion.models.transformer import DiffusionTransformer, MuInputLinear, VectorEmbedding
+from diffusion.models.transformer import DiffusionTransformer, FP32LayerNorm, MuInputLinear, VectorEmbedding
 
 
 def _duplicate_tensor(tensor, num_images_per_prompt):
@@ -547,10 +547,10 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
         self.width_scale = width_scale
 
         # Embedding MLPs and norms for the pooled text embeddings
+        self.t5_ln = FP32LayerNorm(4096)
         self.t5_proj_linear = MuInputLinear(4096, model.num_features)
-        self.t5_ln = torch.nn.LayerNorm(model.num_features)
+        self.clip_ln = FP32LayerNorm(768)
         self.clip_proj_linear = MuInputLinear(768, model.num_features)
-        self.clip_ln = torch.nn.LayerNorm(model.num_features)
         self.pooled_embedding_mlp = VectorEmbedding(pooled_embedding_features, model.num_features)
         # freeze text_encoder during diffusion training and use half precision
         self.autoencoder.requires_grad_(False)
@@ -669,11 +669,12 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
             t5_embed = t5_embed[:, :self.max_seq_len]
         if clip_embed.shape[1] > self.max_seq_len:
             clip_embed = clip_embed[:, :self.max_seq_len]
-        t5_embed = self.t5_proj_linear(t5_embed)
-        clip_embed = self.clip_proj_linear(clip_embed)
         # Apply layernorms
         t5_embed = self.t5_ln(t5_embed)
         clip_embed = self.clip_ln(clip_embed)
+        # Embed to shared dimensionality
+        t5_embed = self.t5_proj_linear(t5_embed)
+        clip_embed = self.clip_proj_linear(clip_embed)
         # Concatenate the text embeddings
         text_embeds = torch.cat([t5_embed, clip_embed], dim=1)
         return text_embeds
