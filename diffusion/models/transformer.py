@@ -167,10 +167,12 @@ class AdaptiveLayerNorm(nn.Module):
         self.num_features = num_features
         # MLP for computing modulations.
         # Initialized to zero so modulation acts as identity at initialization.
-        self.adaLN_mlp_linear_shift = MuLinear(self.num_features, self.num_features, bias=False)
-        self.adaLN_mlp_linear_scale = MuLinear(self.num_features, self.num_features, bias=False)
+        self.adaLN_mlp_linear_shift = MuLinear(self.num_features, self.num_features, bias=True)
+        self.adaLN_mlp_linear_scale = MuLinear(self.num_features, self.num_features, bias=True)
         nn.init.zeros_(self.adaLN_mlp_linear_shift.mu_linear.weight)
         nn.init.zeros_(self.adaLN_mlp_linear_scale.mu_linear.weight)
+        nn.init.zeros_(self.adaLN_mlp_linear_shift.mu_linear.bias)
+        nn.init.zeros_(self.adaLN_mlp_linear_scale.mu_linear.bias)
         self.adaLN_mlp_shift = nn.Sequential(nn.SiLU(), self.adaLN_mlp_linear_shift)
         self.adaLN_mlp_scale = nn.Sequential(nn.SiLU(), self.adaLN_mlp_linear_scale)
         # LayerNorm
@@ -406,9 +408,9 @@ class PostAttentionBlock(nn.Module):
         # Layernorm for the output
         self.output_norm = AdaptiveLayerNorm(self.num_features)
         # Transformer style MLP layers
-        self.linear_1 = MuLinear(self.num_features, self.expansion_factor * self.num_features, bias=False)
+        self.linear_1 = MuLinear(self.num_features, self.expansion_factor * self.num_features)
         self.nonlinearity = nn.GELU(approximate='tanh')
-        self.linear_2 = MuLinear(self.expansion_factor * self.num_features, self.num_features, bias=False)
+        self.linear_2 = MuLinear(self.expansion_factor * self.num_features, self.num_features)
         # Output MLP
         self.output_mlp = nn.Sequential(self.linear_1, self.nonlinearity, self.linear_2)
         # Output modulation
