@@ -167,12 +167,10 @@ class AdaptiveLayerNorm(nn.Module):
         self.num_features = num_features
         # MLP for computing modulations.
         # Initialized to zero so modulation acts as identity at initialization.
-        self.adaLN_mlp_linear_shift = nn.Linear(self.num_features, self.num_features, bias=True)
-        self.adaLN_mlp_linear_scale = nn.Linear(self.num_features, self.num_features, bias=True)
-        nn.init.zeros_(self.adaLN_mlp_linear_shift.weight)
-        nn.init.zeros_(self.adaLN_mlp_linear_scale.weight)
-        nn.init.zeros_(self.adaLN_mlp_linear_shift.bias)
-        nn.init.zeros_(self.adaLN_mlp_linear_scale.bias)
+        self.adaLN_mlp_linear_shift = MuLinear(self.num_features, self.num_features, bias=False)
+        self.adaLN_mlp_linear_scale = MuLinear(self.num_features, self.num_features, bias=False)
+        nn.init.zeros_(self.adaLN_mlp_linear_shift.mu_linear.weight)
+        nn.init.zeros_(self.adaLN_mlp_linear_scale.mu_linear.weight)
         self.adaLN_mlp_shift = nn.Sequential(nn.SiLU(), self.adaLN_mlp_linear_shift)
         self.adaLN_mlp_scale = nn.Sequential(nn.SiLU(), self.adaLN_mlp_linear_scale)
         # LayerNorm
@@ -201,9 +199,9 @@ class ModulationLayer(nn.Module):
         self.num_features = num_features
         # MLP for computing modulation.
         # Initialized to zero so modulation starts off at zero.
-        self.adaLN_mlp_linear = nn.Linear(self.num_features, self.num_features, bias=True)
-        nn.init.zeros_(self.adaLN_mlp_linear.weight)
-        nn.init.zeros_(self.adaLN_mlp_linear.bias)
+        self.adaLN_mlp_linear = MuLinear(self.num_features, self.num_features, bias=True)
+        nn.init.zeros_(self.adaLN_mlp_linear.mu_linear.weight)
+        nn.init.zeros_(self.adaLN_mlp_linear.mu_linear.bias)
         self.adaLN_mlp = nn.Sequential(nn.SiLU(), self.adaLN_mlp_linear)
 
     @torch.compile()
@@ -301,12 +299,12 @@ class PreAttentionBlock(nn.Module):
         # Adaptive layernorm
         self.adaptive_layernorm = AdaptiveLayerNorm(self.num_features)
         # Linear layer to get q, k, and v
-        self.q_proj = MuLinear(self.num_features, self.num_features)
-        self.k_proj = MuLinear(self.num_features, self.num_features)
-        self.v_proj = MuLinear(self.num_features, self.num_features)
+        self.q_proj = MuLinear(self.num_features, self.num_features, bias=False)
+        self.k_proj = MuLinear(self.num_features, self.num_features, bias=False)
+        self.v_proj = MuLinear(self.num_features, self.num_features, bias=False)
         # QK layernorms. Original MMDiT used RMSNorm here.
-        self.q_norm = FP32LayerNorm(self.num_features, elementwise_affine=True, eps=1e-6)
-        self.k_norm = FP32LayerNorm(self.num_features, elementwise_affine=True, eps=1e-6)
+        self.q_norm = FP32LayerNorm(self.num_features, elementwise_affine=False, eps=1e-6)
+        self.k_norm = FP32LayerNorm(self.num_features, elementwise_affine=False, eps=1e-6)
 
     @torch.compile()
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -404,13 +402,13 @@ class PostAttentionBlock(nn.Module):
         # Input modulation
         self.modulate_v = ModulationLayer(self.num_features)
         # Linear layer to process v
-        self.linear_v = MuLinear(self.num_features, self.num_features)
+        self.linear_v = MuLinear(self.num_features, self.num_features, bias=False)
         # Layernorm for the output
         self.output_norm = AdaptiveLayerNorm(self.num_features)
         # Transformer style MLP layers
-        self.linear_1 = MuLinear(self.num_features, self.expansion_factor * self.num_features)
+        self.linear_1 = MuLinear(self.num_features, self.expansion_factor * self.num_features, bias=False)
         self.nonlinearity = nn.GELU(approximate='tanh')
-        self.linear_2 = MuLinear(self.expansion_factor * self.num_features, self.num_features)
+        self.linear_2 = MuLinear(self.expansion_factor * self.num_features, self.num_features, bias=False)
         # Output MLP
         self.output_mlp = nn.Sequential(self.linear_1, self.nonlinearity, self.linear_2)
         # Output modulation
