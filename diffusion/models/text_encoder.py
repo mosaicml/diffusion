@@ -31,6 +31,8 @@ class MultiTextEncoder(torch.nn.Module):
         model_dim_keys: Optional[Union[str, List[str]]] = None,
         encode_latents_in_fp16: bool = True,
         pretrained_sdxl: bool = False,
+        cache_dir: str = '/tmp/hf_files',
+        local_files_only: bool = False
     ):
         super().__init__()
         self.pretrained_sdxl = pretrained_sdxl
@@ -50,7 +52,7 @@ class MultiTextEncoder(torch.nn.Module):
             name_split = model_name.split('/')
             base_name = '/'.join(name_split[:2])
             subfolder = '/'.join(name_split[2:])
-            text_encoder_config = PretrainedConfig.get_config_dict(base_name, subfolder=subfolder)[0]
+            text_encoder_config = PretrainedConfig.get_config_dict(base_name, subfolder=subfolder, cache_dir=cache_dir,  local_files_only=local_files_only)[0]
 
             # Add text_encoder output dim to total dim
             dim_found = False
@@ -70,14 +72,14 @@ class MultiTextEncoder(torch.nn.Module):
             architectures = text_encoder_config['architectures']
             if architectures == ['CLIPTextModel']:
                 self.text_encoders.append(
-                    CLIPTextModel.from_pretrained(base_name, subfolder=subfolder, torch_dtype=torch_dtype))
+                    CLIPTextModel.from_pretrained(base_name, subfolder=subfolder, torch_dtype=torch_dtype, cache_dir=cache_dir,  local_files_only=local_files_only))
             elif architectures == ['CLIPTextModelWithProjection']:
                 self.text_encoders.append(
                     CLIPTextModelWithProjection.from_pretrained(base_name, subfolder=subfolder,
-                                                                torch_dtype=torch_dtype))
+                                                                torch_dtype=torch_dtype, cache_dir=cache_dir,  local_files_only=local_files_only))
             else:
                 self.text_encoders.append(
-                    AutoModel.from_pretrained(base_name, subfolder=subfolder, torch_dtype=torch_dtype))
+                    AutoModel.from_pretrained(base_name, subfolder=subfolder, torch_dtype=torch_dtype, cache_dir=cache_dir,  local_files_only=local_files_only))
             self.architectures += architectures
 
     @property
@@ -125,7 +127,7 @@ class MultiTokenizer:
             "org_name/repo_name/subfolder" where the subfolder is excluded if it is not used in the repo.
     """
 
-    def __init__(self, tokenizer_names_or_paths: Union[str, Tuple[str, ...]]):
+    def __init__(self, tokenizer_names_or_paths: Union[str, Tuple[str, ...]], cache_dir: str = '/tmp/hf_files', local_files_only: bool = False):
         if isinstance(tokenizer_names_or_paths, str):
             tokenizer_names_or_paths = (tokenizer_names_or_paths,)
 
@@ -134,7 +136,7 @@ class MultiTokenizer:
             path_split = tokenizer_name_or_path.split('/')
             base_name = '/'.join(path_split[:2])
             subfolder = '/'.join(path_split[2:])
-            self.tokenizers.append(AutoTokenizer.from_pretrained(base_name, subfolder=subfolder))
+            self.tokenizers.append(AutoTokenizer.from_pretrained(base_name, subfolder=subfolder, cache_dir=cache_dir, local_files_only=local_files_only))
 
         self.model_max_length = min([t.model_max_length for t in self.tokenizers])
 

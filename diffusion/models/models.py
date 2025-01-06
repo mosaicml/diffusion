@@ -307,6 +307,8 @@ def stable_diffusion_xl(
     use_xformers: bool = True,
     lora_rank: Optional[int] = None,
     lora_alpha: Optional[int] = None,
+    cache_dir: str = '/tmp/hf_files',
+    local_files_only: bool = False,
 ):
     """Stable diffusion 2 training setup + SDXL UNet and VAE.
 
@@ -377,10 +379,12 @@ def stable_diffusion_xl(
         val_metrics = [MeanSquaredError()]
 
     # Make the tokenizer and text encoder
-    tokenizer = MultiTokenizer(tokenizer_names_or_paths=tokenizer_names)
+    tokenizer = MultiTokenizer(tokenizer_names_or_paths=tokenizer_names, cache_dir=cache_dir, local_files_only=local_files_only)
     text_encoder = MultiTextEncoder(model_names=text_encoder_names,
                                     encode_latents_in_fp16=encode_latents_in_fp16,
-                                    pretrained_sdxl=pretrained)
+                                    pretrained_sdxl=pretrained,
+                                    cache_dir=cache_dir,
+                                    local_files_only=local_files_only)
 
     precision = torch.float16 if encode_latents_in_fp16 else None
     # Make the autoencoder
@@ -408,9 +412,9 @@ def stable_diffusion_xl(
         downsample_factor = 2**(len(vae.config['channel_multipliers']) - 1)
 
     # Make the unet
-    unet_config = PretrainedConfig.get_config_dict(unet_model_name, subfolder='unet')[0]
+    unet_config = PretrainedConfig.get_config_dict(unet_model_name, subfolder='unet', cache_dir=cache_dir,  local_files_only=local_files_only)[0]
     if pretrained:
-        unet = UNet2DConditionModel.from_pretrained(unet_model_name, subfolder='unet')
+        unet = UNet2DConditionModel.from_pretrained(unet_model_name, subfolder='unet', cache_dir=cache_dir, local_files_only=local_files_only)
         if isinstance(vae, AutoEncoder) and vae.config['latent_channels'] != 4:
             raise ValueError(f'Pretrained unet has 4 latent channels but the vae has {vae.latent_channels}.')
     else:
@@ -612,6 +616,7 @@ def precomputed_text_latent_diffusion(
     use_xformers: bool = True,
     lora_rank: Optional[int] = None,
     lora_alpha: Optional[int] = None,
+    local_files_only: bool = False,
 ):
     """Latent diffusion model training using precomputed text latents from T5-XXL and CLIP.
 
@@ -695,7 +700,7 @@ def precomputed_text_latent_diffusion(
         downsample_factor = 2**(len(vae.config['channel_multipliers']) - 1)
 
     # Make the unet
-    unet_config = PretrainedConfig.get_config_dict(unet_model_name, subfolder='unet')[0]
+    unet_config = PretrainedConfig.get_config_dict(unet_model_name, subfolder='unet', cache_dir=cache_dir, local_files_only=local_files_only)[0]
 
     if isinstance(vae, AutoEncoder):
         # Adapt the unet config to account for differing number of latent channels if necessary
@@ -792,20 +797,20 @@ def precomputed_text_latent_diffusion(
     if include_text_encoders:
         dtype_map = {'float32': torch.float32, 'float16': torch.float16, 'bfloat16': torch.bfloat16}
         dtype = dtype_map[text_encoder_dtype]
-        t5_tokenizer = AutoTokenizer.from_pretrained('google/t5-v1_1-xxl', cache_dir=cache_dir, local_files_only=True)
+        t5_tokenizer = AutoTokenizer.from_pretrained('google/t5-v1_1-xxl', cache_dir=cache_dir, local_files_only=local_files_only)
         clip_tokenizer = AutoTokenizer.from_pretrained('stabilityai/stable-diffusion-xl-base-1.0',
                                                        subfolder='tokenizer',
                                                        cache_dir=cache_dir,
-                                                       local_files_only=False)
+                                                       local_files_only=local_files_only)
         t5_encoder = AutoModel.from_pretrained('google/t5-v1_1-xxl',
                                                torch_dtype=dtype,
                                                cache_dir=cache_dir,
-                                               local_files_only=False).encoder.eval()
+                                               local_files_only=local_files_only).encoder.eval()
         clip_encoder = CLIPTextModel.from_pretrained('stabilityai/stable-diffusion-xl-base-1.0',
                                                      subfolder='text_encoder',
                                                      torch_dtype=dtype,
                                                      cache_dir=cache_dir,
-                                                     local_files_only=False).cuda().eval()
+                                                     local_files_only=local_files_only).cuda().eval()
     # Make the composer model
     model = PrecomputedTextLatentDiffusion(
         unet=unet,
