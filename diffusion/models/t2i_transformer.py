@@ -13,7 +13,7 @@ from torchmetrics import MeanSquaredError
 from tqdm.auto import tqdm
 from transformers import PreTrainedTokenizer
 
-from diffusion.models.transformer import DiffusionTransformer, VectorEmbedding
+from diffusion.models.transformer import DiffusionTransformer, FP32LayerNorm, MuInputLinear, VectorEmbedding
 
 
 def _duplicate_tensor(tensor, num_images_per_prompt):
@@ -219,7 +219,7 @@ class ComposerTextToImageMMDiT(ComposerModel):
     def encode_image(self, image: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """Encode an image tensor with the autoencoder and patchify the latents."""
         with torch.amp.autocast('cuda', enabled=False):
-            latents = self.autoencoder.encode(image.half())['latent_dist'].sample().data
+            latents = self.autoencoder.encode(image.half())['latent_dist'].mean.data
         # Scale and patchify the latents
         latents = (latents - self.latent_mean) / self.latent_std
         latent_patches, latent_coords = patchify(latents, self.patch_size)
@@ -491,6 +491,8 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
         clip_latent_key (str): The key in the batch dict that contains the CLIP latents. Default: `'CLIP_LATENTS'`.
         clip_pooled_key (str): The key in the batch dict that contains the CLIP pooled embeddings. Default: `'CLIP_POOLED'`.
         pooled_embedding_features (int): The number of features in the pooled text embeddings. Default: `768`.
+        width_scale (float): Scaling factor for scaling with width in mu-parameterization. Ex: when scaling from `width=32`
+            to `width=256`, one should set `width_scale=256/32`. Default: `1.0`
     """
 
     def __init__(
@@ -515,6 +517,7 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
         clip_latent_key: str = 'CLIP_LATENTS',
         clip_pooled_key: str = 'CLIP_POOLED',
         pooled_embedding_features: int = 768,
+        width_scale: float = 1.0,
     ):
         super().__init__()
         self.model = model
@@ -541,12 +544,13 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
         self.clip_latent_key = clip_latent_key
         self.clip_pooled_key = clip_pooled_key
         self.pooled_embedding_features = pooled_embedding_features
+        self.width_scale = width_scale
 
         # Embedding MLPs and norms for the pooled text embeddings
-        self.t5_proj = torch.nn.Linear(4096, model.num_features)
-        self.t5_ln = torch.nn.LayerNorm(model.num_features)
-        self.clip_proj = torch.nn.Linear(768, model.num_features)
-        self.clip_ln = torch.nn.LayerNorm(model.num_features)
+        self.t5_ln = FP32LayerNorm(4096)
+        self.t5_proj_linear = MuInputLinear(4096, model.num_features)
+        self.clip_ln = FP32LayerNorm(768)
+        self.clip_proj_linear = MuInputLinear(768, model.num_features)
         self.pooled_embedding_mlp = VectorEmbedding(pooled_embedding_features, model.num_features)
         # freeze text_encoder during diffusion training and use half precision
         self.autoencoder.requires_grad_(False)
@@ -611,7 +615,7 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
     def encode_image(self, image: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """Encode an image tensor with the autoencoder and patchify the latents."""
         with torch.amp.autocast('cuda', enabled=False):
-            latents = self.autoencoder.encode(image.half())['latent_dist'].sample().data
+            latents = self.autoencoder.encode(image.half())['latent_dist'].mean.data
         # Scale and patchify the latents
         latents = (latents - self.latent_mean) / self.latent_std
         latent_patches, latent_coords = patchify(latents, self.patch_size)
@@ -665,11 +669,12 @@ class ComposerPrecomputedTextLatentsToImageMMDiT(ComposerModel):
             t5_embed = t5_embed[:, :self.max_seq_len]
         if clip_embed.shape[1] > self.max_seq_len:
             clip_embed = clip_embed[:, :self.max_seq_len]
-        t5_embed = self.t5_proj(t5_embed)
-        clip_embed = self.clip_proj(clip_embed)
         # Apply layernorms
         t5_embed = self.t5_ln(t5_embed)
         clip_embed = self.clip_ln(clip_embed)
+        # Embed to shared dimensionality
+        t5_embed = self.t5_proj_linear(t5_embed)
+        clip_embed = self.clip_proj_linear(clip_embed)
         # Concatenate the text embeddings
         text_embeds = torch.cat([t5_embed, clip_embed], dim=1)
         return text_embeds

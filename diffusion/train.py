@@ -20,7 +20,8 @@ from omegaconf import DictConfig, OmegaConf
 from torch.optim import Optimizer
 
 from diffusion.models.autoencoder import ComposerAutoEncoder, ComposerDiffusersAutoEncoder
-from diffusion.models.t2i_transformer import ComposerTextToImageMMDiT
+from diffusion.models.t2i_transformer import ComposerPrecomputedTextLatentsToImageMMDiT, ComposerTextToImageMMDiT
+from diffusion.models.transformer import MuOutputLinear
 
 
 def make_autoencoder_optimizer(config: DictConfig, model: ComposerModel) -> Optimizer:
@@ -54,14 +55,29 @@ def make_autoencoder_optimizer(config: DictConfig, model: ComposerModel) -> Opti
 def make_transformer_optimizer(config: DictConfig, model: ComposerModel) -> Optimizer:
     """Configures the optimizer for use with a transformer model."""
     print('Configuring optimizer for transformer')
-    assert isinstance(model, ComposerTextToImageMMDiT)
+    assert isinstance(model, (ComposerTextToImageMMDiT, ComposerPrecomputedTextLatentsToImageMMDiT))
+    # Grab the width scaling factor from the model if it's been given
+    if hasattr(model, 'width_scale'):
+        width_scale = model.width_scale
+    else:
+        width_scale = 1.0
 
     # Turn off weight decay for biases, norms, and positional embeddings.
+    # Also set up learning rates for mu-parameterization
     no_decay = ['bias', 'norm', 'position_embedding']
     params_with_no_decay = []
     params_with_decay = []
+    mu_input_params = []
+    mu_hidden_params = []
+    mu_output_params = []
     for name, param in model.named_parameters():
-        if any(nd in name for nd in no_decay):
+        if 'mu_input_linear.weight' in name:
+            mu_input_params.append(param)
+        elif 'mu_hidden_linear.weight' in name:
+            mu_hidden_params.append(param)
+        elif 'mu_output_linear.weight' in name:
+            mu_output_params.append(param)
+        elif any(nd in name for nd in no_decay):
             params_with_no_decay.append(param)
         else:
             params_with_decay.append(param)
@@ -72,7 +88,24 @@ def make_transformer_optimizer(config: DictConfig, model: ComposerModel) -> Opti
     decay_dict = dict(config.optimizer.items())
     decay_dict['params'] = params_with_decay
 
-    optimizer = hydra.utils.instantiate(config.optimizer, [no_decay_dict, decay_dict])
+    mu_input_dict = dict(config.optimizer.items())
+    mu_input_dict['params'] = mu_input_params
+
+    mu_hidden_dict = dict(config.optimizer.items())
+    mu_hidden_dict['params'] = mu_hidden_params
+    mu_hidden_dict['lr'] *= 1 / width_scale
+
+    mu_output_dict = dict(config.optimizer.items())
+    mu_output_dict['params'] = mu_output_params
+    mu_output_dict['lr'] *= 1 / width_scale
+
+    # Rescaling of output inits
+    for module in model.modules():
+        if isinstance(module, MuOutputLinear):
+            module.rescale_init(width_scale)
+
+    optimizer = hydra.utils.instantiate(config.optimizer,
+                                        [no_decay_dict, decay_dict, mu_input_dict, mu_hidden_dict, mu_output_dict])
     return optimizer
 
 
@@ -97,7 +130,7 @@ def train(config: DictConfig) -> None:
     if hasattr(model, 'autoencoder_loss'):
         # Check if this is training an autoencoder. If so, the optimizer needs different param groups
         optimizer = make_autoencoder_optimizer(config, model)
-    elif isinstance(model, ComposerTextToImageMMDiT):
+    elif isinstance(model, (ComposerTextToImageMMDiT, ComposerPrecomputedTextLatentsToImageMMDiT)):
         # Check if this is training a transformer. If so, the optimizer needs different param groups
         optimizer = make_transformer_optimizer(config, model)
     else:
