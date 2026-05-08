@@ -10,7 +10,7 @@ install_requires = [
     'mosaicml-streaming==0.9.0',
     'hydra-core>=1.2',
     'hydra-colorlog>=1.1.0',
-    'diffusers[torch]==0.30.3',
+    'diffusers[torch]==0.38.0',
     'transformers[torch]==4.44.2',
     'huggingface-hub[hf_transfer]>=0.23.2',
     'wandb>=0.18.1',
