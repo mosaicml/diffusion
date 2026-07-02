@@ -11,7 +11,7 @@ install_requires = [
     'hydra-core>=1.2',
     'hydra-colorlog>=1.1.0',
     'diffusers[torch]==0.30.3',
-    'transformers[torch]==4.44.2',
+    'transformers[torch]==5.3.0',
     'huggingface-hub[hf_transfer]>=0.23.2',
     'wandb>=0.18.1',
     'xformers==0.0.28.post3',
